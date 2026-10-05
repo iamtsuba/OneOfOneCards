@@ -24,7 +24,7 @@ insert into public.opennumber_config (key, value, description) values
   ('start_coins',            0,    'Pièces offertes à la création du profil'),
   ('regen_minutes',          10,   'Délai entre deux recharges (minutes)'),
   ('regen_amount',           10,   'Boosters gagnés à chaque recharge'),
-  ('max_boosters',           50,   'Plafond de boosters en stock'),
+  ('max_boosters',           10,   'Plafond de boosters en stock'),
   ('rarity_exponent',        1,    'Poids d''une carte = taille_de_série ^ exposant. 1 = rareté proportionnelle, 0 = chaque carte disponible a la même chance'),
   ('direct_sell_price',      1,    'Pièces reçues pour une revente directe (la carte retourne dans les boosters)'),
   ('auction_minutes',        60,   'Durée d''une enchère (minutes)'),

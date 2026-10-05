@@ -16,7 +16,7 @@ Chaque carte n'existe qu'en **un seul exemplaire** : une fois tirée, elle appar
 
 ## Règles
 
-- 5 cartes par booster, 10 boosters offerts puis +10 toutes les 10 minutes (plafond 50).
+- 5 cartes par booster, 10 boosters offerts puis +10 toutes les 10 minutes (plafond 10).
 - Raretés (priorité dans cet ordre) : **Unique** (1/1), **Alpha** (toutes les 1/m), **Omega** (toutes les m/m),
   puis selon la taille de série : Ultra Rare (≤ 10), Super Rare (≤ 100), Rare (≤ 250), Commune (au-delà).
 - Un tirage ne donne que des cartes encore disponibles. Le poids d'une série = cartes restantes x (taille ^ exposant).
@@ -37,7 +37,7 @@ Chaque carte n'existe qu'en **un seul exemplaire** : une fois tirée, elle appar
 | `cards_per_booster` | cartes par booster | 5 |
 | `start_boosters` / `start_coins` | boosters et pièces offerts à l'inscription | 10 / 0 |
 | `regen_minutes` / `regen_amount` | recharge : +N boosters toutes les X minutes | 10 / 10 |
-| `max_boosters` | plafond de stock | 50 |
+| `max_boosters` | plafond de stock | 10 |
 | `rarity_exponent` | 1 = rareté proportionnelle, 0 = chaque carte disponible a la même chance | 1 |
 | `direct_sell_price` | pièces reçues pour une revente directe | 1 |
 | `auction_minutes` / `auction_start_price` | durée et prix de départ d'une enchère | 60 / 1 |
