@@ -199,11 +199,6 @@ export function Overlay({ overlay, setOverlay, rarityMap, boosters, onAgain, onC
         <strong>{rarity?.name}</strong> : la {c.number}/{c.series} n’existe qu’en un exemplaire, et c’est le tien.
       </p>
       <p className="overlay-hint">{last ? 'Touche la carte pour voir le résumé.' : 'Touche la carte pour passer à la suivante.'}</p>
-
-      <div className="overlay-actions">
-        <button className="btn accent" onClick={next}>{last ? 'Voir le résumé' : 'Carte suivante'}</button>
-        {!last && <button className="btn ghost-light" onClick={() => setOverlay({ ...overlay, summary: true, revealAll: true, from: idx + 1 })}>Tout révéler</button>}
-      </div>
     </div>
   )
 }
