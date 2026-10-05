@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as api from '../api'
 import { explain } from '../api'
 import { isSpecial } from '../rarity'
@@ -27,21 +27,29 @@ export default function Boosters({ goCollection }) {
     if (!(status && boosters > 0 && (fromSummary === true || !overlay))) return
     setError('')
     setOverlay({ phase: 'shake' })
-    const t = setTimeout(() => setOverlay((o) => (o && o.phase === 'shake' ? { phase: 'tear' } : o)), 550)
+    const t0 = Date.now()
     try {
-      const [res] = await Promise.all([api.openBooster(), wait(1200)])
+      const res = await api.openBooster()
       setStatus(res.status)
       // Les cartes les plus rares sont révélées en dernier
       const cards = [...res.cards].sort(
         (a, b) => (rarityMap[b.rarity_id]?.sort_order ?? 0) - (rarityMap[a.rarity_id]?.sort_order ?? 0),
       )
-      setOverlay({ phase: 'reveal', cards, idx: 0, flipped: false })
+      const golden = !!res.golden
+      if (golden) {
+        // Le booster se transforme en or avant de s'ouvrir
+        setOverlay({ phase: 'shake', golden: true })
+        await wait(1700)
+      } else {
+        await wait(Math.max(0, 700 - (Date.now() - t0)))
+      }
+      setOverlay({ phase: 'tear', golden })
+      await wait(700)
+      setOverlay({ phase: 'reveal', cards, idx: 0, flipped: false, golden })
     } catch (e) {
       setOverlay(null)
       setError(explain(e))
       refreshStatus().catch(() => {})
-    } finally {
-      clearTimeout(t)
     }
   }
 
@@ -105,7 +113,8 @@ export default function Boosters({ goCollection }) {
   )
 }
 
-function Overlay({ overlay, setOverlay, rarityMap, boosters, onAgain, onCollection }) {
+export function Overlay({ overlay, setOverlay, rarityMap, boosters, onAgain, onCollection }) {
+  const flippedAt = useRef(0)
   const close = () => setOverlay(null)
 
   useEffect(() => {
@@ -117,23 +126,28 @@ function Overlay({ overlay, setOverlay, rarityMap, boosters, onAgain, onCollecti
   if (overlay.phase === 'shake' || overlay.phase === 'tear') {
     return (
       <div className="overlay" role="dialog" aria-modal="true" aria-label="Ouverture du booster">
-        <Pack phase={overlay.phase} />
-        <p className="overlay-hint">Ouverture…</p>
+        <Pack phase={overlay.phase} golden={overlay.golden} />
+        <p className="overlay-hint">{overlay.golden ? 'Un booster doré !' : 'Ouverture…'}</p>
       </div>
     )
   }
 
-  const { cards, idx, flipped, summary } = overlay
+  const { cards, idx, flipped, summary, revealAll, golden } = overlay
 
   if (summary) {
     const rarest = cards.reduce((best, c) => (rarityMap[c.rarity_id]?.sort_order < (rarityMap[best.rarity_id]?.sort_order ?? 99) ? c : best), cards[0])
+    // « Tout révéler » : on joue quand même les feux d'artifice des cartes spéciales, rarest en premier
+    const specials = revealAll
+      ? [...new Map(cards.map((c) => rarityMap[c.rarity_id]).filter(isSpecial).map((r) => [r.id, r])).values()].sort((a, b) => a.sort_order - b.sort_order)
+      : []
     return (
       <div className="overlay" role="dialog" aria-modal="true" aria-label="Résumé du booster">
-        <h2 className="overlay-title">Ton booster</h2>
+        {specials.map((r, i) => <Fireworks key={r.id} rarity={r} delay={i * 1800} />)}
+        <h2 className={`overlay-title ${golden ? 'gold' : ''}`}>{golden ? 'Booster doré' : 'Ton booster'}</h2>
         <ul className="summary-grid">
           {cards.map((c) => (
             <li key={`${c.series}-${c.number}`}>
-              <Card series={c.series} number={c.number} rarity={rarityMap[c.rarity_id]} size="sm" glow />
+              <Card series={c.series} number={c.number} rarity={rarityMap[c.rarity_id]} size="sm" glow shine={revealAll} />
             </li>
           ))}
         </ul>
@@ -152,21 +166,31 @@ function Overlay({ overlay, setOverlay, rarityMap, boosters, onAgain, onCollecti
   const c = cards[idx]
   const rarity = rarityMap[c.rarity_id]
   const last = idx === cards.length - 1
-  const flip = () => { if (!flipped) setOverlay({ ...overlay, flipped: true }) }
+  const flip = () => {
+    if (flipped) return
+    flippedAt.current = Date.now()
+    setOverlay({ ...overlay, flipped: true })
+  }
   const next = () => (last ? setOverlay({ ...overlay, summary: true }) : setOverlay({ ...overlay, idx: idx + 1, flipped: false }))
+  // Un clic sur la carte la retourne, un second clic passe à la suivante
+  // (petite pause après le retournement pour ne pas sauter une carte par un double clic)
+  const advance = () => {
+    if (!flipped) flip()
+    else if (Date.now() - flippedAt.current > 600) next()
+  }
 
   return (
     <div className="overlay" role="dialog" aria-modal="true" aria-label="Révélation des cartes">
-      <p className="overlay-hint">Carte {idx + 1} sur {cards.length}</p>
+      <p className="overlay-hint">{golden ? 'Booster doré : ' : ''}carte {idx + 1} sur {cards.length}</p>
 
       <div
         key={idx}
         className={`flip ${flipped ? 'is-flipped' : ''}`}
-        onClick={flip}
+        onClick={advance}
         role="button"
         tabIndex={0}
-        aria-label={flipped ? 'Carte révélée' : 'Retourner la carte'}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip() } }}
+        aria-label={flipped ? (last ? 'Voir le résumé' : 'Carte suivante') : 'Retourner la carte'}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); advance() } }}
       >
         <div className="flip-inner">
           <div className="flip-face flip-back"><CardBack /></div>
@@ -183,6 +207,7 @@ function Overlay({ overlay, setOverlay, rarityMap, boosters, onAgain, onCollecti
           ? <><strong>{rarity?.name}</strong> : la {c.number}/{c.series} n’existe qu’en un exemplaire, et c’est le tien.</>
           : 'Touche la carte pour la retourner'}
       </p>
+      {flipped && <p className="overlay-hint">{last ? 'Touche la carte pour voir le résumé.' : 'Touche la carte pour passer à la suivante.'}</p>}
 
       <div className="overlay-actions">
         {flipped ? (
@@ -190,7 +215,7 @@ function Overlay({ overlay, setOverlay, rarityMap, boosters, onAgain, onCollecti
         ) : (
           <button className="btn light" onClick={flip}>Retourner</button>
         )}
-        {!last && <button className="btn ghost-light" onClick={() => setOverlay({ ...overlay, summary: true })}>Tout révéler</button>}
+        {!last && <button className="btn ghost-light" onClick={() => setOverlay({ ...overlay, summary: true, revealAll: true })}>Tout révéler</button>}
       </div>
     </div>
   )

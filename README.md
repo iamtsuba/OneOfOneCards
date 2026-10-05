@@ -20,6 +20,9 @@ Chaque carte n'existe qu'en **un seul exemplaire** : une fois tirée, elle appar
 - Raretés (priorité dans cet ordre) : **Unique** (1/1), **Alpha** (toutes les 1/m), **Omega** (toutes les m/m),
   puis selon la taille de série : Ultra Rare (≤ 10), Super Rare (≤ 100), Rare (≤ 250), Commune (au-delà).
 - Un tirage ne donne que des cartes encore disponibles. Le poids d'une série = cartes restantes x (taille ^ exposant).
+- **Booster doré** : 0,000001 % de chance par booster (`golden_booster_chance`). Il contient 1 Alpha, 1 Omega, 1 Ultra Rare,
+  1 Super Rare et 1 Rare (contenu modifiable dans `opennumber_golden_contents`). Pour le tester :
+  `update opennumber_config set value = 1 where key = 'golden_booster_chance';` puis remettre `0.00000001`.
 - Pièces : revente directe à la banque (1 pièce, la carte retourne dans les boosters), achat direct (prix libre)
   ou enchère de 60 minutes à partir de 1 pièce.
 - Enchères : la mise est bloquée tant qu'on est en tête et rendue si on est dépassé. Une mise dans la dernière
@@ -40,6 +43,7 @@ Chaque carte n'existe qu'en **un seul exemplaire** : une fois tirée, elle appar
 | `auction_minutes` / `auction_start_price` | durée et prix de départ d'une enchère | 60 / 1 |
 | `auction_min_increment` | surenchère minimale | 1 |
 | `auction_extend_seconds` | fenêtre de prolongation en fin d'enchère | 60 |
+| `golden_booster_chance` | probabilité d'un booster doré (0.00000001 = 0,000001 %) | 0.00000001 |
 
 Les raretés (noms, couleurs, seuils de séries) sont dans `opennumber_rarities`.
 

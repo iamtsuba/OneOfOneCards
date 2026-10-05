@@ -30,7 +30,8 @@ insert into public.opennumber_config (key, value, description) values
   ('auction_minutes',        60,   'Durée d''une enchère (minutes)'),
   ('auction_start_price',    1,    'Prix de départ d''une enchère (pièces)'),
   ('auction_min_increment',  1,    'Surenchère minimale (pièces)'),
-  ('auction_extend_seconds', 60,   'Si une mise arrive dans les X dernières secondes, le compteur repart à X secondes')
+  ('auction_extend_seconds', 60,   'Si une mise arrive dans les X dernières secondes, le compteur repart à X secondes'),
+  ('golden_booster_chance',  0.00000001, 'Chance qu''un booster soit doré (0.00000001 = 0,000001 %). Contenu dans opennumber_golden_contents')
 on conflict (key) do nothing;
 
 -- ---------- Raretés (noms, couleurs, seuils modifiables) ----------
@@ -59,6 +60,15 @@ insert into public.opennumber_rarities (id, name, kind, max_series, sort_order, 
   ('rare',   'Rare',       'range',  250,  6, '#10b981', '#065f46', '#ffffff'),
   ('common', 'Commune',    'range',  null, 7, '#f3efe6', '#cfc8b8', '#3a3630')
 on conflict (id) do nothing;
+
+-- Contenu d'un booster doré : une ligne par rareté, avec le nombre de cartes tirées dans cette rareté
+create table if not exists public.opennumber_golden_contents (
+  rarity_id text primary key references public.opennumber_rarities (id) on delete cascade,
+  quantity  int not null default 1 check (quantity >= 1)
+);
+insert into public.opennumber_golden_contents (rarity_id, quantity) values
+  ('alpha', 1), ('omega', 1), ('ultra', 1), ('super', 1), ('rare', 1)
+on conflict (rarity_id) do nothing;
 
 -- ---------- Profils ----------
 create table if not exists public.opennumber_profiles (
@@ -173,6 +183,7 @@ alter table public.opennumber_cards        enable row level security;
 alter table public.opennumber_series_taken enable row level security;
 alter table public.opennumber_listings     enable row level security;
 alter table public.opennumber_bids         enable row level security;
+alter table public.opennumber_golden_contents enable row level security;
 
 drop policy if exists opennumber_config_read on public.opennumber_config;
 create policy opennumber_config_read on public.opennumber_config
@@ -191,7 +202,7 @@ create policy opennumber_cards_read_own on public.opennumber_cards
   for select to authenticated using (owner_id = auth.uid());
 
 revoke insert, update, delete on public.opennumber_config, public.opennumber_rarities, public.opennumber_profiles, public.opennumber_cards from anon, authenticated;
-revoke all on public.opennumber_series_taken, public.opennumber_listings, public.opennumber_bids from anon, authenticated;
+revoke all on public.opennumber_series_taken, public.opennumber_listings, public.opennumber_bids, public.opennumber_golden_contents from anon, authenticated;
 
 -- ---------- Fonctions utilitaires ----------
 create or replace function public.opennumber_cfg(p_key text)
@@ -220,6 +231,83 @@ begin
     select id into v from public.opennumber_rarities where kind = 'omega' limit 1;
   end if;
   return coalesce(v, public.opennumber_range_rarity(m));
+end $$;
+
+-- Tire au hasard une carte encore disponible d'une rareté donnée (utilisé par le booster doré).
+-- Même pondération que les boosters normaux : poids d'une carte = taille de série ^ exposant.
+create or replace function public.opennumber_draw_rarity(p_rarity text, out o_series int, out o_number int)
+language plpgsql security definer set search_path = public as $$
+declare
+  rar      public.opennumber_rarities;
+  n_series int := public.opennumber_cfg('max_series')::int;
+  e        double precision := public.opennumber_cfg('rarity_exponent')::double precision;
+  lo       int := 1;
+  hi       int;
+  ms       int[];
+  av       int[];
+  ws       double precision[];
+  total    double precision := 0;
+  x        double precision;
+  acc      double precision := 0;
+  i        int;
+  pick     int := 1;
+  k        int;
+begin
+  select * into rar from public.opennumber_rarities where id = p_rarity;
+  if not found then return; end if;
+
+  if rar.kind = 'range' then
+    select coalesce(max(max_series), 0) + 1 into lo
+    from public.opennumber_rarities
+    where kind = 'range' and max_series is not null and max_series < coalesce(rar.max_series, 2147483647);
+    hi := least(coalesce(rar.max_series, n_series), n_series);
+  end if;
+
+  -- Séries qui contiennent encore au moins une carte disponible de cette rareté
+  select array_agg(q.m order by q.m), array_agg(q.avail order by q.m), array_agg(q.avail * power(q.m::double precision, e) order by q.m)
+  into ms, av, ws
+  from (
+    select g as m,
+      case
+        when rar.kind = 'unique' then
+          case when g = 1 and not exists (select 1 from public.opennumber_cards c where c.series = 1 and c.number = 1) then 1 else 0 end
+        when rar.kind = 'alpha' then
+          case when g > 1 and not exists (select 1 from public.opennumber_cards c where c.series = g and c.number = 1) then 1 else 0 end
+        when rar.kind = 'omega' then
+          case when g > 1 and not exists (select 1 from public.opennumber_cards c where c.series = g and c.number = g) then 1 else 0 end
+        else
+          case when g >= greatest(lo, 2) and g <= hi
+               then greatest(g - 2 - (select count(*)::int from public.opennumber_cards c where c.series = g and c.number between 2 and g - 1), 0)
+               else 0 end
+      end as avail
+    from generate_series(1, n_series) g
+  ) q
+  where q.avail > 0;
+
+  if ms is null then return; end if;
+  for i in 1 .. array_length(ws, 1) loop total := total + ws[i]; end loop;
+  if total <= 0 then return; end if;
+
+  x := random() * total;
+  for i in 1 .. array_length(ws, 1) loop
+    pick := i;
+    acc := acc + ws[i];
+    exit when acc > x;
+  end loop;
+  o_series := ms[pick];
+
+  if rar.kind in ('unique', 'alpha') then
+    o_number := 1;
+  elsif rar.kind = 'omega' then
+    o_number := o_series;
+  else
+    k := floor(random() * av[pick])::int;
+    select y into o_number
+    from generate_series(2, o_series - 1) y
+    where not exists (select 1 from public.opennumber_cards c where c.series = o_series and c.number = y)
+    order by y
+    offset k limit 1;
+  end if;
 end $$;
 
 create or replace function public.opennumber_ensure_profile(p_uid uuid)
@@ -359,6 +447,12 @@ declare
   tries    int := 0;
   rows     int;
   res      jsonb := '[]'::jsonb;
+  v_golden boolean := false;
+  gc       record;
+  q        int;
+  s2       int;
+  n2       int;
+  t2       int;
 begin
   if uid is null then raise exception 'not_authenticated'; end if;
 
@@ -371,7 +465,32 @@ begin
   n_cards  := public.opennumber_cfg('cards_per_booster')::int;
   e        := public.opennumber_cfg('rarity_exponent')::double precision;
 
-  while got < n_cards and tries < n_cards * 25 loop
+  -- Booster doré : chance très faible, contenu défini dans opennumber_golden_contents
+  if random() < coalesce(public.opennumber_cfg('golden_booster_chance'), 0)::double precision then
+    v_golden := true;
+    for gc in select rarity_id, quantity from public.opennumber_golden_contents order by rarity_id loop
+      for q in 1 .. gc.quantity loop
+        t2 := 0;
+        while t2 < 10 loop
+          t2 := t2 + 1;
+          select d.o_series, d.o_number into s2, n2 from public.opennumber_draw_rarity(gc.rarity_id) d;
+          exit when s2 is null;
+          insert into public.opennumber_cards (series, number, owner_id) values (s2, n2, uid)
+          on conflict (series, number) do nothing;
+          get diagnostics rows = row_count;
+          if rows = 1 then
+            got := got + 1;
+            res := res || jsonb_build_array(jsonb_build_object(
+              'series', s2, 'number', n2, 'rarity_id', public.opennumber_rarity_id(n2, s2)
+            ));
+            exit;
+          end if;
+        end loop;
+      end loop;
+    end loop;
+  end if;
+
+  while not v_golden and got < n_cards and tries < n_cards * 25 loop
     tries := tries + 1;
 
     -- Poids d'une série = cartes encore disponibles x poids d'une carte (taille ^ exposant)
@@ -423,7 +542,7 @@ begin
       boosters_updated_at = case when was_full then now() else boosters_updated_at end
   where id = uid returning * into p;
 
-  return jsonb_build_object('cards', res, 'status', public.opennumber_status_json(p));
+  return jsonb_build_object('cards', res, 'golden', v_golden, 'status', public.opennumber_status_json(p));
 end $$;
 
 -- Mes cartes (filtre rareté, tri, pagination)
@@ -818,6 +937,7 @@ revoke all on function public.opennumber_sync(uuid) from public, anon, authentic
 revoke all on function public.opennumber_settle_due() from public, anon, authenticated;
 revoke all on function public.opennumber_status_json(public.opennumber_profiles) from public, anon, authenticated;
 revoke all on function public.opennumber_cards_counter() from public, anon, authenticated;
+revoke all on function public.opennumber_draw_rarity(text) from public, anon, authenticated;
 
 revoke all on function public.opennumber_status()                                 from public, anon;
 revoke all on function public.opennumber_open_booster()                           from public, anon;

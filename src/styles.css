@@ -85,7 +85,7 @@ input:focus-visible, select:focus-visible { outline: 3px solid color-mix(in srgb
 .pack-stage { display: grid; justify-items: center; gap: 14px; text-align: center; padding-top: 6px; }
 .pack-button { border: 0; background: none; padding: 0; cursor: pointer; }
 .pack-button:disabled { cursor: not-allowed; }
-.pack-wrap { width: min(54vw, 230px); filter: drop-shadow(0 22px 22px rgba(20,23,63,.35)); }
+.pack-wrap { --pk-a: #323b9e; --pk-b: #14173f; --pk-band: #e8432f; --pk-crimp: #2a3189; --pk-text: #ffffff; --pk-bandtext: #ffffff; width: min(54vw, 230px); filter: drop-shadow(0 22px 22px rgba(20,23,63,.35)); }
 .pack-wrap svg { display: block; width: 100%; height: auto; overflow: visible; }
 .pack-wrap.dim { filter: grayscale(1) opacity(.45); }
 .pack-button:not(:disabled):hover .pack-wrap { transform: translateY(-4px) rotate(-1.5deg); }
@@ -95,7 +95,7 @@ input:focus-visible, select:focus-visible { outline: 3px solid color-mix(in srgb
 .refill { max-width: 36ch; }
 .clock { font-variant-numeric: tabular-nums; }
 
-.pack-wrap.shake { animation: shake .55s ease-in-out; }
+.pack-wrap.shake { animation: shake .6s ease-in-out infinite; }
 .pack-wrap.tear { animation: none; }
 .pack-wrap.tear .pack-top { transform-box: fill-box; transform-origin: 0% 100%; animation: tear .65s ease-in forwards; }
 .pack-wrap.tear .pack-body { animation: packfade .55s .25s ease-in forwards; }
@@ -259,3 +259,12 @@ button.slot:hover { border-color: var(--ink-soft); color: var(--ink-soft); }
 @media (min-width: 720px) {
   .tiles { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 }
+
+/* ---------- Booster doré ---------- */
+.pack-wrap.golden { --pk-a: #fbe9a0; --pk-b: #b07a12; --pk-band: #7a3b06; --pk-crimp: #d6a02e; --pk-text: #3b2503; --pk-bandtext: #ffe9a8; }
+.pack-wrap.golden svg { animation: goldglow 1.1s ease-in-out infinite; }
+@keyframes goldglow {
+  0%, 100% { filter: drop-shadow(0 0 10px rgba(255, 214, 102, .55)) brightness(1); }
+  50% { filter: drop-shadow(0 0 36px rgba(255, 214, 102, 1)) brightness(1.18); }
+}
+.overlay-title.gold { background: linear-gradient(90deg, #f7d774, #fff3bf, #d9a53a); -webkit-background-clip: text; background-clip: text; color: transparent; }

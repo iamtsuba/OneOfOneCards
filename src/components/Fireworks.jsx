@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 const toRgb = (hex) => {
   const n = parseInt(hex.replace('#', ''), 16)
@@ -11,10 +11,18 @@ const lighten = (hex, t) => {
 }
 
 // Feux d'artifice aux couleurs de la rareté (violet Unique, doré Alpha, argenté Omega)
-export default function Fireworks({ rarity }) {
+export default function Fireworks({ rarity, delay = 0 }) {
   const ref = useRef(null)
+  const [on, setOn] = useState(delay === 0)
 
   useEffect(() => {
+    if (delay === 0) return
+    const t = setTimeout(() => setOn(true), delay)
+    return () => clearTimeout(t)
+  }, [delay])
+
+  useEffect(() => {
+    if (!on) return
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
     const canvas = ref.current
     if (!canvas) return
@@ -90,7 +98,7 @@ export default function Fireworks({ rarity }) {
       cancelAnimationFrame(raf)
       window.removeEventListener('resize', resize)
     }
-  }, [rarity])
+  }, [rarity, on])
 
   return <canvas ref={ref} className="fireworks" aria-hidden="true" />
 }
