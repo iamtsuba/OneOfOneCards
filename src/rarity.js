@@ -1,12 +1,11 @@
-// Même logique que la fonction SQL opennumber_rarity_id (utilisée pour l'album d'une série)
-const isPow10 = (m) => m >= 10 && /^10+$/.test(String(m))
-
+// Même logique que la fonction SQL opennumber_rarity_id.
+// Priorité : Unique (1/1) > Alpha (1/m) > Omega (m/m) > rareté par taille de série
 export function rarityId(n, m, rarities) {
   const byKind = (k) => rarities.find((r) => r.kind === k)
   let r = null
   if (m === 1) r = byKind('unique')
-  else if (n === 1 && isPow10(m)) r = byKind('alpha')
-  else if (n === m && isPow10(m)) r = byKind('omega')
+  else if (n === 1) r = byKind('alpha')
+  else if (n === m) r = byKind('omega')
   if (r) return r.id
   const ranges = rarities
     .filter((x) => x.kind === 'range')
@@ -15,4 +14,5 @@ export function rarityId(n, m, rarities) {
   return found?.id
 }
 
-export const isFoil = (r) => r && ['unique', 'alpha', 'omega'].includes(r.kind)
+// Raretés qui déclenchent les feux d'artifice et l'effet métallisé
+export const isSpecial = (r) => !!r && ['unique', 'alpha', 'omega'].includes(r.kind)

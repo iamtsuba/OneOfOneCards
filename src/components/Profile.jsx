@@ -62,9 +62,9 @@ export default function Profile({ session }) {
 
       {stats && (
         <dl className="stats">
+          <div><dt>Pièces</dt><dd>{fmt(status?.coins)}</dd></div>
+          <div><dt>Cartes à toi</dt><dd>{fmt(stats.unique_owned)}</dd></div>
           <div><dt>Boosters ouverts</dt><dd>{fmt(status?.boosters_opened)}</dd></div>
-          <div><dt>Cartes différentes</dt><dd>{fmt(stats.unique_owned)}</dd></div>
-          <div><dt>Cartes au total</dt><dd>{fmt(stats.total_copies)}</dd></div>
           <div><dt>Séries commencées</dt><dd>{fmt(stats.series_started)}</dd></div>
         </dl>
       )}

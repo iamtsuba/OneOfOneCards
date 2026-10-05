@@ -2,12 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from './supabase'
 import * as api from './api'
 import { explain } from './api'
-import { GameContext } from './game'
+import { GameContext, fmtCoins } from './game'
 import Auth from './components/Auth'
 import Brand from './components/Brand'
 import TabBar from './components/TabBar'
 import Boosters from './components/Boosters'
 import Collection from './components/Collection'
+import Market from './components/Market'
 import Profile from './components/Profile'
 
 export default function App() {
@@ -26,6 +27,7 @@ export default function App() {
 
 function Game({ session }) {
   const [tab, setTab] = useState('boosters')
+  const [marketView, setMarketView] = useState('browse')
   const [rarities, setRarities] = useState(null)
   const [status, setStatusRaw] = useState(null)
   const [error, setError] = useState('')
@@ -66,13 +68,20 @@ function Game({ session }) {
 
   return (
     <GameContext.Provider value={ctx}>
-      <header className="topbar"><Brand /></header>
+      <header className="topbar">
+        <Brand />
+        <button className="coin-pill" onClick={() => { setMarketView('browse'); setTab('market') }} aria-label={`${fmtCoins(status.coins)}, ouvrir le marché`}>
+          <i className="coin" aria-hidden="true">1</i>
+          {fmtCoins(status.coins)}
+        </button>
+      </header>
       <main>
         {tab === 'boosters' && <Boosters goCollection={() => setTab('collection')} />}
-        {tab === 'collection' && <Collection />}
+        {tab === 'collection' && <Collection goMarket={(v) => { setMarketView(v || 'browse'); setTab('market') }} />}
+        {tab === 'market' && <Market key={marketView} initialView={marketView} />}
         {tab === 'profile' && <Profile session={session} />}
       </main>
-      <TabBar tab={tab} onChange={setTab} boosters={status.boosters} />
+      <TabBar tab={tab} onChange={(t) => { if (t === 'market') setMarketView('browse'); setTab(t) }} boosters={status.boosters} />
     </GameContext.Provider>
   )
 }

@@ -1,0 +1,281 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import * as api from '../api'
+import { explain } from '../api'
+import { useGame, useNow, fmt, fmtClock, fmtCoins } from '../game'
+import Card from './Card'
+
+const KINDS = [[null, 'Toutes'], ['auction', 'Enchères'], ['buy_now', 'Achat direct']]
+const SORTS = [['ending', 'Fin proche'], ['price', 'Prix croissant'], ['rarity', 'Plus rares'], ['recent', 'Récentes']]
+
+export default function Market({ initialView = 'browse' }) {
+  const { status, setStatus, refreshStatus, rarityMap } = useGame()
+  const [view, setView] = useState(initialView)
+  const [kind, setKind] = useState(null)
+  const [sort, setSort] = useState('ending')
+  const [browse, setBrowse] = useState([])
+  const [mine, setMine] = useState([])
+  const [skew, setSkew] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [selectedId, setSelectedId] = useState(null)
+  const now = useNow()
+  const lastLoad = useRef(0)
+
+  const load = useCallback(async () => {
+    lastLoad.current = Date.now()
+    try {
+      const rows = view === 'browse' ? await api.marketList({ kind, sort, limit: 60 }) : await api.marketMine()
+      if (rows[0]?.server_now) setSkew(new Date(rows[0].server_now).getTime() - Date.now())
+      if (view === 'browse') setBrowse(rows)
+      else setMine(rows.map((r) => ({ ...r, is_mine: r.role === 'seller' })))
+      setError('')
+    } catch (e) {
+      setError(explain(e))
+    } finally {
+      setLoading(false)
+    }
+  }, [view, kind, sort])
+
+  useEffect(() => { setLoading(true); load() }, [load])
+  useEffect(() => { refreshStatus().catch(() => {}) }, [refreshStatus])
+  useEffect(() => {
+    const id = setInterval(load, 15000)
+    return () => clearInterval(id)
+  }, [load])
+
+  const rows = view === 'browse' ? browse : mine
+  const ended = rows.some((r) => r.status !== 'sold' && r.status !== 'expired' && r.status !== 'cancelled' && r.ends_at && new Date(r.ends_at).getTime() <= now + skew)
+  useEffect(() => {
+    if (!ended || Date.now() - lastLoad.current < 3000) return
+    const t = setTimeout(() => { load(); refreshStatus().catch(() => {}) }, 1200)
+    return () => clearTimeout(t)
+  }, [ended, now, load, refreshStatus])
+
+  const selected = rows.find((r) => r.listing_id === selectedId)
+  const left = (r) => (r.ends_at ? new Date(r.ends_at).getTime() - (now + skew) : null)
+
+  return (
+    <section className="page">
+      <h1 className="page-title">Marché</h1>
+
+      {status && (
+        <p className="wallet">
+          <strong>{fmtCoins(status.coins)}</strong>
+          {status.coins_locked > 0 && <span className="muted"> dont {fmt(status.coins_locked)} bloquée{status.coins_locked > 1 ? 's' : ''} dans tes enchères</span>}
+        </p>
+      )}
+
+      <div className="segmented" role="tablist" aria-label="Marché">
+        <button role="tab" aria-selected={view === 'browse'} className={view === 'browse' ? 'on' : ''} onClick={() => setView('browse')}>À vendre</button>
+        <button role="tab" aria-selected={view === 'mine'} className={view === 'mine' ? 'on' : ''} onClick={() => setView('mine')}>Mes ventes et enchères</button>
+      </div>
+
+      {error && <p className="msg error" role="alert">{error}</p>}
+
+      {view === 'browse' && (
+        <>
+          <div className="chips" role="group" aria-label="Type d’annonce">
+            {KINDS.map(([k, label]) => (
+              <button key={String(k)} className={`chip ${kind === k ? 'on' : ''}`} onClick={() => setKind(k)} aria-pressed={kind === k}>{label}</button>
+            ))}
+          </div>
+          <div className="toolbar">
+            <span className="muted">{loading ? 'Chargement…' : `${fmt(browse.length)} annonce${browse.length > 1 ? 's' : ''}`}</span>
+            <label className="select">
+              <span className="sr">Trier</span>
+              <select value={sort} onChange={(e) => setSort(e.target.value)}>
+                {SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </label>
+          </div>
+
+          {!loading && browse.length === 0 ? (
+            <div className="empty">
+              <p><strong>Aucune annonce pour l’instant.</strong></p>
+              <p>Ouvre ta collection, choisis une carte à toi et mets-la en vente.</p>
+            </div>
+          ) : (
+            <ul className="tiles">
+              {browse.map((r) => {
+                const ms = left(r)
+                return (
+                  <li key={r.listing_id}>
+                    <button className="tile" onClick={() => setSelectedId(r.listing_id)}>
+                      <Card series={r.card_series} number={r.card_number} rarity={rarityMap[r.rarity_id]} size="sm" />
+                      <span className="tile-kind">{r.kind === 'auction' ? 'Enchère' : 'Achat direct'}</span>
+                      <span className="tile-price">{fmtCoins(r.price)}</span>
+                      {r.kind === 'auction' && ms !== null && (
+                        <span className={`tile-time ${ms < 60000 ? 'urgent' : ''}`}>{fmtClock(ms)}</span>
+                      )}
+                      {r.is_mine && <span className="tile-flag">Ta vente</span>}
+                      {r.is_leading && <span className="tile-flag good">Tu es en tête</span>}
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </>
+      )}
+
+      {view === 'mine' && (
+        <>
+          {!loading && mine.length === 0 ? (
+            <div className="empty">
+              <p><strong>Rien pour l’instant.</strong></p>
+              <p>Tes annonces, tes enchères et tes achats des 7 derniers jours apparaîtront ici.</p>
+            </div>
+          ) : (
+            <ul className="mine-list">
+              {mine.map((r) => {
+                const active = r.status === 'active'
+                return (
+                  <li key={r.listing_id}>
+                    <button className="mine-row" onClick={() => active && setSelectedId(r.listing_id)} disabled={!active}>
+                      <div className="mine-card"><Card series={r.card_series} number={r.card_number} rarity={rarityMap[r.rarity_id]} size="sm" /></div>
+                      <div className="mine-text">
+                        <strong>{rarityMap[r.rarity_id]?.name} {r.card_number}/{r.card_series}</strong>
+                        <span>{describe(r, left(r))}</span>
+                      </div>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </>
+      )}
+
+      {selected && (
+        <ListingModal
+          row={selected}
+          ms={left(selected)}
+          rarity={rarityMap[selected.rarity_id]}
+          coins={status?.coins ?? 0}
+          onClose={() => setSelectedId(null)}
+          onStatus={setStatus}
+          reload={load}
+        />
+      )}
+    </section>
+  )
+}
+
+function describe(r, ms) {
+  const clock = ms !== null && ms !== undefined ? fmtClock(ms) : ''
+  if (r.status === 'active') {
+    if (r.role === 'seller') {
+      if (r.kind === 'buy_now') return `En vente à ${fmtCoins(r.price)}.`
+      return r.bid_count > 0
+        ? `Enchère à ${fmtCoins(r.current_bid)} (${r.bid_count} offre${r.bid_count > 1 ? 's' : ''}). Fin dans ${clock}.`
+        : `Enchère sans offre pour l’instant. Fin dans ${clock}.`
+    }
+    return r.is_leading
+      ? `Tu es en tête avec ${fmtCoins(r.my_bid)}. Fin dans ${clock}.`
+      : `Tu as été dépassé (ta mise : ${fmtCoins(r.my_bid)}, actuellement ${fmtCoins(r.current_bid)}). Fin dans ${clock}.`
+  }
+  if (r.role === 'seller') {
+    if (r.status === 'sold') return `Vendue ${fmtCoins(r.final_price)}.`
+    if (r.status === 'expired') return 'Enchère terminée sans offre : la carte est restée dans ta collection.'
+    return 'Annonce retirée.'
+  }
+  if (r.role === 'buyer') return `${r.kind === 'auction' ? 'Enchère gagnée' : 'Achetée'} pour ${fmtCoins(r.final_price)}. La carte est à toi.`
+  return `Enchère perdue (ta mise : ${fmtCoins(r.my_bid)}). Tes pièces t’ont été rendues.`
+}
+
+function ListingModal({ row, ms, rarity, coins, onClose, onStatus, reload }) {
+  const [amount, setAmount] = useState(String(row.min_bid ?? ''))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const lastMin = useRef(row.min_bid)
+
+  // Si quelqu'un surenchérit pendant que la fenêtre est ouverte, on remet la mise minimale à jour
+  useEffect(() => {
+    if (row.min_bid != null && row.min_bid !== lastMin.current) {
+      lastMin.current = row.min_bid
+      setAmount((a) => (Number(a) < row.min_bid ? String(row.min_bid) : a))
+    }
+  }, [row.min_bid])
+
+  async function act(fn, done) {
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const res = await fn()
+      if (res?.status) onStatus(res.status)
+      await reload()
+      if (done === 'close') onClose()
+      else setNotice(done)
+    } catch (e) {
+      setError(explain(e))
+      reload()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const isAuction = row.kind === 'auction'
+  const mine = row.is_mine || row.role === 'seller'
+  const bid = Number(amount)
+  const ended = ms !== null && ms <= 0
+
+  return (
+    <div className="overlay" role="dialog" aria-modal="true" aria-label="Détail de l’annonce" onClick={onClose}>
+      <div className="detail" onClick={(e) => e.stopPropagation()}>
+        <div className="detail-card">
+          <Card series={row.card_series} number={row.card_number} rarity={rarity} size="lg" glow shine />
+        </div>
+        <p className="reveal-line"><strong>{rarity?.name}</strong> : carte {row.card_number} de la série de {row.card_series}.</p>
+
+        <div className="sheet">
+          {isAuction ? (
+            <>
+              <p className="sheet-line">
+                <strong>{row.bid_count > 0 ? `Offre actuelle : ${fmtCoins(row.current_bid)}` : `Départ à ${fmtCoins(row.price)}, aucune offre`}</strong>
+                {row.bid_count > 0 && <span className="muted"> ({row.bid_count} offre{row.bid_count > 1 ? 's' : ''})</span>}
+              </p>
+              <p className={`sheet-line ${ms !== null && ms < 60000 ? 'urgent' : ''}`}>
+                {ended ? 'Enchère terminée.' : <>Fin dans <strong className="clock">{fmtClock(ms)}</strong>{ms < 60000 ? ' : une mise relance le compteur à 1 minute.' : ''}</>}
+              </p>
+              {row.is_leading && <p className="msg info">Tu es en tête avec {fmtCoins(row.current_bid)}.</p>}
+            </>
+          ) : (
+            <p className="sheet-line"><strong>Prix : {fmtCoins(row.price)}</strong></p>
+          )}
+          <p className="muted">Vendeur : {mine ? 'toi' : row.seller_name}.</p>
+
+          {mine ? (
+            isAuction && row.bid_count > 0 ? (
+              <p className="muted">Des offres ont été faites : l’annonce ne peut plus être retirée.</p>
+            ) : (
+              <button className="btn ghost" disabled={busy} onClick={() => act(() => api.cancelListing(row.listing_id), 'close')}>Retirer de la vente</button>
+            )
+          ) : isAuction ? (
+            <>
+              <label>
+                Ta mise, en pièces (minimum {fmt(row.min_bid)})
+                <input type="number" inputMode="numeric" min={row.min_bid} step="1" value={amount} onChange={(e) => setAmount(e.target.value)} />
+              </label>
+              <p className="fine">Tu as {fmtCoins(coins)}. Ta mise est bloquée tant que tu es en tête, et rendue si quelqu’un te dépasse.</p>
+              <button className="btn accent" disabled={busy || ended || !(bid >= row.min_bid)} onClick={() => act(() => api.placeBid(row.listing_id, bid), 'Mise enregistrée.')}>
+                Enchérir à {fmtCoins(bid || 0)}
+              </button>
+            </>
+          ) : (
+            <>
+              {coins < row.price && <p className="msg error">Il te manque {fmtCoins(row.price - coins)}.</p>}
+              <button className="btn accent" disabled={busy || coins < row.price} onClick={() => act(() => api.buyNow(row.listing_id), 'close')}>
+                Acheter pour {fmtCoins(row.price)}
+              </button>
+            </>
+          )}
+          {notice && <p className="msg info" role="status">{notice}</p>}
+          {error && <p className="msg error" role="alert">{error}</p>}
+        </div>
+        <button className="btn ghost-light" onClick={onClose}>Fermer</button>
+      </div>
+    </div>
+  )
+}

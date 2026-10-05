@@ -9,6 +9,11 @@ const Icon = {
       <rect x="3.5" y="6" width="10" height="14" rx="1.5" /><path d="M7 3.5h9.5a1.5 1.5 0 0 1 1.5 1.5v12" /><path d="M20.5 8v10" />
     </svg>
   ),
+  market: (
+    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3.5 9.5 5 4.5h14l1.5 5" /><path d="M4.5 9.5v10h15v-10" /><path d="M3.5 9.5c0 1.5 1.1 2.5 2.5 2.5s2.5-1 2.5-2.5c0 1.5 1.1 2.5 3.5 2.5s3.5-1 3.5-2.5c0 1.5 1.1 2.5 2.5 2.5s2.5-1 2.5-2.5" /><path d="M10 19.5v-4h4v4" />
+    </svg>
+  ),
   profile: (
     <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="8.5" r="3.5" /><path d="M5 20c.8-3.6 3.8-5.5 7-5.5s6.2 1.9 7 5.5" />
@@ -19,6 +24,7 @@ const Icon = {
 const TABS = [
   ['boosters', 'Boosters'],
   ['collection', 'Collection'],
+  ['market', 'Marché'],
   ['profile', 'Profil'],
 ]
 

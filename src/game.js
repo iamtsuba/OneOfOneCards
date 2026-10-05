@@ -4,6 +4,7 @@ export const GameContext = createContext(null)
 export const useGame = () => useContext(GameContext)
 
 export const fmt = (n) => new Intl.NumberFormat('fr-FR').format(n ?? 0)
+export const fmtCoins = (n) => `${fmt(n)} pièce${Math.abs(Number(n)) > 1 ? 's' : ''}`
 export const fmtPct = (x) =>
   new Intl.NumberFormat('fr-FR', { maximumFractionDigits: x < 1 ? 3 : 1 }).format(x) + ' %'
 export const fmtDate = (d) =>
@@ -38,4 +39,14 @@ export function useCountdown(status, onZero) {
   }, [due, status?.next_refill_at])
 
   return remaining
+}
+
+// Horloge qui bat chaque seconde (pour les comptes à rebours)
+export function useNow(interval = 1000) {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), interval)
+    return () => clearInterval(id)
+  }, [interval])
+  return now
 }

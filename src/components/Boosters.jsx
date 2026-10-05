@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import * as api from '../api'
 import { explain } from '../api'
+import { isSpecial } from '../rarity'
 import { useGame, useCountdown, fmtClock, fmt } from '../game'
 import Card, { CardBack } from './Card'
 import Pack from './Pack'
+import Fireworks from './Fireworks'
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -29,7 +31,11 @@ export default function Boosters({ goCollection }) {
     try {
       const [res] = await Promise.all([api.openBooster(), wait(1200)])
       setStatus(res.status)
-      setOverlay({ phase: 'reveal', cards: res.cards, idx: 0, flipped: false })
+      // Les cartes les plus rares sont révélées en dernier
+      const cards = [...res.cards].sort(
+        (a, b) => (rarityMap[b.rarity_id]?.sort_order ?? 0) - (rarityMap[a.rarity_id]?.sort_order ?? 0),
+      )
+      setOverlay({ phase: 'reveal', cards, idx: 0, flipped: false })
     } catch (e) {
       setOverlay(null)
       setError(explain(e))
@@ -80,6 +86,7 @@ export default function Boosters({ goCollection }) {
         {status && (
           <p className="fine">
             +{status.regen_amount} boosters toutes les {status.regen_minutes} minutes, jusqu’à {status.max_boosters} en stock.
+            Chaque carte n’existe qu’en un exemplaire : {fmt(status.cards_taken)} déjà tirées sur {fmt(status.total_cards)}.
           </p>
         )}
       </div>
@@ -99,11 +106,10 @@ export default function Boosters({ goCollection }) {
 }
 
 function Overlay({ overlay, setOverlay, rarityMap, boosters, onAgain, onCollection }) {
-  const closeBtn = useRef(null)
   const close = () => setOverlay(null)
 
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape' && overlay.phase !== 'shake' && overlay.phase !== 'tear') close() }
+    const onKey = (e) => { if (e.key === 'Escape' && overlay.phase === 'reveal') close() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   })
@@ -120,23 +126,24 @@ function Overlay({ overlay, setOverlay, rarityMap, boosters, onAgain, onCollecti
   const { cards, idx, flipped, summary } = overlay
 
   if (summary) {
+    const rarest = cards.reduce((best, c) => (rarityMap[c.rarity_id]?.sort_order < (rarityMap[best.rarity_id]?.sort_order ?? 99) ? c : best), cards[0])
     return (
       <div className="overlay" role="dialog" aria-modal="true" aria-label="Résumé du booster">
         <h2 className="overlay-title">Ton booster</h2>
         <ul className="summary-grid">
-          {cards.map((c, i) => (
-            <li key={i}>
-              <Card series={c.series} number={c.number} rarity={rarityMap[c.rarity_id]} quantity={c.quantity} isNew={c.is_new} size="sm" glow />
+          {cards.map((c) => (
+            <li key={`${c.series}-${c.number}`}>
+              <Card series={c.series} number={c.number} rarity={rarityMap[c.rarity_id]} size="sm" glow />
             </li>
           ))}
         </ul>
         <p className="overlay-hint">
-          {cards.filter((c) => c.is_new).length} nouvelle{cards.filter((c) => c.is_new).length > 1 ? 's' : ''} carte{cards.filter((c) => c.is_new).length > 1 ? 's' : ''} sur {cards.length}.
+          {cards.length} carte{cards.length > 1 ? 's' : ''} ajoutée{cards.length > 1 ? 's' : ''} à ta collection. Meilleure carte : {rarityMap[rarest.rarity_id]?.name}, {rarest.number}/{rarest.series}.
         </p>
         <div className="overlay-actions">
           {boosters > 0 && <button className="btn accent" onClick={onAgain}>Ouvrir un autre booster</button>}
           <button className="btn light" onClick={onCollection}>Voir ma collection</button>
-          <button className="btn ghost-light" ref={closeBtn} onClick={close}>Fermer</button>
+          <button className="btn ghost-light" onClick={close}>Fermer</button>
         </div>
       </div>
     )
@@ -169,9 +176,11 @@ function Overlay({ overlay, setOverlay, rarityMap, boosters, onAgain, onCollecti
         </div>
       </div>
 
+      {flipped && isSpecial(rarity) && <Fireworks key={idx} rarity={rarity} />}
+
       <p className="reveal-line" aria-live="polite">
         {flipped
-          ? <><strong>{rarity?.name}</strong> : {c.is_new ? 'nouvelle carte !' : `tu en as déjà ${c.quantity - 1}.`}</>
+          ? <><strong>{rarity?.name}</strong> : la {c.number}/{c.series} n’existe qu’en un exemplaire, et c’est le tien.</>
           : 'Touche la carte pour la retourner'}
       </p>
 
