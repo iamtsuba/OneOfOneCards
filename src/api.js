@@ -25,6 +25,18 @@ export const marketList = ({ kind = null, sort = 'ending', limit = 60, offset = 
   rpc('opennumber_market_list', { p_kind: kind, p_sort: sort, p_limit: limit, p_offset: offset })
 export const marketMine = () => rpc('opennumber_market_mine')
 
+// Boutique : demande une page de paiement Stripe et renvoie son adresse
+export async function startCheckout() {
+  const { data, error } = await supabase.functions.invoke('opennumber-checkout', { body: {} })
+  if (error) {
+    let code = ''
+    try { code = (await error.context.json()).error } catch { /* réponse non lisible */ }
+    throw new Error(code || error.message)
+  }
+  if (!data?.url) throw new Error('stripe_error')
+  return data.url
+}
+
 export async function getRarities() {
   const { data, error } = await supabase.from('opennumber_rarities').select('*').order('sort_order')
   if (error) throw error
@@ -36,6 +48,8 @@ export function explain(e) {
   const m = e?.message || String(e)
   const low = m.match(/bid_too_low:(\d+)/)
   if (low) return `Mise trop basse : minimum ${low[1]} pièce${Number(low[1]) > 1 ? 's' : ''}.`
+  if (/shop_disabled|not_configured|stripe_error|server_error|not_authenticated|Failed to send a request to the Edge Function|FunctionsFetchError|FunctionsRelayError/.test(m))
+    return 'Le paiement n’est pas disponible pour le moment. Réessaie plus tard.'
   if (m.includes('no_boosters')) return 'Tu n’as plus de booster pour le moment.'
   if (m.includes('pool_empty')) return 'Toutes les cartes ont déjà été tirées.'
   if (m.includes('invalid_username')) return 'Le pseudo doit contenir entre 2 et 24 caractères.'

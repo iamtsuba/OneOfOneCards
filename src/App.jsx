@@ -81,7 +81,7 @@ function Game({ session }) {
         {tab === 'market' && <Market key={marketView} initialView={marketView} />}
         {tab === 'profile' && <Profile session={session} />}
       </main>
-      <TabBar tab={tab} onChange={(t) => { if (t === 'market') setMarketView('browse'); setTab(t) }} boosters={status.boosters} />
+      <TabBar tab={tab} onChange={(t) => { if (t === 'market') setMarketView('browse'); setTab(t) }} boosters={status.boosters + (status.bonus_boosters || 0)} />
     </GameContext.Provider>
   )
 }

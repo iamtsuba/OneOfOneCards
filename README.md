@@ -51,3 +51,29 @@ Les raretés (noms, couleurs, seuils de séries) sont dans `opennumber_rarities`
 update opennumber_config set value = 0.5 where key = 'rarity_exponent';
 update opennumber_config set value = 20 where key = 'start_coins';
 ```
+
+## Paiement Stripe (boosters supplémentaires)
+
+Un joueur peut acheter un pack de boosters (10 par défaut). Les boosters achetés sont **hors plafond** de recharge
+(colonne `bonus_boosters`) et sont utilisés **après** le stock gratuit.
+
+Fonctionnement : l'application appelle la fonction `opennumber-checkout`, qui crée une page de paiement Stripe.
+Une fois le paiement confirmé, Stripe appelle `opennumber-stripe-webhook`, qui vérifie la signature puis crédite les boosters
+(`opennumber_credit_purchase`, idempotente : un même paiement ne crédite qu'une fois). Le navigateur ne crédite jamais rien.
+
+Réglages dans `opennumber_config` : `shop_enabled` (0 = bouton masqué), `stripe_pack_boosters`, `stripe_pack_price_cents`.
+
+### Mise en place
+
+1. Relancer `supabase/schema.sql`.
+2. Stripe (mode test) : Développeurs > Clés API > copier la clé secrète `sk_test_...`.
+3. Supabase > Edge Functions > Secrets : ajouter `STRIPE_SECRET_KEY` et `SITE_URL` (ex. `https://iamtsuba.github.io/OneOfOnePack/`).
+4. Déployer les deux fonctions de `supabase/functions/` avec **Verify JWT désactivé** :
+   - en ligne de commande : `supabase link --project-ref <ref>` puis `supabase functions deploy opennumber-checkout opennumber-stripe-webhook`
+   - ou depuis le tableau de bord : Edge Functions > Deploy a new function > Via Editor, en collant chaque `index.ts`.
+5. Stripe > Développeurs > Webhooks > Ajouter un endpoint :
+   `https://<ref>.supabase.co/functions/v1/opennumber-stripe-webhook`, événements `checkout.session.completed`
+   et `checkout.session.async_payment_succeeded`. Copier le secret de signature `whsec_...` dans le secret Supabase `STRIPE_WEBHOOK_SECRET`.
+6. Afficher la boutique : `update opennumber_config set value = 1 where key = 'shop_enabled';`
+7. Tester avec la carte `4242 4242 4242 4242` (date future, CVC au choix), puis passer en production :
+   remplacer les deux secrets par la clé `sk_live_...` et le secret du webhook du mode production.

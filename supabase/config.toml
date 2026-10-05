@@ -1,0 +1,8 @@
+project_id = "uhsodmpqoporeiebhvwt"
+
+# Le jeton du joueur est vérifié dans le code de la fonction ; le webhook est vérifié par la signature Stripe
+[functions.opennumber-checkout]
+verify_jwt = false
+
+[functions.opennumber-stripe-webhook]
+verify_jwt = false

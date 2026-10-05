@@ -31,7 +31,10 @@ insert into public.opennumber_config (key, value, description) values
   ('auction_start_price',    1,    'Prix de départ d''une enchère (pièces)'),
   ('auction_min_increment',  1,    'Surenchère minimale (pièces)'),
   ('auction_extend_seconds', 60,   'Si une mise arrive dans les X dernières secondes, le compteur repart à X secondes'),
-  ('golden_booster_chance',  0.00000001, 'Chance qu''un booster soit doré (0.00000001 = 0,000001 %). Contenu dans opennumber_golden_contents')
+  ('golden_booster_chance',  0.00000001, 'Chance qu''un booster soit doré (0.00000001 = 0,000001 %). Contenu dans opennumber_golden_contents'),
+  ('shop_enabled',           0,    'Boutique Stripe : 1 = visible dans l''application, 0 = masquée (à passer à 1 une fois Stripe configuré)'),
+  ('stripe_pack_boosters',   10,   'Boosters bonus ajoutés par achat'),
+  ('stripe_pack_price_cents', 199, 'Prix d''un pack en centimes d''euro (199 = 1,99 EUR)')
 on conflict (key) do nothing;
 
 -- ---------- Raretés (noms, couleurs, seuils modifiables) ----------
@@ -80,6 +83,8 @@ create table if not exists public.opennumber_profiles (
   created_at          timestamptz not null default now()
 );
 alter table public.opennumber_profiles add column if not exists coins bigint not null default 0;
+-- Boosters achetés : hors plafond de recharge, consommés après le stock gratuit
+alter table public.opennumber_profiles add column if not exists bonus_boosters int not null default 0;
 do $$ begin
   if not exists (select 1 from pg_constraint where conname = 'opennumber_profiles_coins_check') then
     alter table public.opennumber_profiles add constraint opennumber_profiles_coins_check check (coins >= 0);
@@ -175,6 +180,19 @@ create table if not exists public.opennumber_bids (
 );
 create index if not exists opennumber_bids_bidder_idx on public.opennumber_bids (bidder_id, listing_id);
 
+-- Achats Stripe (un enregistrement par session de paiement : empêche de créditer deux fois)
+create table if not exists public.opennumber_purchases (
+  id                    bigint generated always as identity primary key,
+  user_id               uuid not null references auth.users (id) on delete cascade,
+  stripe_session_id     text not null unique,
+  stripe_payment_intent text,
+  boosters              int  not null,
+  amount_cents          int,
+  currency              text,
+  created_at            timestamptz not null default now()
+);
+create index if not exists opennumber_purchases_user_idx on public.opennumber_purchases (user_id, created_at desc);
+
 -- ---------- Sécurité : tout passe par les fonctions ci-dessous ----------
 alter table public.opennumber_config       enable row level security;
 alter table public.opennumber_rarities     enable row level security;
@@ -184,6 +202,11 @@ alter table public.opennumber_series_taken enable row level security;
 alter table public.opennumber_listings     enable row level security;
 alter table public.opennumber_bids         enable row level security;
 alter table public.opennumber_golden_contents enable row level security;
+alter table public.opennumber_purchases    enable row level security;
+
+drop policy if exists opennumber_purchases_read_own on public.opennumber_purchases;
+create policy opennumber_purchases_read_own on public.opennumber_purchases
+  for select to authenticated using (user_id = auth.uid());
 
 drop policy if exists opennumber_config_read on public.opennumber_config;
 create policy opennumber_config_read on public.opennumber_config
@@ -203,6 +226,7 @@ create policy opennumber_cards_read_own on public.opennumber_cards
 
 revoke insert, update, delete on public.opennumber_config, public.opennumber_rarities, public.opennumber_profiles, public.opennumber_cards from anon, authenticated;
 revoke all on public.opennumber_series_taken, public.opennumber_listings, public.opennumber_bids, public.opennumber_golden_contents from anon, authenticated;
+revoke insert, update, delete on public.opennumber_purchases from anon, authenticated;
 
 -- ---------- Fonctions utilitaires ----------
 create or replace function public.opennumber_cfg(p_key text)
@@ -398,6 +422,10 @@ begin
   return jsonb_build_object(
     'username',            p.username,
     'boosters',            p.boosters,
+    'bonus_boosters',      p.bonus_boosters,
+    'shop_enabled',        coalesce(public.opennumber_cfg('shop_enabled'), 0) = 1,
+    'pack_boosters',       public.opennumber_cfg('stripe_pack_boosters')::int,
+    'pack_price_cents',    public.opennumber_cfg('stripe_pack_price_cents')::int,
     'max_boosters',        v_max,
     'regen_minutes',       v_min,
     'regen_amount',        public.opennumber_cfg('regen_amount')::int,
@@ -434,6 +462,7 @@ declare
   p        public.opennumber_profiles;
   v_max    int;
   was_full boolean;
+  use_bonus boolean;
   n_series int;
   n_cards  int;
   e        double precision;
@@ -457,7 +486,8 @@ begin
   if uid is null then raise exception 'not_authenticated'; end if;
 
   p := public.opennumber_sync(uid);
-  if p.boosters <= 0 then raise exception 'no_boosters'; end if;
+  if p.boosters <= 0 and p.bonus_boosters <= 0 then raise exception 'no_boosters'; end if;
+  use_bonus := p.boosters <= 0;   -- le stock gratuit est utilisé en premier : la recharge repart plus vite
 
   v_max    := public.opennumber_cfg('max_boosters')::int;
   was_full := p.boosters >= v_max;
@@ -537,9 +567,10 @@ begin
   if got = 0 then raise exception 'pool_empty'; end if;   -- annule aussi la consommation du booster
 
   update public.opennumber_profiles
-  set boosters            = boosters - 1,
+  set boosters            = boosters - case when use_bonus then 0 else 1 end,
+      bonus_boosters      = bonus_boosters - case when use_bonus then 1 else 0 end,
       boosters_opened     = boosters_opened + 1,
-      boosters_updated_at = case when was_full then now() else boosters_updated_at end
+      boosters_updated_at = case when was_full and not use_bonus then now() else boosters_updated_at end
   where id = uid returning * into p;
 
   return jsonb_build_object('cards', res, 'golden', v_golden, 'status', public.opennumber_status_json(p));
@@ -931,6 +962,25 @@ begin
   limit 100;
 end $$;
 
+-- Crédite un achat Stripe. Appelée uniquement par la fonction serveur "opennumber-stripe-webhook" (rôle service_role).
+-- Idempotente : une même session de paiement ne crédite qu'une fois. Renvoie true si les boosters ont été ajoutés.
+create or replace function public.opennumber_credit_purchase(
+  p_session_id text, p_user uuid, p_boosters int, p_amount int, p_currency text, p_payment_intent text
+)
+returns boolean language plpgsql security definer set search_path = public as $$
+declare v_rows int;
+begin
+  if p_boosters is null or p_boosters < 1 or p_boosters > 1000 then raise exception 'invalid_boosters'; end if;
+  perform public.opennumber_ensure_profile(p_user);
+  insert into public.opennumber_purchases (user_id, stripe_session_id, stripe_payment_intent, boosters, amount_cents, currency)
+  values (p_user, p_session_id, p_payment_intent, p_boosters, p_amount, p_currency)
+  on conflict (stripe_session_id) do nothing;
+  get diagnostics v_rows = row_count;
+  if v_rows = 0 then return false; end if;
+  update public.opennumber_profiles set bonus_boosters = bonus_boosters + p_boosters where id = p_user;
+  return true;
+end $$;
+
 -- ---------- Droits d'exécution ----------
 revoke all on function public.opennumber_ensure_profile(uuid) from public, anon, authenticated;
 revoke all on function public.opennumber_sync(uuid) from public, anon, authenticated;
@@ -938,6 +988,8 @@ revoke all on function public.opennumber_settle_due() from public, anon, authent
 revoke all on function public.opennumber_status_json(public.opennumber_profiles) from public, anon, authenticated;
 revoke all on function public.opennumber_cards_counter() from public, anon, authenticated;
 revoke all on function public.opennumber_draw_rarity(text) from public, anon, authenticated;
+revoke all on function public.opennumber_credit_purchase(text, uuid, int, int, text, text) from public, anon, authenticated;
+grant execute on function public.opennumber_credit_purchase(text, uuid, int, int, text, text) to service_role;
 
 revoke all on function public.opennumber_status()                                 from public, anon;
 revoke all on function public.opennumber_open_booster()                           from public, anon;

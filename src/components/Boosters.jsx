@@ -21,10 +21,48 @@ export default function Boosters({ goCollection }) {
   }, [])
 
   const boosters = status?.boosters ?? 0
-  const canOpen = status && boosters > 0 && !overlay
+  const bonus = status?.bonus_boosters ?? 0
+  const total = boosters + bonus
+  const canOpen = status && total > 0 && !overlay
+  const [buying, setBuying] = useState(false)
+  const [notice, setNotice] = useState('')
+  const returned = useRef(false)
+
+  // Retour de la page de paiement Stripe : message, puis rafraîchissement du stock le temps que le paiement soit enregistré
+  useEffect(() => {
+    if (returned.current) return
+    returned.current = true
+    const params = new URLSearchParams(window.location.search)
+    const pay = params.get('payment')
+    if (!pay) return
+    params.delete('payment')
+    const qs = params.toString()
+    window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash)
+    if (pay === 'cancel') { setNotice('Paiement annulé : tu n’as pas été débité.'); return }
+    if (pay === 'success') {
+      setNotice('Merci ! Ton paiement est confirmé : tes boosters s’affichent dans quelques secondes.')
+      let tries = 0
+      const id = setInterval(() => {
+        refreshStatus().catch(() => {})
+        if (++tries >= 10) clearInterval(id)
+      }, 2500)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function buy() {
+    setBuying(true)
+    setError('')
+    try {
+      window.location.href = await api.startCheckout()
+    } catch (e) {
+      setError(explain(e))
+      setBuying(false)
+    }
+  }
 
   async function open(fromSummary = false) {
-    if (!(status && boosters > 0 && (fromSummary === true || !overlay))) return
+    if (!(status && total > 0 && (fromSummary === true || !overlay))) return
     setError('')
     setOverlay({ phase: 'shake' })
     const t0 = Date.now()
@@ -59,13 +97,16 @@ export default function Boosters({ goCollection }) {
 
       <div className="pack-stage">
         <button className="pack-button" onClick={() => open()} disabled={!canOpen} aria-label="Ouvrir un booster">
-          <Pack dim={boosters === 0} />
+          <Pack dim={total === 0} />
         </button>
 
         <p className="stock">
           {status ? (
-            boosters > 0 ? (
-              <><strong>{fmt(boosters)}</strong> {boosters > 1 ? 'boosters prêts' : 'booster prêt'}</>
+            total > 0 ? (
+              <>
+                <strong>{fmt(total)}</strong> {total > 1 ? 'boosters prêts' : 'booster prêt'}
+                {bonus > 0 && <span className="muted stock-bonus"> dont {fmt(bonus)} acheté{bonus > 1 ? 's' : ''}</span>}
+              </>
             ) : (
               <>Aucun booster pour le moment</>
             )
@@ -78,6 +119,7 @@ export default function Boosters({ goCollection }) {
           Ouvrir un booster
         </button>
 
+        {notice && <p className="msg info" role="status">{notice}</p>}
         {error && <p className="msg error" role="alert">{error}</p>}
 
         {status && (
@@ -97,6 +139,22 @@ export default function Boosters({ goCollection }) {
             Chaque carte n’existe qu’en un exemplaire : {fmt(status.cards_taken)} déjà tirées sur {fmt(status.total_cards)}.
           </p>
         )}
+
+        {status?.shop_enabled && (
+          <div className="shop">
+            <div>
+              <strong>Plus de boosters ?</strong>
+              <p className="muted">
+                {fmt(status.pack_boosters)} boosters en plus pour {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(status.pack_price_cents / 100)}.
+                Ils s’ajoutent à ton stock et ne comptent pas dans le plafond de {status.max_boosters}.
+              </p>
+            </div>
+            <button className="btn" onClick={buy} disabled={buying}>
+              {buying ? 'Redirection…' : `Acheter ${fmt(status.pack_boosters)} boosters`}
+            </button>
+            <p className="fine">Paiement sécurisé par Stripe. Les boosters achetés sont utilisés après ton stock gratuit.</p>
+          </div>
+        )}
       </div>
 
       {overlay && (
@@ -104,7 +162,7 @@ export default function Boosters({ goCollection }) {
           overlay={overlay}
           setOverlay={setOverlay}
           rarityMap={rarityMap}
-          boosters={boosters}
+          boosters={total}
           onAgain={() => open(true)}
           onCollection={() => { setOverlay(null); goCollection() }}
         />

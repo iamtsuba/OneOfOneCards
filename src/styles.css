@@ -273,3 +273,8 @@ button.slot:hover { border-color: var(--ink-soft); color: var(--ink-soft); }
 .reveal-card { width: min(66vw, 280px); cursor: pointer; animation: cardin .35s cubic-bezier(.2, .8, .2, 1); }
 @keyframes cardin { from { opacity: 0; transform: translateY(16px) scale(.88); } to { opacity: 1; transform: none; } }
 @media (min-width: 720px) { .reveal-card { width: 300px; } }
+
+/* ---------- Boutique ---------- */
+.stock-bonus { font-size: 15px; font-family: var(--font-body); font-weight: 500; letter-spacing: 0; }
+.shop { width: 100%; max-width: 440px; display: grid; gap: 12px; justify-items: center; margin-top: 10px; padding: 18px; border-radius: 20px; background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--line); }
+.shop strong { font-family: var(--font-display); font-size: 20px; font-weight: 800; letter-spacing: -0.02em; }
