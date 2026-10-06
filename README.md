@@ -25,7 +25,7 @@ appartient à un seul joueur.
 - Raretés (priorité dans cet ordre) : **Unique** (1/1), **Alpha** (toutes les 1/m), **Omega** (toutes les m/m),
   puis selon la taille de série : Ultra Rare (≤ 35), Super Rare (≤ 100), Rare (≤ 250), Commune (au-delà).
 - Un tirage ne donne que des cartes encore disponibles. Le poids d'une carte = taille de série ^ exposant (exposant 0 : toutes les cartes disponibles ont la même chance).
-- L'encart « Chances de tirage » (écran Boosters) affiche, pour chaque rareté, la chance qu'un booster en contienne au moins une, calculée par
+- L'encart « Chances de tirage » (écran Boosters) affiche, pour chaque rareté, sa part en % sur la totalité des cartes encore disponibles, calculée par
   le serveur sur les cartes encore disponibles (`opennumber_draw_odds`).
 - **Booster doré** : 0,000001 % de chance par booster (`golden_booster_chance`). Il contient 1 Alpha, 1 Omega, 1 Ultra Rare,
   1 Super Rare et 1 Rare (contenu modifiable dans `opennumber_golden_contents`). Pour le tester :

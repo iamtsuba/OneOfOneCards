@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api'
 import { explain } from '../api'
-import { useGame, fmt, fmtOdds } from '../game'
+import { useGame, fmt, fmtShare } from '../game'
 
 // Chances de tirage de la catégorie en cours, calculées par le serveur sur les cartes encore disponibles
 export default function Odds({ category }) {
@@ -32,8 +32,8 @@ export default function Odds({ category }) {
       {data && (
         <>
           <p className="fine">
-            Pour un booster de {data.cards_per_booster} cartes « {category.name} » : chance d’y trouver au moins une carte de chaque rareté,
-            calculée sur les cartes encore disponibles.
+            Part de chaque rareté sur la totalité des cartes encore disponibles de « {category.name} » ({fmt(data.pool_left)} cartes).
+            C’est la chance qu’une carte tirée soit de cette rareté.
           </p>
           <ul className="odds-list">
             {data.by_rarity.map((r) => {
@@ -42,7 +42,7 @@ export default function Odds({ category }) {
                 <li key={r.id} className={r.remaining === 0 ? 'gone' : ''}>
                   <i className="dot" style={{ '--dot': rar?.color, '--dot2': rar?.color2 }} />
                   <span className="odds-name">{rar?.name ?? r.id}</span>
-                  <span className="odds-val">{r.remaining === 0 ? 'épuisée' : fmtOdds(r.per_booster)}</span>
+                  <span className="odds-val">{r.remaining === 0 ? 'épuisée' : fmtShare(r.share)}</span>
                   <span className="odds-left">{fmt(r.remaining)} cartes restantes sur {fmt(r.total)}</span>
                 </li>
               )
@@ -50,13 +50,13 @@ export default function Odds({ category }) {
           </ul>
           {golden && (
             <p className="fine">
-              Booster doré : {golden.chance > 0 ? fmtOdds(golden.chance) : 'désactivé'} par booster
+              Booster doré : {golden.chance > 0 ? fmtShare(golden.chance) : 'désactivé'} par booster
               {goldenList ? `, il contient ${goldenList}` : ''}.
             </p>
           )}
           <p className="fine">
             {data.exponent === 0
-              ? 'Chaque carte encore disponible a la même chance d’être tirée : une rareté qui compte peu de cartes sort rarement.'
+              ? 'Chaque carte encore disponible a la même chance d’être tirée : le pourcentage d’une rareté est sa part des cartes restantes.'
               : 'Les cartes des petites séries ont moins de chances d’être tirées que celles des grandes séries.'}
             {' '}Ces chances évoluent à mesure que les cartes sont tirées.
           </p>
