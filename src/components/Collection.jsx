@@ -257,7 +257,7 @@ function MyCards({ catId, catTypes, rarities, rarityMap, stats, version, onSelec
 function Album({ type, seriesCount, rarities, rarityMap, version, onBack, onSelect }) {
   const [series, setSeries] = useState(null)
   const [input, setInput] = useState('')
-  const [state, setState] = useState({ mine: {}, taken: [] })
+  const [state, setState] = useState({ mine: {}, taken: [], reward: 'none', reward_eligible: false })
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -311,6 +311,12 @@ function Album({ type, seriesCount, rarities, rarityMap, version, onBack, onSele
         <li><i className="sw taken" />Tirée par un autre joueur ({fmt(taken.size)})</li>
         <li><i className="sw free" />Encore dans les boosters ({fmt(free)})</li>
       </ul>
+
+      {state.reward === 'mine' && <p className="msg info" role="status">Série complète : tu as gagné un pack doré !</p>}
+      {state.reward === 'other' && <p className="msg warn">Cette série a déjà été complétée par un autre joueur : le pack doré est attribué.</p>}
+      {state.reward === 'none' && state.reward_eligible && (
+        <p className="msg warn">Complète cette série (les {fmt(series)} cartes) pour gagner un pack doré. Seul le premier joueur qui y parvient le reçoit.</p>
+      )}
 
       {error && <p className="msg error" role="alert">{error}</p>}
 

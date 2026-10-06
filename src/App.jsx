@@ -10,6 +10,7 @@ import Boosters from './components/Boosters'
 import Collection from './components/Collection'
 import Market from './components/Market'
 import Profile from './components/Profile'
+import RewardModal from './components/RewardModal'
 
 export default function App() {
   const [session, setSession] = useState(undefined)
@@ -28,6 +29,7 @@ export default function App() {
 function Game({ session }) {
   const [tab, setTab] = useState('boosters')
   const [marketView, setMarketView] = useState('browse')
+  const [revealing, setRevealing] = useState(false)
   const [rarities, setRarities] = useState(null)
   const [catalogRaw, setCatalogRaw] = useState(null)
   const [status, setStatusRaw] = useState(null)
@@ -69,7 +71,7 @@ function Game({ session }) {
     }
   }, [catalogRaw])
   const ctx = useMemo(
-    () => ({ rarities, rarityMap, catalog, refreshCatalog, status, setStatus, refreshStatus }),
+    () => ({ rarities, rarityMap, catalog, refreshCatalog, status, setStatus, refreshStatus, setRevealing }),
     [rarities, rarityMap, catalog, refreshCatalog, status, setStatus, refreshStatus],
   )
 
@@ -102,6 +104,15 @@ function Game({ session }) {
         {tab === 'market' && <Market key={marketView} initialView={marketView} />}
         {tab === 'profile' && <Profile session={session} />}
       </main>
+      {!revealing && (status.unseen_rewards ?? []).length > 0 && (
+        <RewardModal
+          rewards={status.unseen_rewards}
+          onClose={async (openNow) => {
+            try { setStatus(await api.ackRewards()) } catch { /* l'annonce réapparaîtra */ }
+            if (openNow) setTab('boosters')
+          }}
+        />
+      )}
       <TabBar tab={tab} onChange={(t) => { if (t === 'market') setMarketView('browse'); setTab(t) }} boosters={status.boosters + (status.bonus_boosters || 0)} />
     </GameContext.Provider>
   )

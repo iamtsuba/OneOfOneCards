@@ -30,6 +30,12 @@ appartient à un seul joueur.
 - **Booster doré** : 0,000001 % de chance par booster (`golden_booster_chance`). Il contient 1 Alpha, 1 Omega, 1 Ultra Rare,
   1 Super Rare et 1 Rare (contenu modifiable dans `opennumber_golden_contents`). Pour le tester :
   `update opennumber_config set value = 1 where key = 'golden_booster_chance';` puis remettre `0.00000001`.
+- **Série complétée = pack doré.** Le premier joueur qui possède toutes les cartes d'un type dans une série (par exemple les 104
+  cartes « Caméscope » de la série de 104) débloque un pack doré (1 Alpha, 1 Omega, 1 Ultra Rare, 1 Super Rare, 1 Rare, tirés dans la
+  catégorie en cours). Une seule récompense par type et par série pour toute la communauté (un échange de cartes entre comptes ne la
+  redonne pas). Détectée à chaque nouvelle carte : booster, achat sur le marché, enchère gagnée, pack doré. Réglage
+  `series_reward_min_size` (2 par défaut : les séries d'une seule carte ne comptent pas ; 0 = désactivé). Les packs gagnés s'ouvrent
+  à part (bouton doré sur l'écran Boosters) et ne consomment pas le stock de boosters.
 - Pièces : revente directe à la banque (1 pièce, la carte retourne dans les boosters), achat direct (prix libre)
   ou enchère de 60 minutes à partir de 1 pièce.
 - Enchères : la mise est bloquée tant qu'on est en tête et rendue si on est dépassé. Une mise dans la dernière
@@ -50,6 +56,7 @@ appartient à un seul joueur.
 | `auction_minutes` / `auction_start_price` | durée et prix de départ d'une enchère | 60 / 1 |
 | `auction_min_increment` | surenchère minimale | 1 |
 | `auction_extend_seconds` | fenêtre de prolongation en fin d'enchère | 60 |
+| `series_reward_min_size` | taille de série minimale pour gagner un pack doré en la complétant (0 = désactivé) | 2 |
 | `golden_booster_chance` | probabilité d'un booster doré (0.00000001 = 0,000001 %) | 0.00000001 |
 
 Les raretés (noms, couleurs, seuils de séries) sont dans `opennumber_rarities`.

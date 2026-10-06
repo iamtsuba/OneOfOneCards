@@ -63,6 +63,7 @@ insert into public.opennumber_config (key, value, description) values
   ('auction_min_increment',  1,    'Surenchère minimale (pièces)'),
   ('auction_extend_seconds', 60,   'Si une mise arrive dans les X dernières secondes, le compteur repart à X secondes'),
   ('golden_booster_chance',  0.00000001, 'Chance qu''un booster soit doré (0.00000001 = 0,000001 %). Contenu dans opennumber_golden_contents'),
+  ('series_reward_min_size', 2,    'Une série complétée (toutes ses cartes d''un type) donne un pack doré au premier joueur qui la complète. Taille de série minimale pour être récompensée (0 = désactivé)'),
   ('shop_enabled',           0,    'Boutique Stripe : 1 = visible dans l''application, 0 = masquée (à passer à 1 une fois Stripe configuré)'),
   ('stripe_pack_boosters',   10,   'Boosters bonus ajoutés par achat'),
   ('stripe_pack_price_cents', 99,  'Prix d''un pack en centimes d''euro (99 = 0,99 EUR)'),
@@ -134,6 +135,8 @@ create table if not exists public.opennumber_profiles (
 alter table public.opennumber_profiles add column if not exists coins bigint not null default 0;
 -- Boosters achetés : hors plafond de recharge, consommés après le stock gratuit
 alter table public.opennumber_profiles add column if not exists bonus_boosters int not null default 0;
+-- Packs dorés gagnés en complétant une série : s'ouvrent à part, sans toucher au stock de boosters
+alter table public.opennumber_profiles add column if not exists golden_packs int not null default 0;
 do $$ begin
   if not exists (select 1 from pg_constraint where conname = 'opennumber_profiles_coins_check') then
     alter table public.opennumber_profiles add constraint opennumber_profiles_coins_check check (coins >= 0);
@@ -234,6 +237,57 @@ select type_id, series, count(*) from public.opennumber_cards group by type_id, 
 on conflict (type_id, series) do update set taken = excluded.taken;
 update public.opennumber_series_taken t set taken = 0
 where not exists (select 1 from public.opennumber_cards c where c.type_id = t.type_id and c.series = t.series);
+
+-- ---------- Séries complétées : un pack doré pour le PREMIER joueur qui possède toutes les cartes d'un type dans une série ----------
+-- (une récompense par type et par série, pour toute la communauté : un échange de cartes entre comptes ne la redonne pas)
+create table if not exists public.opennumber_series_rewards (
+  type_id    int  not null references public.opennumber_types (id) on delete cascade,
+  series     int  not null,
+  user_id    uuid not null references auth.users (id) on delete cascade,
+  claimed_at timestamptz not null default now(),
+  seen       boolean not null default false,   -- le joueur a vu l'annonce de sa récompense
+  primary key (type_id, series)
+);
+create index if not exists opennumber_series_rewards_user_idx on public.opennumber_series_rewards (user_id, seen);
+
+create or replace function public.opennumber_cards_reward()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare v_min int := coalesce(public.opennumber_cfg('series_reward_min_size'), 0)::int; v_owned int; v_rows int;
+begin
+  if v_min < 1 or new.series < v_min then return new; end if;
+  select count(*) into v_owned from public.opennumber_cards
+  where type_id = new.type_id and series = new.series and owner_id = new.owner_id;
+  if v_owned = new.series then
+    insert into public.opennumber_series_rewards (type_id, series, user_id)
+    values (new.type_id, new.series, new.owner_id) on conflict (type_id, series) do nothing;
+    get diagnostics v_rows = row_count;
+    if v_rows = 1 then
+      update public.opennumber_profiles set golden_packs = golden_packs + 1 where id = new.owner_id;
+    end if;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists opennumber_cards_reward_trg on public.opennumber_cards;
+create trigger opennumber_cards_reward_trg
+  after insert or update of owner_id on public.opennumber_cards
+  for each row execute function public.opennumber_cards_reward();
+
+-- Rattrapage (sûr à relancer) : séries déjà complètes par un seul joueur avant l'arrivée de cette règle
+with ins as (
+  insert into public.opennumber_series_rewards (type_id, series, user_id)
+  select c.type_id, c.series, min(c.owner_id::text)::uuid
+  from public.opennumber_cards c
+  where coalesce((select value from public.opennumber_config where key = 'series_reward_min_size'), 0) >= 1
+    and c.series >= (select value from public.opennumber_config where key = 'series_reward_min_size')
+  group by c.type_id, c.series
+  having count(*) = c.series and count(distinct c.owner_id) = 1
+  on conflict (type_id, series) do nothing
+  returning user_id
+)
+update public.opennumber_profiles pr set golden_packs = pr.golden_packs + x.n
+from (select user_id, count(*) as n from ins group by user_id) x
+where pr.id = x.user_id;
 
 -- ---------- Marché ----------
 create table if not exists public.opennumber_listings (
@@ -348,6 +402,7 @@ alter table public.opennumber_legal        enable row level security;
 alter table public.opennumber_consents     enable row level security;
 alter table public.opennumber_secrets      enable row level security;
 alter table public.opennumber_admin_log    enable row level security;
+alter table public.opennumber_series_rewards enable row level security;
 
 drop policy if exists opennumber_legal_read on public.opennumber_legal;
 create policy opennumber_legal_read on public.opennumber_legal
@@ -388,7 +443,7 @@ create policy opennumber_cards_read_own on public.opennumber_cards
 revoke insert, update, delete on public.opennumber_config, public.opennumber_rarities, public.opennumber_profiles,
   public.opennumber_categories, public.opennumber_types, public.opennumber_cards from anon, authenticated;
 revoke all on public.opennumber_series_taken, public.opennumber_listings, public.opennumber_bids, public.opennumber_golden_contents,
-  public.opennumber_secrets, public.opennumber_admin_log from anon, authenticated;
+  public.opennumber_secrets, public.opennumber_admin_log, public.opennumber_series_rewards from anon, authenticated;
 revoke insert, update, delete on public.opennumber_purchases, public.opennumber_legal, public.opennumber_consents from anon, authenticated;
 
 -- ---------- Fonctions utilitaires ----------
@@ -632,6 +687,10 @@ begin
     'boosters',            p.boosters,
     'bonus_boosters',      p.bonus_boosters,
     'shop_enabled',        coalesce(public.opennumber_cfg('shop_enabled'), 0) = 1,
+    'golden_packs',        p.golden_packs,
+    'unseen_rewards',      (select coalesce(jsonb_agg(jsonb_build_object('type_id', r.type_id, 'series', r.series) order by r.claimed_at), '[]'::jsonb)
+                            from public.opennumber_series_rewards r where r.user_id = p.id and not r.seen),
+    'series_reward_min_size', coalesce(public.opennumber_cfg('series_reward_min_size'), 0)::int,
     'pack_boosters',       public.opennumber_cfg('stripe_pack_boosters')::int,
     'pack_price_cents',    public.opennumber_cfg('stripe_pack_price_cents')::int,
     'cgv_version',         coalesce(public.opennumber_cfg('cgv_version'), 1)::int,
@@ -664,6 +723,43 @@ begin
   perform public.opennumber_settle_due();
   p := public.opennumber_sync(auth.uid());
   return public.opennumber_status_json(p);
+end $$;
+
+-- Tire le contenu d'un booster doré (défini dans opennumber_golden_contents) dans une catégorie et l'attribue au joueur.
+-- Renvoie la liste des cartes obtenues (vide si plus aucune carte de ces raretés n'est disponible).
+create or replace function public.opennumber_draw_golden(p_uid uuid, p_cat int)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  gc   record;
+  q    int;
+  t2   int;
+  tid  int;
+  m    int;
+  num  int;
+  rows int;
+  res  jsonb := '[]'::jsonb;
+begin
+  for gc in select rarity_id, quantity from public.opennumber_golden_contents order by rarity_id loop
+    for q in 1 .. gc.quantity loop
+      t2 := 0;
+      while t2 < 10 loop
+        t2 := t2 + 1;
+        select d2.o_type, d2.o_series, d2.o_number into tid, m, num
+        from public.opennumber_draw_rarity(gc.rarity_id, p_cat) d2;
+        exit when tid is null;
+        insert into public.opennumber_cards (type_id, series, number, owner_id) values (tid, m, num, p_uid)
+        on conflict (type_id, series, number) do nothing;
+        get diagnostics rows = row_count;
+        if rows = 1 then
+          res := res || jsonb_build_array(jsonb_build_object(
+            'type_id', tid, 'series', m, 'number', num, 'rarity_id', public.opennumber_rarity_id(num, m)
+          ));
+          exit;
+        end if;
+      end loop;
+    end loop;
+  end loop;
+  return res;
 end $$;
 
 -- Ouvre un booster de la catégorie en cours. Chaque carte tirée n'existait pas encore : elle devient
@@ -719,27 +815,8 @@ begin
     -- Booster doré : chance très faible, contenu défini dans opennumber_golden_contents
     if random() < coalesce(public.opennumber_cfg('golden_booster_chance'), 0)::double precision then
       v_golden := true;
-      for gc in select rarity_id, quantity from public.opennumber_golden_contents order by rarity_id loop
-        for q in 1 .. gc.quantity loop
-          t2 := 0;
-          while t2 < 10 loop
-            t2 := t2 + 1;
-            select d2.o_type, d2.o_series, d2.o_number into tid, m, num
-            from public.opennumber_draw_rarity(gc.rarity_id, v_cat) d2;
-            exit when tid is null;
-            insert into public.opennumber_cards (type_id, series, number, owner_id) values (tid, m, num, uid)
-            on conflict (type_id, series, number) do nothing;
-            get diagnostics rows = row_count;
-            if rows = 1 then
-              got := got + 1;
-              res := res || jsonb_build_array(jsonb_build_object(
-                'type_id', tid, 'series', m, 'number', num, 'rarity_id', public.opennumber_rarity_id(num, m)
-              ));
-              exit;
-            end if;
-          end loop;
-        end loop;
-      end loop;
+      res := public.opennumber_draw_golden(uid, v_cat);
+      got := jsonb_array_length(res);
       if got = 0 then v_golden := false; end if;   -- contenu doré indisponible : booster normal
     end if;
 
@@ -815,6 +892,36 @@ begin
   return jsonb_build_object('cards', res, 'golden', v_golden, 'category_id', v_cat, 'status', public.opennumber_status_json(p));
 end $$;
 
+-- Ouvre un pack doré gagné en complétant une série (catégorie en cours). Ne consomme aucun booster.
+create or replace function public.opennumber_open_golden_pack()
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); p public.opennumber_profiles; v_cat int; res jsonb;
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  p := public.opennumber_sync(uid);
+  if p.golden_packs <= 0 then raise exception 'no_golden_pack'; end if;
+  v_cat := public.opennumber_active_category();
+  if v_cat is null then raise exception 'pool_empty'; end if;
+  res := public.opennumber_draw_golden(uid, v_cat);
+  if jsonb_array_length(res) = 0 then raise exception 'pool_empty'; end if;
+  if public.opennumber_category_taken(v_cat) >= public.opennumber_category_total(v_cat) then
+    update public.opennumber_categories set closed = true where id = v_cat;
+  end if;
+  update public.opennumber_profiles set golden_packs = golden_packs - 1 where id = uid returning * into p;
+  return jsonb_build_object('cards', res, 'golden', true, 'category_id', v_cat, 'status', public.opennumber_status_json(p));
+end $$;
+
+-- Marque les annonces de séries complétées comme vues
+create or replace function public.opennumber_ack_rewards()
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare p public.opennumber_profiles;
+begin
+  if auth.uid() is null then raise exception 'not_authenticated'; end if;
+  update public.opennumber_series_rewards set seen = true where user_id = auth.uid() and not seen;
+  p := public.opennumber_sync(auth.uid());
+  return public.opennumber_status_json(p);
+end $$;
+
 -- Mes cartes (filtres catégorie / type / rareté, tri, pagination)
 create or replace function public.opennumber_list_collection(
   p_category int  default null,
@@ -865,7 +972,7 @@ end $$;
 -- État d'une série d'un type : mes cartes (avec l'annonce éventuelle) et celles prises par d'autres joueurs
 create or replace function public.opennumber_type_state(p_type int, p_series int)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare uid uuid := auth.uid(); v_mine jsonb; v_taken jsonb;
+declare uid uuid := auth.uid(); v_mine jsonb; v_taken jsonb; v_reward text; v_min int := coalesce(public.opennumber_cfg('series_reward_min_size'), 0)::int;
 begin
   if uid is null then raise exception 'not_authenticated'; end if;
   perform public.opennumber_settle_due();
@@ -877,7 +984,10 @@ begin
   select coalesce(jsonb_agg(c.number order by c.number), '[]'::jsonb) into v_taken
   from public.opennumber_cards c
   where c.type_id = p_type and c.series = p_series and c.owner_id <> uid;
-  return jsonb_build_object('mine', v_mine, 'taken', v_taken);
+  select case when r.user_id is null then 'none' when r.user_id = uid then 'mine' else 'other' end into v_reward
+  from (select 1) x left join public.opennumber_series_rewards r on r.type_id = p_type and r.series = p_series;
+  return jsonb_build_object('mine', v_mine, 'taken', v_taken, 'reward', v_reward,
+                            'reward_eligible', v_min >= 1 and p_series >= v_min);
 end $$;
 
 -- Statistiques de collection : par catégorie, par type et par rareté (pour la catégorie demandée)
@@ -1569,6 +1679,8 @@ revoke all on function public.opennumber_settle_due() from public, anon, authent
 revoke all on function public.opennumber_status_json(public.opennumber_profiles) from public, anon, authenticated;
 revoke all on function public.opennumber_cards_counter() from public, anon, authenticated;
 revoke all on function public.opennumber_draw_rarity(text, int) from public, anon, authenticated;
+revoke all on function public.opennumber_draw_golden(uuid, int) from public, anon, authenticated;
+revoke all on function public.opennumber_cards_reward() from public, anon, authenticated;
 revoke all on function public.opennumber_admin_guard(text) from public, anon, authenticated;
 -- Réservée au SQL Editor (mot de passe admin initial)
 revoke all on function public.opennumber_admin_set_password(text) from public, anon, authenticated;
@@ -1579,6 +1691,8 @@ grant execute on function public.opennumber_credit_purchase(text, uuid, int, int
 -- Fonctions de l'application : joueurs connectés uniquement
 revoke all on function public.opennumber_status()                                          from public, anon;
 revoke all on function public.opennumber_open_booster()                                    from public, anon;
+revoke all on function public.opennumber_open_golden_pack()                                from public, anon;
+revoke all on function public.opennumber_ack_rewards()                                     from public, anon;
 revoke all on function public.opennumber_list_collection(int, int, text, text, int, int)   from public, anon;
 revoke all on function public.opennumber_type_state(int, int)                              from public, anon;
 revoke all on function public.opennumber_my_stats(int)                                     from public, anon;
@@ -1604,6 +1718,8 @@ revoke all on function public.opennumber_admin_set_legal(text, text, text)      
 
 grant execute on function public.opennumber_status()                                          to authenticated;
 grant execute on function public.opennumber_open_booster()                                    to authenticated;
+grant execute on function public.opennumber_open_golden_pack()                                to authenticated;
+grant execute on function public.opennumber_ack_rewards()                                     to authenticated;
 grant execute on function public.opennumber_list_collection(int, int, text, text, int, int)   to authenticated;
 grant execute on function public.opennumber_type_state(int, int)                              to authenticated;
 grant execute on function public.opennumber_my_stats(int)                                     to authenticated;

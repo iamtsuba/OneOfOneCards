@@ -9,6 +9,8 @@ async function rpc(fn, args) {
 
 export const getStatus = () => rpc('opennumber_status')
 export const openBooster = () => rpc('opennumber_open_booster')
+export const openGoldenPack = () => rpc('opennumber_open_golden_pack')
+export const ackRewards = () => rpc('opennumber_ack_rewards')
 export const getStats = (category = null) => rpc('opennumber_my_stats', { p_category: category })
 export const getOdds = (category = null) => rpc('opennumber_draw_odds', { p_category: category })
 export const typeState = (type, series) => rpc('opennumber_type_state', { p_type: type, p_series: series })
@@ -124,6 +126,7 @@ export function explain(e) {
   if (m.includes('invalid_name')) return 'Le nom est vide ou trop long.'
   if (m.includes('category_closed')) return 'Revente à la banque indisponible : cette catégorie est terminée. Tu peux toujours vendre la carte sur le marché.'
   if (m.includes('try_again')) return 'Le tirage a été interrompu : réessaie dans un instant.'
+  if (m.includes('no_golden_pack')) return 'Tu n’as pas de pack doré à ouvrir.'
   if (m.includes('no_boosters')) return 'Tu n’as plus de booster pour le moment.'
   if (m.includes('pool_empty')) return 'Toutes les cartes ont déjà été tirées.'
   if (m.includes('invalid_username')) return 'Le pseudo doit contenir entre 2 et 24 caractères.'

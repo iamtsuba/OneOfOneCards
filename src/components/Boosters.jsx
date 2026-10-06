@@ -13,7 +13,7 @@ import Odds from './Odds'
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 
 export default function Boosters({ goCollection }) {
-  const { status, setStatus, refreshStatus, rarityMap, catalog } = useGame()
+  const { status, setStatus, refreshStatus, rarityMap, catalog, setRevealing } = useGame()
   const [overlay, setOverlay] = useState(null)
   const [error, setError] = useState('')
   const remaining = useCountdown(status, () => refreshStatus().catch(() => {}))
@@ -22,6 +22,13 @@ export default function Boosters({ goCollection }) {
     refreshStatus().catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Tant que l'ouverture est à l'écran, l'annonce d'une série complétée attend la fin de la révélation
+  useEffect(() => {
+    setRevealing?.(!!overlay)
+    return () => setRevealing?.(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!overlay])
 
   const boosters = status?.boosters ?? 0
   const bonus = status?.bonus_boosters ?? 0
@@ -56,20 +63,26 @@ export default function Boosters({ goCollection }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  async function open(fromSummary = false) {
-    if (!(status && category && total > 0 && (fromSummary === true || !overlay))) return
+  const goldenPacks = status?.golden_packs ?? 0
+
+  // kind : 'normal' (un booster) ou 'golden' (un pack doré gagné en complétant une série)
+  async function open(fromSummary = false, kind = 'normal') {
+    const isPack = kind === 'golden'
+    if (!(status && category && (isPack ? goldenPacks > 0 : total > 0) && (fromSummary === true || !overlay))) return
     setError('')
-    setOverlay({ phase: 'shake', categoryId: category.id })
+    setOverlay({ phase: 'shake', categoryId: category.id, golden: isPack })
     const t0 = Date.now()
     try {
-      const res = await api.openBooster()
+      const res = isPack ? await api.openGoldenPack() : await api.openBooster()
       setStatus(res.status)
       // Les cartes les plus rares sont révélées en dernier
       const cards = [...res.cards].sort(
         (a, b) => (rarityMap[b.rarity_id]?.sort_order ?? 0) - (rarityMap[a.rarity_id]?.sort_order ?? 0),
       )
       const golden = !!res.golden
-      if (golden) {
+      if (isPack) {
+        await wait(Math.max(0, 1100 - (Date.now() - t0)))
+      } else if (golden) {
         // Le booster se transforme en or avant de s'ouvrir
         setOverlay((o) => ({ ...o, phase: 'shake', golden: true }))
         await wait(1700)
@@ -115,6 +128,15 @@ export default function Boosters({ goCollection }) {
           Ouvrir un booster
         </button>
 
+        {goldenPacks > 0 && (
+          <div className="golden-reward">
+            <strong>{goldenPacks > 1 ? `${goldenPacks} packs dorés à ouvrir` : 'Un pack doré à ouvrir'}</strong>
+            <p className="muted">Tu l’as gagné en complétant une série. Il contient 1 Alpha, 1 Omega, 1 Ultra Rare, 1 Super Rare et 1 Rare.</p>
+            <button className="btn gold" onClick={() => open(false, 'golden')} disabled={!!overlay || !category}>
+              Ouvrir un pack doré
+            </button>
+          </div>
+        )}
         {notice && <p className="msg info" role="status">{notice}</p>}
         {error && <p className="msg error" role="alert">{error}</p>}
 
