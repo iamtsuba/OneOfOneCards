@@ -8,6 +8,7 @@ import Pack from './Pack'
 import Fireworks from './Fireworks'
 import PurchaseConsent from './PurchaseConsent'
 import LegalSheet from './Legal'
+import Odds from './Odds'
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -140,6 +141,7 @@ export default function Boosters({ goCollection }) {
             {nextCategory ? ` Quand elles seront toutes tirées, la catégorie « ${nextCategory.name} » s’ouvrira.` : ' C’est la dernière catégorie.'}
           </p>
         )}
+        {category && <Odds category={category} />}
         {status && !category && (
           <p className="msg info">Toutes les catégories de boosters ont été entièrement tirées. De nouvelles arriveront bientôt.</p>
         )}

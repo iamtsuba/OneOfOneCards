@@ -10,6 +10,7 @@ async function rpc(fn, args) {
 export const getStatus = () => rpc('opennumber_status')
 export const openBooster = () => rpc('opennumber_open_booster')
 export const getStats = (category = null) => rpc('opennumber_my_stats', { p_category: category })
+export const getOdds = (category = null) => rpc('opennumber_draw_odds', { p_category: category })
 export const typeState = (type, series) => rpc('opennumber_type_state', { p_type: type, p_series: series })
 export const setUsername = (name) => rpc('opennumber_set_username', { p_username: name })
 export const listCollection = ({ category = null, type = null, rarity = null, sort = 'series', limit = 60, offset = 0 } = {}) =>

@@ -355,3 +355,19 @@ textarea { width: 100%; padding: 10px 14px; border: 1.5px solid var(--line); bor
 .admin-card.slim input[type='number'] { width: 130px; }
 .admin-type-art { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 10px; background: var(--bg); font-size: 24px; line-height: 1; overflow: hidden; }
 .check.inline { align-items: center; padding-bottom: 8px; }
+
+/* ---------- Chances de tirage ---------- */
+.odds { width: 100%; max-width: 440px; padding: 0 16px; border-radius: 16px; background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--line); text-align: left; }
+.odds summary { display: flex; align-items: center; justify-content: space-between; padding: 13px 0; font-weight: 700; cursor: pointer; list-style: none; }
+.odds summary::-webkit-details-marker { display: none; }
+.odds summary::after { content: '+'; font-size: 22px; line-height: 1; color: var(--ink-soft); }
+.odds[open] summary::after { content: '−'; }
+.odds[open] { padding-bottom: 14px; }
+.odds-list { margin: 8px 0; }
+.odds-list li { display: grid; grid-template-columns: auto 1fr auto; column-gap: 10px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); }
+.odds-list .dot { width: 12px; height: 12px; border-radius: 50%; background: linear-gradient(135deg, var(--dot), var(--dot2)); box-shadow: inset 0 0 0 1px rgba(0,0,0,.18); }
+.odds-name { font-weight: 700; }
+.odds-val { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+.odds-left { grid-column: 2 / 4; font-size: 13px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.odds-list li.gone { opacity: .55; }
+.odds .fine { margin-top: 6px; }

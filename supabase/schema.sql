@@ -56,7 +56,7 @@ insert into public.opennumber_config (key, value, description) values
   ('regen_minutes',          10,   'Délai entre deux recharges (minutes)'),
   ('regen_amount',           10,   'Boosters gagnés à chaque recharge'),
   ('max_boosters',           10,   'Plafond de boosters en stock'),
-  ('rarity_exponent',        1,    'Poids d''une carte = taille_de_série ^ exposant. 1 = rareté proportionnelle, 0 = chaque carte disponible a la même chance'),
+  ('rarity_exponent',        0,    'Poids d''une carte = taille_de_série ^ exposant. 0 = chaque carte disponible a la même chance (recommandé), 1 = les petites séries sont très difficiles à obtenir'),
   ('direct_sell_price',      1,    'Pièces reçues pour une revente directe (la carte retourne dans les boosters)'),
   ('auction_minutes',        60,   'Durée d''une enchère (minutes)'),
   ('auction_start_price',    1,    'Prix de départ d''une enchère (pièces)'),
@@ -92,11 +92,26 @@ insert into public.opennumber_rarities (id, name, kind, max_series, sort_order, 
   ('unique', 'Unique',     'unique', null, 1, '#8b5cf6', '#4c1d95', '#ffffff'),
   ('alpha',  'Alpha',      'alpha',  null, 2, '#f2c94c', '#b7791f', '#3b2a05'),
   ('omega',  'Omega',      'omega',  null, 3, '#e5e9f0', '#9aa5b8', '#1f2937'),
-  ('ultra',  'Ultra Rare', 'range',  10,   4, '#f43f5e', '#9f1239', '#ffffff'),
+  ('ultra',  'Ultra Rare', 'range',  35,   4, '#f43f5e', '#9f1239', '#ffffff'),
   ('super',  'Super Rare', 'range',  100,  5, '#3b82f6', '#1e3a8a', '#ffffff'),
   ('rare',   'Rare',       'range',  250,  6, '#10b981', '#065f46', '#ffffff'),
   ('common', 'Commune',    'range',  null, 7, '#f3efe6', '#cfc8b8', '#3a3630')
 on conflict (id) do nothing;
+
+-- Modèle de rareté v2 (appliqué une seule fois aux bases existantes, sans écraser un réglage personnalisé) :
+-- exposant 0 (chaque carte disponible a la même chance) et Ultra Rare = séries jusqu'à 35 cartes.
+do $$
+begin
+  if coalesce((select value from public.opennumber_config where key = 'rarity_model_version'), 0) < 2 then
+    update public.opennumber_config set value = 0,
+      description = 'Poids d''une carte = taille_de_série ^ exposant. 0 = chaque carte disponible a la même chance (recommandé), 1 = les petites séries sont très difficiles à obtenir'
+    where key = 'rarity_exponent' and value = 1;
+    update public.opennumber_rarities set max_series = 35 where id = 'ultra' and kind = 'range' and max_series = 10;
+    insert into public.opennumber_config (key, value, description)
+    values ('rarity_model_version', 2, 'Version du modèle de rareté (ne pas modifier : marqueur de migration)')
+    on conflict (key) do update set value = 2;
+  end if;
+end $$;
 
 -- Contenu d'un booster doré : une ligne par rareté, avec le nombre de cartes tirées dans cette rareté
 create table if not exists public.opennumber_golden_contents (
@@ -965,6 +980,85 @@ begin
   );
 end $$;
 
+-- Chances de tirage de la catégorie (en cours par défaut), calculées sur les cartes ENCORE disponibles.
+-- Pour chaque rareté : cartes restantes, part des tirages, chance qu'un booster en contienne au moins une.
+create or replace function public.opennumber_draw_odds(p_category int default null)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  v_cat     int := coalesce(p_category, public.opennumber_active_category());
+  n_series  int;
+  e         double precision := public.opennumber_cfg('rarity_exponent')::double precision;
+  n_cards   int := public.opennumber_cfg('cards_per_booster')::int;
+  v_unique  text;
+  v_alpha   text;
+  v_omega   text;
+  v_rows    jsonb;
+  v_golden  jsonb;
+begin
+  select series_count into n_series from public.opennumber_categories where id = v_cat;
+  if v_cat is null or n_series is null then
+    return jsonb_build_object('category_id', null, 'by_rarity', '[]'::jsonb);
+  end if;
+  select id into v_unique from public.opennumber_rarities where kind = 'unique' limit 1;
+  select id into v_alpha  from public.opennumber_rarities where kind = 'alpha'  limit 1;
+  select id into v_omega  from public.opennumber_rarities where kind = 'omega'  limit 1;
+
+  with s as (
+    select ty.id as type_id, g as m, (g - coalesce(t.taken, 0)) as avail,
+           case when g > 1 and exists (select 1 from public.opennumber_cards c where c.type_id = ty.id and c.series = g and c.number = 1) then 1 else 0 end as a_taken,
+           case when g > 1 and exists (select 1 from public.opennumber_cards c where c.type_id = ty.id and c.series = g and c.number = g) then 1 else 0 end as o_taken
+    from public.opennumber_types ty
+    cross join generate_series(1, n_series) g
+    left join public.opennumber_series_taken t on t.type_id = ty.id and t.series = g
+    where ty.category_id = v_cat
+  ),
+  parts as (
+    select v_unique as id, greatest(avail, 0)::bigint as remaining, 1::bigint as total, greatest(avail, 0)::double precision as w
+      from s where m = 1 and v_unique is not null
+    union all
+    select v_alpha, (1 - a_taken)::bigint, 1::bigint, (1 - a_taken) * power(m::double precision, e)
+      from s where m > 1 and v_alpha is not null
+    union all
+    select v_omega, (1 - o_taken)::bigint, 1::bigint, (1 - o_taken) * power(m::double precision, e)
+      from s where m > 1 and v_omega is not null
+    union all
+    select public.opennumber_range_rarity(m),
+           greatest(avail - 2 + a_taken + o_taken, 0)::bigint, (m - 2)::bigint,
+           greatest(avail - 2 + a_taken + o_taken, 0) * power(m::double precision, e)
+      from s where m > 1
+  ),
+  agg as (
+    select id, sum(remaining)::bigint as remaining, sum(total)::bigint as total, sum(w) as w from parts group by id
+  ),
+  tot as (select sum(w) as w, sum(remaining) as remaining from agg)
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'id', r.id,
+           'remaining', coalesce(a.remaining, 0),
+           'total', coalesce(a.total, 0),
+           'share', case when tot.w > 0 then coalesce(a.w, 0) / tot.w else 0 end,
+           'per_booster', case when tot.w > 0 then 1 - power(1 - coalesce(a.w, 0) / tot.w, n_cards) else 0 end
+         ) order by r.sort_order), '[]'::jsonb)
+  into v_rows
+  from public.opennumber_rarities r
+  left join agg a on a.id = r.id
+  cross join tot;
+
+  select jsonb_build_object(
+           'chance', coalesce(public.opennumber_cfg('golden_booster_chance'), 0),
+           'contents', coalesce((select jsonb_agg(jsonb_build_object('rarity_id', rarity_id, 'quantity', quantity) order by rarity_id)
+                                 from public.opennumber_golden_contents), '[]'::jsonb))
+  into v_golden;
+
+  return jsonb_build_object(
+    'category_id',       v_cat,
+    'exponent',          e,
+    'cards_per_booster', n_cards,
+    'pool_left',         public.opennumber_category_total(v_cat) - public.opennumber_category_taken(v_cat),
+    'by_rarity',         v_rows,
+    'golden',            v_golden
+  );
+end $$;
+
 create or replace function public.opennumber_set_username(p_username text)
 returns text language plpgsql security definer set search_path = public as $$
 declare v text := trim(coalesce(p_username, ''));
@@ -1488,6 +1582,7 @@ revoke all on function public.opennumber_open_booster()                         
 revoke all on function public.opennumber_list_collection(int, int, text, text, int, int)   from public, anon;
 revoke all on function public.opennumber_type_state(int, int)                              from public, anon;
 revoke all on function public.opennumber_my_stats(int)                                     from public, anon;
+revoke all on function public.opennumber_draw_odds(int)                                    from public, anon;
 revoke all on function public.opennumber_set_username(text)                                from public, anon;
 revoke all on function public.opennumber_sell_direct(int, int, int)                        from public, anon;
 revoke all on function public.opennumber_list_card(int, int, int, text, int)               from public, anon;
@@ -1512,6 +1607,7 @@ grant execute on function public.opennumber_open_booster()                      
 grant execute on function public.opennumber_list_collection(int, int, text, text, int, int)   to authenticated;
 grant execute on function public.opennumber_type_state(int, int)                              to authenticated;
 grant execute on function public.opennumber_my_stats(int)                                     to authenticated;
+grant execute on function public.opennumber_draw_odds(int)                                    to authenticated;
 grant execute on function public.opennumber_set_username(text)                                to authenticated;
 grant execute on function public.opennumber_sell_direct(int, int, int)                        to authenticated;
 grant execute on function public.opennumber_list_card(int, int, int, text, int)               to authenticated;

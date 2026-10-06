@@ -23,8 +23,10 @@ appartient à un seul joueur.
   dans une catégorie terminée (la vente sur le marché reste possible).
 - 5 cartes par booster, 10 boosters offerts puis +10 toutes les 10 minutes (plafond 10).
 - Raretés (priorité dans cet ordre) : **Unique** (1/1), **Alpha** (toutes les 1/m), **Omega** (toutes les m/m),
-  puis selon la taille de série : Ultra Rare (≤ 10), Super Rare (≤ 100), Rare (≤ 250), Commune (au-delà).
-- Un tirage ne donne que des cartes encore disponibles. Le poids d'une série = cartes restantes x (taille ^ exposant).
+  puis selon la taille de série : Ultra Rare (≤ 35), Super Rare (≤ 100), Rare (≤ 250), Commune (au-delà).
+- Un tirage ne donne que des cartes encore disponibles. Le poids d'une carte = taille de série ^ exposant (exposant 0 : toutes les cartes disponibles ont la même chance).
+- L'encart « Chances de tirage » (écran Boosters) affiche, pour chaque rareté, la chance qu'un booster en contienne au moins une, calculée par
+  le serveur sur les cartes encore disponibles (`opennumber_draw_odds`).
 - **Booster doré** : 0,000001 % de chance par booster (`golden_booster_chance`). Il contient 1 Alpha, 1 Omega, 1 Ultra Rare,
   1 Super Rare et 1 Rare (contenu modifiable dans `opennumber_golden_contents`). Pour le tester :
   `update opennumber_config set value = 1 where key = 'golden_booster_chance';` puis remettre `0.00000001`.
@@ -43,7 +45,7 @@ appartient à un seul joueur.
 | `start_boosters` / `start_coins` | boosters et pièces offerts à l'inscription | 10 / 0 |
 | `regen_minutes` / `regen_amount` | recharge : +N boosters toutes les X minutes | 10 / 10 |
 | `max_boosters` | plafond de stock | 10 |
-| `rarity_exponent` | 1 = rareté proportionnelle, 0 = chaque carte disponible a la même chance | 1 |
+| `rarity_exponent` | 0 = chaque carte disponible a la même chance (recommandé), 1 = les petites séries sont très difficiles à obtenir | 0 |
 | `direct_sell_price` | pièces reçues pour une revente directe | 1 |
 | `auction_minutes` / `auction_start_price` | durée et prix de départ d'une enchère | 60 / 1 |
 | `auction_min_increment` | surenchère minimale | 1 |
@@ -139,3 +141,11 @@ select opennumber_admin_set_password('ton mot de passe');   -- 8 caractères min
 
 Au premier lancement de cette version du schéma, les cartes, le marché et les pièces de l'ancienne structure sont remis à zéro
 (comptes, boosters et achats conservés).
+
+
+## Modèle de rareté v2
+
+Chances au départ d'une catégorie (exposant 0, 8 types de 500 séries, pour 1 000 boosters de 5 cartes) : environ 1 040 Rares,
+170 Super Rares, 22 Ultra Rares, 20 Alpha, 20 Omega, et 0,04 Unique (une carte 1/1 sur 25 000 boosters environ).
+Au premier lancement de `schema.sql` sur une base existante, l'exposant passe de 1 à 0 et le seuil Ultra de 10 à 35. Cette
+migration ne s'applique qu'une fois (marqueur `rarity_model_version`) et n'écrase pas un réglage que tu as personnalisé.

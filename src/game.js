@@ -5,6 +5,14 @@ export const useGame = () => useContext(GameContext)
 
 export const fmt = (n) => new Intl.NumberFormat('fr-FR').format(n ?? 0)
 export const fmtCoins = (n) => `${fmt(n)} pièce${Math.abs(Number(n)) > 1 ? 's' : ''}`
+// Chance exprimée simplement : « 69 % » quand elle est fréquente, « 1 sur 45 » quand elle est rare
+export function fmtOdds(p) {
+  if (!(p > 0)) return '—'
+  if (p >= 0.5) {
+    return new Intl.NumberFormat('fr-FR', { maximumFractionDigits: p >= 0.99 ? 1 : 0 }).format(p * 100) + ' %'
+  }
+  return `1 sur ${fmt(Math.round(1 / p))}`
+}
 export const fmtPct = (x) =>
   new Intl.NumberFormat('fr-FR', { maximumFractionDigits: x < 1 ? 3 : 1 }).format(x) + ' %'
 export const fmtDate = (d) =>
