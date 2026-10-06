@@ -26,8 +26,8 @@ export const marketList = ({ kind = null, sort = 'ending', limit = 60, offset = 
 export const marketMine = () => rpc('opennumber_market_mine')
 
 // Boutique : demande une page de paiement Stripe et renvoie son adresse
-export async function startCheckout() {
-  const { data, error } = await supabase.functions.invoke('opennumber-checkout', { body: {} })
+export async function startCheckout(consent) {
+  const { data, error } = await supabase.functions.invoke('opennumber-checkout', { body: { consent } })
   if (error) {
     // Code renvoyé par la fonction (not_configured, shop_disabled...), sinon statut HTTP ou type d'erreur réseau
     let code = ''
@@ -38,6 +38,20 @@ export async function startCheckout() {
   }
   if (!data?.url) throw new Error('checkout:no_url')
   return data.url
+}
+
+// Infos légales du vendeur, textes de consentement et réglages de la boutique (lisibles sans être connecté)
+export async function getLegal() {
+  const [legal, config] = await Promise.all([
+    supabase.from('opennumber_legal').select('key,value'),
+    supabase.from('opennumber_config').select('key,value').in('key', ['stripe_pack_boosters', 'stripe_pack_price_cents', 'cgv_version']),
+  ])
+  if (legal.error) throw legal.error
+  if (config.error) throw config.error
+  return {
+    legal: Object.fromEntries(legal.data.map((r) => [r.key, r.value || ''])),
+    config: Object.fromEntries(config.data.map((r) => [r.key, Number(r.value)])),
+  }
 }
 
 export async function getRarities() {
@@ -51,6 +65,9 @@ export function explain(e) {
   const m = e?.message || String(e)
   const low = m.match(/bid_too_low:(\d+)/)
   if (low) return `Mise trop basse : minimum ${low[1]} pièce${Number(low[1]) > 1 ? 's' : ''}.`
+  if (m.includes('checkout:consent_required')) return 'Pour payer, coche les deux cases : conditions de vente et exécution immédiate.'
+  if (m.includes('checkout:cgv_outdated')) return 'Les conditions de vente ont changé : recharge la page puis réessaie.'
+  if (m.includes('checkout:legal_incomplete')) return 'Les informations légales du vendeur ne sont pas encore renseignées : le paiement est indisponible.'
   if (m.startsWith('checkout:'))
     return `Le paiement n’est pas disponible pour le moment. Réessaie plus tard. (code : ${m.slice(9)})`
   if (m.includes('no_boosters')) return 'Tu n’as plus de booster pour le moment.'

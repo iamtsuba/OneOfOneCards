@@ -81,3 +81,32 @@ Réglages dans `opennumber_config` : `shop_enabled` (0 = bouton masqué), `strip
 6. Afficher la boutique : `update opennumber_config set value = 1 where key = 'shop_enabled';`
 7. Tester avec la carte `4242 4242 4242 4242` (date future, CVC au choix), puis passer en production :
    remplacer les deux secrets par la clé `sk_live_...` et le secret du webhook du mode production.
+
+## Conditions de vente et consentement
+
+Avant tout paiement, le joueur voit une fenêtre « Avant de payer » avec deux cases à cocher (acceptation des conditions de vente,
+demande d'exécution immédiate avec renonciation au droit de rétractation, contenu numérique). Le bouton de paiement reste inactif
+tant que les deux ne sont pas cochées. La fonction `opennumber-checkout` refuse ensuite toute demande sans consentement, puis
+enregistre la preuve dans `opennumber_consents` (compte, date, version des conditions, textes exacts acceptés, IP, navigateur,
+session Stripe). Les conditions et mentions légales sont accessibles depuis l'écran de connexion, le profil et la boutique.
+
+À renseigner avant de vendre pour de vrai (table `opennumber_legal`) :
+
+```sql
+insert into opennumber_legal (key, value) values
+  ('seller_name',    'Prénom Nom ou raison sociale'),
+  ('seller_status',  'Entrepreneur individuel'),
+  ('seller_address', '12 rue Exemple, 69000 Lyon'),
+  ('seller_email',   'contact@exemple.fr'),
+  ('seller_siret',   '123 456 789 00012'),
+  ('seller_vat',     'TVA non applicable, art. 293 B du CGI'),   -- uniquement si c'est ton cas
+  ('mediator_name',  'Nom du médiateur de la consommation'),
+  ('mediator_url',   'https://exemple-mediateur.fr')
+on conflict (key) do update set value = excluded.value;
+```
+
+Garde-fou : avec une clé Stripe de production (`sk_live_...`), la fonction refuse tout paiement tant que `seller_name`,
+`seller_address` et `seller_email` sont vides. Les champs vides s'affichent en jaune « [à compléter] » dans les conditions.
+
+Si le texte des conditions (`src/components/Legal.jsx`) change, incrémenter `cgv_version` dans `opennumber_config` :
+les joueurs devront alors ré-accepter avant de payer.

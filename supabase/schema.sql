@@ -34,7 +34,8 @@ insert into public.opennumber_config (key, value, description) values
   ('golden_booster_chance',  0.00000001, 'Chance qu''un booster soit doré (0.00000001 = 0,000001 %). Contenu dans opennumber_golden_contents'),
   ('shop_enabled',           0,    'Boutique Stripe : 1 = visible dans l''application, 0 = masquée (à passer à 1 une fois Stripe configuré)'),
   ('stripe_pack_boosters',   10,   'Boosters bonus ajoutés par achat'),
-  ('stripe_pack_price_cents', 99,  'Prix d''un pack en centimes d''euro (99 = 0,99 EUR)')
+  ('stripe_pack_price_cents', 99,  'Prix d''un pack en centimes d''euro (99 = 0,99 EUR)'),
+  ('cgv_version',            1,    'Version des conditions générales de vente. À incrémenter à chaque modification du texte : les joueurs doivent alors ré-accepter avant de payer')
 on conflict (key) do nothing;
 
 -- ---------- Raretés (noms, couleurs, seuils modifiables) ----------
@@ -180,6 +181,43 @@ create table if not exists public.opennumber_bids (
 );
 create index if not exists opennumber_bids_bidder_idx on public.opennumber_bids (bidder_id, listing_id);
 
+-- Informations légales du vendeur et textes de consentement (affichés dans les conditions de vente).
+-- À compléter avant de vendre pour de vrai : voir README.
+create table if not exists public.opennumber_legal (
+  key   text primary key,
+  value text not null default ''
+);
+insert into public.opennumber_legal (key, value) values
+  ('seller_name',     ''),   -- nom (ou raison sociale) du vendeur
+  ('seller_status',   ''),   -- ex. Entrepreneur individuel, SASU...
+  ('seller_address',  ''),   -- adresse postale complète
+  ('seller_email',    ''),   -- adresse de contact
+  ('seller_phone',    ''),   -- facultatif
+  ('seller_siret',    ''),   -- numéro SIRET
+  ('seller_vat',      ''),   -- n° de TVA, ou mention du type « TVA non applicable, art. 293 B du CGI »
+  ('mediator_name',   ''),   -- médiateur de la consommation
+  ('mediator_url',    ''),   -- site ou adresse du médiateur
+  ('consent_cgv_text', 'J''ai lu et j''accepte les conditions générales de vente.'),
+  ('consent_withdrawal_text', 'Je demande l''exécution immédiate de ma commande : les boosters sont ajoutés à mon compte dès le paiement. Je reconnais que je perds mon droit de rétractation dès que les boosters sont fournis.')
+on conflict (key) do nothing;
+
+-- Preuve du consentement donné avant chaque paiement (écrite uniquement par la fonction serveur de paiement)
+create table if not exists public.opennumber_consents (
+  id                bigint generated always as identity primary key,
+  user_id           uuid not null references auth.users (id) on delete cascade,
+  cgv_version       int  not null,
+  statement         text not null,   -- textes exacts acceptés par le joueur
+  ip                text,
+  user_agent        text,
+  boosters          int,
+  amount_cents      int,
+  currency          text,
+  stripe_session_id text,
+  created_at        timestamptz not null default now()
+);
+create index if not exists opennumber_consents_user_idx on public.opennumber_consents (user_id, created_at desc);
+create index if not exists opennumber_consents_session_idx on public.opennumber_consents (stripe_session_id);
+
 -- Achats Stripe (un enregistrement par session de paiement : empêche de créditer deux fois)
 create table if not exists public.opennumber_purchases (
   id                    bigint generated always as identity primary key,
@@ -203,6 +241,16 @@ alter table public.opennumber_listings     enable row level security;
 alter table public.opennumber_bids         enable row level security;
 alter table public.opennumber_golden_contents enable row level security;
 alter table public.opennumber_purchases    enable row level security;
+alter table public.opennumber_legal        enable row level security;
+alter table public.opennumber_consents     enable row level security;
+
+drop policy if exists opennumber_legal_read on public.opennumber_legal;
+create policy opennumber_legal_read on public.opennumber_legal
+  for select to anon, authenticated using (true);
+
+drop policy if exists opennumber_consents_read_own on public.opennumber_consents;
+create policy opennumber_consents_read_own on public.opennumber_consents
+  for select to authenticated using (user_id = auth.uid());
 
 drop policy if exists opennumber_purchases_read_own on public.opennumber_purchases;
 create policy opennumber_purchases_read_own on public.opennumber_purchases
@@ -226,7 +274,7 @@ create policy opennumber_cards_read_own on public.opennumber_cards
 
 revoke insert, update, delete on public.opennumber_config, public.opennumber_rarities, public.opennumber_profiles, public.opennumber_cards from anon, authenticated;
 revoke all on public.opennumber_series_taken, public.opennumber_listings, public.opennumber_bids, public.opennumber_golden_contents from anon, authenticated;
-revoke insert, update, delete on public.opennumber_purchases from anon, authenticated;
+revoke insert, update, delete on public.opennumber_purchases, public.opennumber_legal, public.opennumber_consents from anon, authenticated;
 
 -- ---------- Fonctions utilitaires ----------
 create or replace function public.opennumber_cfg(p_key text)
@@ -426,6 +474,7 @@ begin
     'shop_enabled',        coalesce(public.opennumber_cfg('shop_enabled'), 0) = 1,
     'pack_boosters',       public.opennumber_cfg('stripe_pack_boosters')::int,
     'pack_price_cents',    public.opennumber_cfg('stripe_pack_price_cents')::int,
+    'cgv_version',         coalesce(public.opennumber_cfg('cgv_version'), 1)::int,
     'max_boosters',        v_max,
     'regen_minutes',       v_min,
     'regen_amount',        public.opennumber_cfg('regen_amount')::int,

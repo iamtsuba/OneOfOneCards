@@ -6,6 +6,8 @@ import { useGame, useCountdown, fmtClock, fmt } from '../game'
 import Card from './Card'
 import Pack from './Pack'
 import Fireworks from './Fireworks'
+import PurchaseConsent from './PurchaseConsent'
+import LegalSheet from './Legal'
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -24,7 +26,8 @@ export default function Boosters({ goCollection }) {
   const bonus = status?.bonus_boosters ?? 0
   const total = boosters + bonus
   const canOpen = status && total > 0 && !overlay
-  const [buying, setBuying] = useState(false)
+  const [consentOpen, setConsentOpen] = useState(false)
+  const [termsOpen, setTermsOpen] = useState(false)
   const [notice, setNotice] = useState('')
   const returned = useRef(false)
 
@@ -49,17 +52,6 @@ export default function Boosters({ goCollection }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  async function buy() {
-    setBuying(true)
-    setError('')
-    try {
-      window.location.href = await api.startCheckout()
-    } catch (e) {
-      setError(explain(e))
-      setBuying(false)
-    }
-  }
 
   async function open(fromSummary = false) {
     if (!(status && total > 0 && (fromSummary === true || !overlay))) return
@@ -149,13 +141,19 @@ export default function Boosters({ goCollection }) {
                 Ils s’ajoutent à ton stock et ne comptent pas dans le plafond de {status.max_boosters}.
               </p>
             </div>
-            <button className="btn" onClick={buy} disabled={buying}>
-              {buying ? 'Redirection…' : `Acheter ${fmt(status.pack_boosters)} boosters`}
+            <button className="btn" onClick={() => setConsentOpen(true)}>
+              Acheter {fmt(status.pack_boosters)} boosters
             </button>
-            <p className="fine">Paiement sécurisé par Stripe. Les boosters achetés sont utilisés après ton stock gratuit.</p>
+            <p className="fine">
+              Paiement sécurisé par Stripe. Les boosters achetés sont utilisés après ton stock gratuit.{' '}
+              <button type="button" className="link" onClick={() => setTermsOpen(true)}>Conditions générales de vente</button>
+            </p>
           </div>
         )}
       </div>
+
+      {consentOpen && <PurchaseConsent status={status} onClose={() => setConsentOpen(false)} />}
+      {termsOpen && <LegalSheet onClose={() => setTermsOpen(false)} />}
 
       {overlay && (
         <Overlay

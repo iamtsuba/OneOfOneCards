@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { supabase } from '../supabase'
 import { explain } from '../api'
 import Brand from './Brand'
+import LegalSheet from './Legal'
 
 export default function Auth() {
   const [mode, setMode] = useState('login')
@@ -11,6 +12,7 @@ export default function Auth() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
+  const [terms, setTerms] = useState(false)
 
   async function submit(e) {
     e.preventDefault()
@@ -80,6 +82,8 @@ export default function Auth() {
           </button>
         </form>
         {signup && <p className="fine">Tu reçois 10 boosters à l’arrivée, puis 10 de plus toutes les 10 minutes.</p>}
+        <p className="fine"><button type="button" className="link" onClick={() => setTerms(true)}>Conditions de vente et mentions légales</button></p>
+        {terms && <LegalSheet onClose={() => setTerms(false)} />}
       </div>
     </main>
   )

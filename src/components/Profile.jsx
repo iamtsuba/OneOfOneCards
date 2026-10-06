@@ -4,6 +4,7 @@ import * as api from '../api'
 import { explain } from '../api'
 import { useGame, fmt } from '../game'
 import Card from './Card'
+import LegalSheet from './Legal'
 
 export default function Profile({ session }) {
   const { status, refreshStatus, rarityMap } = useGame()
@@ -12,6 +13,7 @@ export default function Profile({ session }) {
   const [name, setName] = useState('')
   const [msg, setMsg] = useState('')
   const [error, setError] = useState('')
+  const [terms, setTerms] = useState(false)
 
   useEffect(() => {
     api.getStats().then(setStats).catch((e) => setError(explain(e)))
@@ -81,7 +83,9 @@ export default function Profile({ session }) {
         </div>
       )}
 
+      <button className="btn ghost wide" onClick={() => setTerms(true)}>Conditions de vente et mentions légales</button>
       <button className="btn ghost wide" onClick={() => supabase.auth.signOut()}>Se déconnecter</button>
+      {terms && <LegalSheet onClose={() => setTerms(false)} />}
     </section>
   )
 }
