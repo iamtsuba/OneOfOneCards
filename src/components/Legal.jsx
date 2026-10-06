@@ -40,12 +40,15 @@ export function LegalDocument({ legal = {}, config = {} }) {
         du joueur, ne comptent pas dans le plafond de la recharge gratuite et sont utilisés après le stock gratuit.
       </p>
 
-      <h3>4. Nature aléatoire du contenu</h3>
+      <h3>4. Catégories et nature aléatoire du contenu</h3>
       <p>
-        Le contenu d’un booster est tiré au hasard. Chaque carte n’existe qu’en un seul exemplaire : une carte déjà tirée par
-        un joueur ne peut plus être tirée par un autre. Aucune carte ni aucune rareté n’est garantie. La rareté d’une carte
-        (Unique, Alpha, Omega, Ultra Rare, Super Rare, Rare, Commune) dépend de son numéro et de la taille de sa série.
-        Un booster peut exceptionnellement être « doré », avec un contenu défini à l’avance.
+        Les cartes sont réparties en catégories de boosters (par exemple « Années 80 ») et en types de cartes, chaque type ayant
+        sa propre numérotation. Une seule catégorie est ouvrable à la fois : la suivante s’ouvre quand toutes les cartes de la
+        précédente ont été tirées. Le contenu d’un booster est tiré au hasard parmi les cartes encore disponibles de la catégorie
+        en cours. Chaque carte n’existe qu’en un seul exemplaire : une carte déjà tirée par un joueur ne peut plus être tirée par
+        un autre. Aucune carte, aucun type et aucune rareté n’est garanti. La rareté d’une carte (Unique, Alpha, Omega, Ultra Rare,
+        Super Rare, Rare, Commune) dépend de son numéro et de la taille de sa série. Un booster peut exceptionnellement être
+        « doré », avec un contenu défini à l’avance.
       </p>
 
       <h3>5. Commande et paiement</h3>

@@ -9,11 +9,24 @@ function crimp(y0, y1, w, teeth) {
   return d
 }
 
-export default function Pack({ phase = 'idle', dim = false, golden = false }) {
+// Variables de couleur du booster, tirées de la catégorie (le booster doré garde sa propre palette)
+function packColors(category) {
+  if (!category) return undefined
+  return {
+    '--pk-a': category.color,
+    '--pk-b': category.color2,
+    '--pk-band': `color-mix(in srgb, ${category.color2} 62%, #000)`,
+    '--pk-crimp': category.color2,
+    '--pk-text': category.text_color,
+    '--pk-bandtext': '#ffffff',
+  }
+}
+
+export default function Pack({ phase = 'idle', dim = false, golden = false, category = null }) {
   const top = crimp(4, 20, 220, 30) + 'L230 34 L10 34 Z'
   const bottom = crimp(356, 340, 220, 30) + 'L230 326 L10 326 Z'
   return (
-    <div className={`pack-wrap ${phase} ${dim ? 'dim' : ''} ${golden ? 'golden' : ''}`} aria-hidden="true">
+    <div className={`pack-wrap ${phase} ${dim ? 'dim' : ''} ${golden ? 'golden' : ''}`} style={golden ? undefined : packColors(category)} aria-hidden="true">
       <svg viewBox="0 0 240 360" role="img">
         <defs>
           <linearGradient id="pk-body" x1="0" y1="0" x2="1" y2="1">
@@ -34,7 +47,7 @@ export default function Pack({ phase = 'idle', dim = false, golden = false }) {
             <rect x="10" y="30" width="70" height="300" fill="url(#pk-shine)" />
           </g>
           <text x="120" y="130" textAnchor="middle" fontSize="76" fontWeight="800" style={{ fill: 'var(--pk-text)', fontFamily: 'var(--font-display)', letterSpacing: '-0.04em' }}>1/1</text>
-          <text x="120" y="212" textAnchor="middle" fontSize="15" fontWeight="600" transform="rotate(-13 120 207)" style={{ fill: 'var(--pk-bandtext)', fontFamily: 'var(--font-body)' }}>{golden ? 'Booster doré' : '5 cartes numérotées'}</text>
+          <text x="120" y="212" textAnchor="middle" fontSize="15" fontWeight="600" transform="rotate(-13 120 207)" style={{ fill: 'var(--pk-bandtext)', fontFamily: 'var(--font-body)' }}>{golden ? 'Booster doré' : category?.name ?? '5 cartes numérotées'}</text>
           <text x="120" y="302" textAnchor="middle" fontSize="23" fontWeight="700" style={{ fill: 'var(--pk-text)', fontFamily: 'var(--font-display)' }}>OneOfOne Pack</text>
           <path d={bottom} style={{ fill: 'var(--pk-crimp)' }} />
         </g>

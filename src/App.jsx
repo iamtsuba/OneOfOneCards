@@ -29,6 +29,7 @@ function Game({ session }) {
   const [tab, setTab] = useState('boosters')
   const [marketView, setMarketView] = useState('browse')
   const [rarities, setRarities] = useState(null)
+  const [catalogRaw, setCatalogRaw] = useState(null)
   const [status, setStatusRaw] = useState(null)
   const [error, setError] = useState('')
 
@@ -37,20 +38,40 @@ function Game({ session }) {
   }, [])
   const refreshStatus = useCallback(async () => setStatus(await api.getStatus()), [setStatus])
 
+  const refreshCatalog = useCallback(async () => setCatalogRaw(await api.getCatalog()), [])
+
   const load = useCallback(async () => {
     setError('')
     try {
-      const [r] = await Promise.all([api.getRarities(), refreshStatus()])
+      const [r] = await Promise.all([api.getRarities(), refreshStatus(), refreshCatalog()])
       setRarities(r)
     } catch (e) {
       setError(explain(e))
     }
-  }, [refreshStatus])
+  }, [refreshStatus, refreshCatalog])
 
   useEffect(() => { load() }, [load])
 
+  // Une catégorie vient de se terminer (ou a été modifiée) : on relit le catalogue
+  const activeCategory = status?.active_category_id
+  useEffect(() => {
+    if (catalogRaw) refreshCatalog().catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCategory])
+
   const rarityMap = useMemo(() => Object.fromEntries((rarities || []).map((r) => [r.id, r])), [rarities])
-  const ctx = useMemo(() => ({ rarities, rarityMap, status, setStatus, refreshStatus }), [rarities, rarityMap, status, setStatus, refreshStatus])
+  const catalog = useMemo(() => {
+    if (!catalogRaw) return null
+    return {
+      ...catalogRaw,
+      typeMap: Object.fromEntries(catalogRaw.types.map((t) => [t.id, t])),
+      categoryMap: Object.fromEntries(catalogRaw.categories.map((c) => [c.id, c])),
+    }
+  }, [catalogRaw])
+  const ctx = useMemo(
+    () => ({ rarities, rarityMap, catalog, refreshCatalog, status, setStatus, refreshStatus }),
+    [rarities, rarityMap, catalog, refreshCatalog, status, setStatus, refreshStatus],
+  )
 
   if (error) {
     return (
@@ -64,7 +85,7 @@ function Game({ session }) {
       </main>
     )
   }
-  if (!rarities || !status) return <div className="splash"><Brand size="lg" /></div>
+  if (!rarities || !status || !catalog) return <div className="splash"><Brand size="lg" /></div>
 
   return (
     <GameContext.Provider value={ctx}>

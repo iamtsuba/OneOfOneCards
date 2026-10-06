@@ -8,7 +8,7 @@ const KINDS = [[null, 'Toutes'], ['auction', 'Enchères'], ['buy_now', 'Achat di
 const SORTS = [['ending', 'Fin proche'], ['price', 'Prix croissant'], ['rarity', 'Plus rares'], ['recent', 'Récentes']]
 
 export default function Market({ initialView = 'browse' }) {
-  const { status, setStatus, refreshStatus, rarityMap } = useGame()
+  const { status, setStatus, refreshStatus, rarityMap, catalog } = useGame()
   const [view, setView] = useState(initialView)
   const [kind, setKind] = useState(null)
   const [sort, setSort] = useState('ending')
@@ -101,7 +101,8 @@ export default function Market({ initialView = 'browse' }) {
                 return (
                   <li key={r.listing_id}>
                     <button className="tile" onClick={() => setSelectedId(r.listing_id)}>
-                      <Card series={r.card_series} number={r.card_number} rarity={rarityMap[r.rarity_id]} size="sm" />
+                      <Card typeId={r.card_type} series={r.card_series} number={r.card_number} rarity={rarityMap[r.rarity_id]} size="sm" />
+                      <span className="tile-name">{catalog.typeMap[r.card_type]?.name}</span>
                       <span className="tile-kind">{r.kind === 'auction' ? 'Enchère' : 'Achat direct'}</span>
                       <span className="tile-price">{fmtCoins(r.price)}</span>
                       {r.kind === 'auction' && ms !== null && (
@@ -132,9 +133,9 @@ export default function Market({ initialView = 'browse' }) {
                 return (
                   <li key={r.listing_id}>
                     <button className="mine-row" onClick={() => active && setSelectedId(r.listing_id)} disabled={!active}>
-                      <div className="mine-card"><Card series={r.card_series} number={r.card_number} rarity={rarityMap[r.rarity_id]} size="sm" /></div>
+                      <div className="mine-card"><Card typeId={r.card_type} series={r.card_series} number={r.card_number} rarity={rarityMap[r.rarity_id]} size="sm" /></div>
                       <div className="mine-text">
-                        <strong>{rarityMap[r.rarity_id]?.name} {r.card_number}/{r.card_series}</strong>
+                        <strong>{catalog.typeMap[r.card_type]?.name} {r.card_number}/{r.card_series}</strong>
                         <span>{describe(r, left(r))}</span>
                       </div>
                     </button>
@@ -225,7 +226,7 @@ function ListingModal({ row, ms, rarity, coins, onClose, onStatus, reload }) {
     <div className="overlay" role="dialog" aria-modal="true" aria-label="Détail de l’annonce" onClick={onClose}>
       <div className="detail" onClick={(e) => e.stopPropagation()}>
         <div className="detail-card">
-          <Card series={row.card_series} number={row.card_number} rarity={rarity} size="lg" glow shine />
+          <Card typeId={row.card_type} series={row.card_series} number={row.card_number} rarity={rarity} size="lg" glow shine />
         </div>
         <p className="reveal-line"><strong>{rarity?.name}</strong> : carte {row.card_number} de la série de {row.card_series}.</p>
 

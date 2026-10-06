@@ -12,7 +12,7 @@ import LegalSheet from './Legal'
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 
 export default function Boosters({ goCollection }) {
-  const { status, setStatus, refreshStatus, rarityMap } = useGame()
+  const { status, setStatus, refreshStatus, rarityMap, catalog } = useGame()
   const [overlay, setOverlay] = useState(null)
   const [error, setError] = useState('')
   const remaining = useCountdown(status, () => refreshStatus().catch(() => {}))
@@ -25,7 +25,9 @@ export default function Boosters({ goCollection }) {
   const boosters = status?.boosters ?? 0
   const bonus = status?.bonus_boosters ?? 0
   const total = boosters + bonus
-  const canOpen = status && total > 0 && !overlay
+  const category = catalog.categoryMap[status?.active_category_id]
+  const nextCategory = status?.next_category
+  const canOpen = status && total > 0 && !overlay && !!category
   const [consentOpen, setConsentOpen] = useState(false)
   const [termsOpen, setTermsOpen] = useState(false)
   const [notice, setNotice] = useState('')
@@ -54,9 +56,9 @@ export default function Boosters({ goCollection }) {
   }, [])
 
   async function open(fromSummary = false) {
-    if (!(status && total > 0 && (fromSummary === true || !overlay))) return
+    if (!(status && category && total > 0 && (fromSummary === true || !overlay))) return
     setError('')
-    setOverlay({ phase: 'shake' })
+    setOverlay({ phase: 'shake', categoryId: category.id })
     const t0 = Date.now()
     try {
       const res = await api.openBooster()
@@ -68,14 +70,14 @@ export default function Boosters({ goCollection }) {
       const golden = !!res.golden
       if (golden) {
         // Le booster se transforme en or avant de s'ouvrir
-        setOverlay({ phase: 'shake', golden: true })
+        setOverlay((o) => ({ ...o, phase: 'shake', golden: true }))
         await wait(1700)
       } else {
         await wait(Math.max(0, 700 - (Date.now() - t0)))
       }
-      setOverlay({ phase: 'tear', golden })
+      setOverlay((o) => ({ ...o, phase: 'tear', golden }))
       await wait(700)
-      setOverlay({ phase: 'reveal', cards, idx: 0, golden })
+      setOverlay({ phase: 'reveal', cards, idx: 0, golden, categoryId: res.category_id, nextCategoryId: res.status.active_category_id })
     } catch (e) {
       setOverlay(null)
       setError(explain(e))
@@ -89,9 +91,10 @@ export default function Boosters({ goCollection }) {
 
       <div className="pack-stage">
         <button className="pack-button" onClick={() => open()} disabled={!canOpen} aria-label="Ouvrir un booster">
-          <Pack dim={total === 0} />
+          <Pack dim={total === 0 || !category} category={category} />
         </button>
 
+        {category && <p className="pack-name">Booster « {category.name} »</p>}
         <p className="stock">
           {status ? (
             total > 0 ? (
@@ -128,8 +131,17 @@ export default function Boosters({ goCollection }) {
         {status && (
           <p className="fine">
             +{status.regen_amount} boosters toutes les {status.regen_minutes} minutes, jusqu’à {status.max_boosters} en stock.
-            Chaque carte n’existe qu’en un exemplaire : {fmt(status.cards_taken)} déjà tirées sur {fmt(status.total_cards)}.
+            Chaque carte n’existe qu’en un exemplaire.
           </p>
+        )}
+        {status && category && (
+          <p className="fine">
+            {category.name} : {fmt(status.cards_taken)} cartes tirées sur {fmt(status.total_cards)}.
+            {nextCategory ? ` Quand elles seront toutes tirées, la catégorie « ${nextCategory.name} » s’ouvrira.` : ' C’est la dernière catégorie.'}
+          </p>
+        )}
+        {status && !category && (
+          <p className="msg info">Toutes les catégories de boosters ont été entièrement tirées. De nouvelles arriveront bientôt.</p>
         )}
 
         {status?.shop_enabled && (
@@ -160,6 +172,7 @@ export default function Boosters({ goCollection }) {
           overlay={overlay}
           setOverlay={setOverlay}
           rarityMap={rarityMap}
+          catalog={catalog}
           boosters={total}
           onAgain={() => open(true)}
           onCollection={() => { setOverlay(null); goCollection() }}
@@ -169,7 +182,7 @@ export default function Boosters({ goCollection }) {
   )
 }
 
-export function Overlay({ overlay, setOverlay, rarityMap, boosters, onAgain, onCollection }) {
+export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onAgain, onCollection }) {
   const shownAt = useRef(Date.now())
   const close = () => setOverlay(null)
 
@@ -182,7 +195,7 @@ export function Overlay({ overlay, setOverlay, rarityMap, boosters, onAgain, onC
   if (overlay.phase === 'shake' || overlay.phase === 'tear') {
     return (
       <div className="overlay" role="dialog" aria-modal="true" aria-label="Ouverture du booster">
-        <Pack phase={overlay.phase} golden={overlay.golden} />
+        <Pack phase={overlay.phase} golden={overlay.golden} category={catalog?.categoryMap?.[overlay.categoryId]} />
         <p className="overlay-hint">{overlay.golden ? 'Un booster doré !' : 'Ouverture…'}</p>
       </div>
     )
@@ -199,16 +212,22 @@ export function Overlay({ overlay, setOverlay, rarityMap, boosters, onAgain, onC
     return (
       <div className="overlay" role="dialog" aria-modal="true" aria-label="Résumé du booster">
         {specials.map((r, i) => <Fireworks key={r.id} rarity={r} delay={i * 1800} />)}
+        {overlay.nextCategoryId !== overlay.categoryId && catalog?.categoryMap?.[overlay.categoryId] && (
+          <p className="category-done">
+            Catégorie « {catalog.categoryMap[overlay.categoryId].name} » terminée !
+            {catalog.categoryMap[overlay.nextCategoryId] ? ` « ${catalog.categoryMap[overlay.nextCategoryId].name} » est maintenant ouverte.` : ' Toutes les catégories sont terminées.'}
+          </p>
+        )}
         <h2 className={`overlay-title ${golden ? 'gold' : ''}`}>{golden ? 'Booster doré' : 'Ton booster'}</h2>
         <ul className="summary-grid">
           {cards.map((c) => (
             <li key={`${c.series}-${c.number}`}>
-              <Card series={c.series} number={c.number} rarity={rarityMap[c.rarity_id]} size="sm" glow shine={revealAll} />
+              <Card typeId={c.type_id} series={c.series} number={c.number} rarity={rarityMap[c.rarity_id]} size="sm" glow shine={revealAll} />
             </li>
           ))}
         </ul>
         <p className="overlay-hint">
-          {cards.length} carte{cards.length > 1 ? 's' : ''} ajoutée{cards.length > 1 ? 's' : ''} à ta collection. Meilleure carte : {rarityMap[rarest.rarity_id]?.name}, {rarest.number}/{rarest.series}.
+          {cards.length} carte{cards.length > 1 ? 's' : ''} ajoutée{cards.length > 1 ? 's' : ''} à ta collection. Meilleure carte : {rarityMap[rarest.rarity_id]?.name}, {catalog?.typeMap?.[rarest.type_id]?.name} {rarest.number}/{rarest.series}.
         </p>
         <div className="overlay-actions">
           {boosters > 0 && <button className="btn accent" onClick={onAgain}>Ouvrir un autre booster</button>}
@@ -246,13 +265,13 @@ export function Overlay({ overlay, setOverlay, rarityMap, boosters, onAgain, onC
         aria-label={last ? 'Voir le résumé' : 'Carte suivante'}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); advance() } }}
       >
-        <Card series={c.series} number={c.number} rarity={rarity} size="lg" glow shine />
+        <Card typeId={c.type_id} series={c.series} number={c.number} rarity={rarity} size="lg" glow shine />
       </div>
 
       {isSpecial(rarity) && <Fireworks key={idx} rarity={rarity} />}
 
       <p className="reveal-line" aria-live="polite">
-        <strong>{rarity?.name}</strong> : la {c.number}/{c.series} n’existe qu’en un exemplaire, et c’est le tien.
+        <strong>{rarity?.name}</strong> : « {catalog?.typeMap?.[c.type_id]?.name} » {c.number}/{c.series} n’existe qu’en un exemplaire, et c’est le tien.
       </p>
       <p className="overlay-hint">{last ? 'Touche la carte pour voir le résumé.' : 'Touche la carte pour passer à la suivante.'}</p>
     </div>

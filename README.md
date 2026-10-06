@@ -1,7 +1,9 @@
 # OneOfOne Pack
 
-Ouverture de boosters de cartes numérotées de 1/1 à 1413/1413 (998 991 cartes).
-Chaque carte n'existe qu'en **un seul exemplaire** : une fois tirée, elle appartient à un seul joueur.
+Ouverture de boosters de cartes numérotées. Les boosters sont regroupés en **catégories** (« Années 80 », « Années 90 »…),
+chaque catégorie contient des **types** de cartes (Magnétoscope VHS, Fax…), et chaque type a sa propre numérotation de 1/1 à N/N
+(500/500 par défaut, soit 125 250 cartes par type). Chaque carte n'existe qu'en **un seul exemplaire** : une fois tirée, elle
+appartient à un seul joueur.
 
 - Front : React + Vite, hébergé sur GitHub Pages
 - Base de données : Supabase (toutes les tables commencent par `opennumber_`)
@@ -16,6 +18,9 @@ Chaque carte n'existe qu'en **un seul exemplaire** : une fois tirée, elle appar
 
 ## Règles
 
+- Une seule catégorie est ouvrable à la fois. Quand toutes ses cartes sont tirées, elle est terminée et la suivante s'ouvre
+  automatiquement (ou à la main depuis la console admin). La progression est définitive : la revente à la banque est refusée
+  dans une catégorie terminée (la vente sur le marché reste possible).
 - 5 cartes par booster, 10 boosters offerts puis +10 toutes les 10 minutes (plafond 10).
 - Raretés (priorité dans cet ordre) : **Unique** (1/1), **Alpha** (toutes les 1/m), **Omega** (toutes les m/m),
   puis selon la taille de série : Ultra Rare (≤ 10), Super Rare (≤ 100), Rare (≤ 250), Commune (au-delà).
@@ -110,3 +115,27 @@ Garde-fou : avec une clé Stripe de production (`sk_live_...`), la fonction refu
 
 Si le texte des conditions (`src/components/Legal.jsx`) change, incrémenter `cgv_version` dans `opennumber_config` :
 les joueurs devront alors ré-accepter avant de payer.
+
+
+## Catégories, types et console admin
+
+Tout se règle depuis la **console admin** (Profil > Console admin) : catégories (nom, couleurs, position, nombre de séries,
+activée, terminer à la main), types de cartes (nom, position, image), réglages du jeu et de la boutique, raretés, informations légales
+et mot de passe. Les images d'un type peuvent être un emoji, une adresse `https://` ou une image téléversée (réduite à 256 px et
+enregistrée dans la base).
+
+Mot de passe admin : il n'est jamais écrit dans le code ni dans ce dépôt (public). Il est haché (bcrypt) dans la table
+`opennumber_secrets`. À définir une seule fois depuis le SQL Editor de Supabase :
+
+```sql
+select opennumber_admin_set_password('ton mot de passe');   -- 8 caractères minimum
+```
+
+- Le premier compte qui saisit le bon mot de passe devient le seul compte admin (réinitialisation :
+  `delete from opennumber_secrets where key = 'admin_user_id';`).
+- Après 5 erreurs, l'accès est verrouillé 15 minutes (30 erreurs au total en 15 minutes : verrouillage général).
+- Le nombre de séries d'une catégorie ne peut plus changer une fois des cartes tirées ; un type ou une catégorie ne se supprime
+  que si aucune carte n'a été tirée.
+
+Au premier lancement de cette version du schéma, les cartes, le marché et les pièces de l'ancienne structure sont remis à zéro
+(comptes, boosters et achats conservés).
