@@ -34,7 +34,7 @@ insert into public.opennumber_config (key, value, description) values
   ('golden_booster_chance',  0.00000001, 'Chance qu''un booster soit doré (0.00000001 = 0,000001 %). Contenu dans opennumber_golden_contents'),
   ('shop_enabled',           0,    'Boutique Stripe : 1 = visible dans l''application, 0 = masquée (à passer à 1 une fois Stripe configuré)'),
   ('stripe_pack_boosters',   10,   'Boosters bonus ajoutés par achat'),
-  ('stripe_pack_price_cents', 199, 'Prix d''un pack en centimes d''euro (199 = 1,99 EUR)')
+  ('stripe_pack_price_cents', 99,  'Prix d''un pack en centimes d''euro (99 = 0,99 EUR)')
 on conflict (key) do nothing;
 
 -- ---------- Raretés (noms, couleurs, seuils modifiables) ----------
