@@ -61,6 +61,10 @@ Fonctionnement : l'application appelle la fonction `opennumber-checkout`, qui cr
 Une fois le paiement confirmé, Stripe appelle `opennumber-stripe-webhook`, qui vérifie la signature puis crédite les boosters
 (`opennumber_credit_purchase`, idempotente : un même paiement ne crédite qu'une fois). Le navigateur ne crédite jamais rien.
 
+Managed Payments : si cette offre Stripe est activée sur le compte (Stripe devient le vendeur officiel et gère la TVA),
+chaque produit doit avoir un code fiscal. La fonction envoie `txcd_10201000` (jeu vidéo numérique) ; modifiable avec le secret
+`STRIPE_TAX_CODE`. Pour ne pas utiliser Managed Payments, ajouter le secret `STRIPE_MANAGED_PAYMENTS` = `false`.
+
 Réglages dans `opennumber_config` : `shop_enabled` (0 = bouton masqué), `stripe_pack_boosters`, `stripe_pack_price_cents`.
 
 ### Mise en place

@@ -4,6 +4,9 @@
 // Secrets requis (Supabase > Edge Functions > Secrets) :
 //   STRIPE_SECRET_KEY : clé secrète Stripe (sk_test_... puis sk_live_...)
 //   SITE_URL          : adresse de l'application, ex. https://iamtsuba.github.io/OneOfOnePack/
+// Secrets facultatifs :
+//   STRIPE_TAX_CODE         : code fiscal du produit (défaut txcd_10201000, jeu vidéo numérique : exigé par Managed Payments)
+//   STRIPE_MANAGED_PAYMENTS : mettre "false" pour ne pas utiliser Managed Payments (Stripe comme vendeur officiel)
 // SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY sont fournis automatiquement par Supabase.
 import { createClient } from 'npm:@supabase/supabase-js@2'
 
@@ -76,10 +79,12 @@ Deno.serve(async (req) => {
       'line_items[0][price_data][currency]': 'eur',
       'line_items[0][price_data][unit_amount]': String(cents),
       'line_items[0][price_data][product_data][name]': `${boosters} boosters OneOfOne Pack`,
+      'line_items[0][price_data][product_data][tax_code]': Deno.env.get('STRIPE_TAX_CODE') || 'txcd_10201000',
       'metadata[user_id]': user.id,
       'metadata[boosters]': String(boosters),
     })
     if (user.email) form.set('customer_email', user.email)
+    if (Deno.env.get('STRIPE_MANAGED_PAYMENTS') === 'false') form.set('managed_payments[enabled]', 'false')
 
     const base = Deno.env.get('STRIPE_API_BASE') ?? 'https://api.stripe.com'
     const res = await fetch(`${base}/v1/checkout/sessions`, {
