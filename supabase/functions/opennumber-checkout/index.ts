@@ -17,13 +17,27 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } })
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
+  if (req.method === 'OPTIONS') {
+    // On autorise exactement les en-têtes demandés par le navigateur (supabase-js peut en ajouter selon sa version)
+    const requested = req.headers.get('Access-Control-Request-Headers')
+    return new Response('ok', { headers: { ...CORS, ...(requested ? { 'Access-Control-Allow-Headers': requested } : {}) } })
+  }
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
 
   try {
     const stripeKey = Deno.env.get('STRIPE_SECRET_KEY')
     const siteUrl = Deno.env.get('SITE_URL')
-    if (!stripeKey || !siteUrl) return json({ error: 'not_configured' }, 503)
+    if (!stripeKey || !siteUrl) {
+      console.error('Secret manquant :', !stripeKey ? 'STRIPE_SECRET_KEY' : '', !siteUrl ? 'SITE_URL' : '')
+      return json({ error: 'not_configured' }, 503)
+    }
+    let back: URL
+    try {
+      back = new URL(siteUrl)
+    } catch {
+      console.error('SITE_URL invalide (elle doit commencer par https://) :', siteUrl)
+      return json({ error: 'not_configured' }, 503)
+    }
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
       auth: { persistSession: false },
@@ -47,7 +61,6 @@ Deno.serve(async (req) => {
     const cents = Math.round(cfg.stripe_pack_price_cents)
     if (!(boosters >= 1 && boosters <= 1000) || !(cents >= 50)) return json({ error: 'not_configured' }, 503)
 
-    const back = new URL(siteUrl)
     const success = new URL(back)
     success.searchParams.set('payment', 'success')
     const cancel = new URL(back)

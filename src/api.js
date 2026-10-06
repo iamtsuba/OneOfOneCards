@@ -29,11 +29,14 @@ export const marketMine = () => rpc('opennumber_market_mine')
 export async function startCheckout() {
   const { data, error } = await supabase.functions.invoke('opennumber-checkout', { body: {} })
   if (error) {
+    // Code renvoyé par la fonction (not_configured, shop_disabled...), sinon statut HTTP ou type d'erreur réseau
     let code = ''
-    try { code = (await error.context.json()).error } catch { /* réponse non lisible */ }
-    throw new Error(code || error.message)
+    const res = error.context
+    try { code = (await res.json()).error || '' } catch { /* réponse non lisible */ }
+    if (!code) code = res?.status ? `http_${res.status}` : error.name || 'network'
+    throw new Error(`checkout:${code}`)
   }
-  if (!data?.url) throw new Error('stripe_error')
+  if (!data?.url) throw new Error('checkout:no_url')
   return data.url
 }
 
@@ -48,8 +51,8 @@ export function explain(e) {
   const m = e?.message || String(e)
   const low = m.match(/bid_too_low:(\d+)/)
   if (low) return `Mise trop basse : minimum ${low[1]} pièce${Number(low[1]) > 1 ? 's' : ''}.`
-  if (/shop_disabled|not_configured|stripe_error|server_error|not_authenticated|Failed to send a request to the Edge Function|FunctionsFetchError|FunctionsRelayError/.test(m))
-    return 'Le paiement n’est pas disponible pour le moment. Réessaie plus tard.'
+  if (m.startsWith('checkout:'))
+    return `Le paiement n’est pas disponible pour le moment. Réessaie plus tard. (code : ${m.slice(9)})`
   if (m.includes('no_boosters')) return 'Tu n’as plus de booster pour le moment.'
   if (m.includes('pool_empty')) return 'Toutes les cartes ont déjà été tirées.'
   if (m.includes('invalid_username')) return 'Le pseudo doit contenir entre 2 et 24 caractères.'
