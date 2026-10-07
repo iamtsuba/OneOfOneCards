@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config'
+import { AUTH_STORAGE_KEY } from './env'
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: { persistSession: true, autoRefreshToken: true, storageKey: 'oneofone-pack-auth' },
+  auth: { persistSession: true, autoRefreshToken: true, storageKey: AUTH_STORAGE_KEY },
 })

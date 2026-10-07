@@ -8,7 +8,7 @@ const euro = (cents) => new Intl.NumberFormat('fr-FR', { style: 'currency', curr
 const V = ({ value, children }) => (value ? (children ?? value) : <span className="todo">[à compléter]</span>)
 
 // Texte des conditions générales de vente et mentions légales.
-// Modèle à faire relire : les informations du vendeur viennent de la table opennumber_legal.
+// Modèle à faire relire : les informations du vendeur viennent de la table legal (préfixée par l’environnement).
 export function LegalDocument({ legal = {}, config = {} }) {
   const price = config.stripe_pack_price_cents ? euro(config.stripe_pack_price_cents) : '[prix]'
   const boosters = config.stripe_pack_boosters ?? '[nombre]'
@@ -20,7 +20,7 @@ export function LegalDocument({ legal = {}, config = {} }) {
 
       <h3>1. Éditeur et vendeur</h3>
       <p>
-        OneOfOne Pack (« l’Application ») est éditée par <V value={legal.seller_name} />
+        1/1 Cards (« l’Application ») est éditée par <V value={legal.seller_name} />
         {legal.seller_status ? `, ${legal.seller_status}` : ''}, <V value={legal.seller_address} />.
         Contact : <V value={mail} />{legal.seller_phone ? `, ${legal.seller_phone}` : ''}.
         {' '}SIRET : <V value={legal.seller_siret} />. TVA : <V value={legal.seller_vat} />.

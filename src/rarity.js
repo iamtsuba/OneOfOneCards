@@ -1,4 +1,4 @@
-// Même logique que la fonction SQL opennumber_rarity_id.
+// Même logique que la fonction SQL o1ocards_rarity_id.
 // Priorité : Unique (1/1) > Alpha (1/m) > Omega (m/m) > rareté par taille de série
 export function rarityId(n, m, rarities) {
   const byKind = (k) => rarities.find((r) => r.kind === k)

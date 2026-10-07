@@ -384,3 +384,6 @@ textarea { width: 100%; padding: 10px 14px; border: 1.5px solid var(--line); bor
 .reward-art { display: grid; place-items: center; width: 48px; height: 48px; flex: none; border-radius: 12px; background: var(--bg); font-size: 30px; line-height: 1; overflow: hidden; }
 .reward-art img.type-art { width: 100%; height: 100%; object-fit: contain; }
 .legal-panel.reward h2 { background: linear-gradient(90deg, #c8932a, #f0c64f, #c8932a); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* ---------- Bandeau de préproduction ---------- */
+.env-banner { position: sticky; top: 0; z-index: 90; padding: 6px 12px; padding-top: calc(6px + env(safe-area-inset-top)); background: repeating-linear-gradient(135deg, #ffd23f 0 14px, #f5c000 14px 28px); color: #3b2a00; font-size: 13px; text-align: center; }

@@ -11,6 +11,7 @@ import Collection from './components/Collection'
 import Market from './components/Market'
 import Profile from './components/Profile'
 import RewardModal from './components/RewardModal'
+import EnvBanner from './components/EnvBanner'
 
 export default function App() {
   const [session, setSession] = useState(undefined)
@@ -21,9 +22,16 @@ export default function App() {
     return () => data.subscription.unsubscribe()
   }, [])
 
-  if (session === undefined) return <div className="splash"><Brand size="lg" /></div>
-  if (!session) return <Auth />
-  return <Game key={session.user.id} session={session} />
+  let screen
+  if (session === undefined) screen = <div className="splash"><Brand size="lg" /></div>
+  else if (!session) screen = <Auth />
+  else screen = <Game key={session.user.id} session={session} />
+  return (
+    <>
+      <EnvBanner />
+      {screen}
+    </>
+  )
 }
 
 function Game({ session }) {
