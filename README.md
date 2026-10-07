@@ -35,6 +35,7 @@ npm test                  # tests du front, des fonctions Edge et du SQL
 | `supabase/functions/` | fonctions Edge générées (`_templates/` : modèles) |
 | `scripts/` | génération du SQL et des fonctions, déploiement |
 | `tests/` | tests du front, des fonctions Edge et du SQL |
+| `skills/o1ocards-release/` | skill Claude de livraison préproduction → production (copie du fichier `.skill`) |
 | `.env.prod`, `.env.preprod` | réglages publics de chaque environnement |
 
 Branches : `main` = production, `preprod` = développement et préproduction, `gh-pages` = sites publiés (ne pas modifier à la main).

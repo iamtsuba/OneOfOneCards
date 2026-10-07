@@ -1,0 +1,20 @@
+{
+  "skill_name": "o1ocards-release",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "J'ai fini de tester la préprod de 1/1 Cards, tu peux livrer ça en prod ?",
+      "expected_output": "Demande le jeton GitHub, lance status puis plan, résume le plan en français, présente le SQL de production et les fonctions, attend la confirmation que la base est à jour et un accord explicite avant apply --yes."
+    },
+    {
+      "id": 2,
+      "prompt": "Qu'est-ce qui reste à passer de la preprod vers la prod ?",
+      "expected_output": "Lance seulement status (et éventuellement plan) sans rien modifier, résume les commits d'avance et l'état des deux sites en ligne."
+    },
+    {
+      "id": 3,
+      "prompt": "La mise en prod a cassé le jeu, remets l'ancienne version tout de suite.",
+      "expected_output": "Identifie la dernière étiquette release-* saine avec status, demande confirmation, lance rollback --yes, et précise que la base de données n'est pas annulée."
+    }
+  ]
+}
