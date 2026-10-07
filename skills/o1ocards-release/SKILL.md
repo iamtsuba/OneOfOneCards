@@ -1,6 +1,6 @@
 ---
 name: o1ocards-release
-description: Livre en production les développements validés en préproduction de l'application 1/1 Cards (domaine 1o1cards.cc, dépôt GitHub OneOfOnePack, base Supabase partagée, tables o1ocards_ et pp_o1ocards_). Prépare le plan de livraison, le SQL de production et les fonctions Edge à déployer, fusionne la branche preprod dans main, crée l'étiquette de version, déploie le site sur GitHub Pages et sait revenir en arrière. À utiliser dès que l'utilisateur demande de livrer, mettre en prod, passer en production, pousser ou promouvoir la préprod, faire une release, une mise en production ou un déploiement de 1/1 Cards, ou demande ce qui reste à livrer de la préprod vers la prod, même s'il ne cite pas le mot « skill ».
+description: Livre en production les développements validés en préproduction de l'application 1/1 Cards (domaine 1o1cards.cc, dépôt GitHub OneOfOneCards, base Supabase partagée, tables o1ocards_ et pp_o1ocards_). Prépare le plan de livraison, le SQL de production et les fonctions Edge à déployer, fusionne la branche preprod dans main, crée l'étiquette de version, déploie le site sur GitHub Pages et sait revenir en arrière. À utiliser dès que l'utilisateur demande de livrer, mettre en prod, passer en production, pousser ou promouvoir la préprod, faire une release, une mise en production ou un déploiement de 1/1 Cards, ou demande ce qui reste à livrer de la préprod vers la prod, même s'il ne cite pas le mot « skill ».
 ---
 
 # Livrer la préproduction en production : 1/1 Cards
@@ -9,7 +9,7 @@ description: Livre en production les développements validés en préproduction 
 
 - Deux environnements dans **la même base Supabase** : production (tables et fonctions `o1ocards_*`, site `https://1o1cards.cc/`)
   et préproduction (`pp_o1ocards_*`, site `https://1o1cards.cc/preprod/`). Mêmes comptes joueurs, progression séparée.
-- Dépôt `iamtsuba/OneOfOnePack` : branche `main` = production, branche `preprod` = développement et préproduction,
+- Dépôt `iamtsuba/OneOfOneCards` : branche `main` = production, branche `preprod` = développement et préproduction,
   branche `gh-pages` = sites publiés (jamais modifiée à la main).
 - Livrer = (1) exécuter en production le SQL qui a été éprouvé en préproduction, (2) redéployer les fonctions Edge modifiées,
   (3) fusionner `preprod` dans `main`, (4) déployer le site de production. Les données de production ne sont jamais copiées
@@ -116,7 +116,7 @@ Si le problème vient d'un changement de structure, prépare la correction sur `
   livraison ne la perde pas.
 - **Nouvelles fonctions Edge** : elles demandent des secrets (`STRIPE_SECRET_KEY`, `SITE_URL`, `STRIPE_WEBHOOK_SECRET` en production) et un
   webhook Stripe par environnement ; vérifie avec `references/environments.md` qu'ils existent avant de livrer le paiement.
-- **Domaine pas encore configuré** : le site reste accessible sur `https://iamtsuba.github.io/OneOfOnePack/` (production) et
+- **Domaine pas encore configuré** : le site reste accessible sur `https://iamtsuba.github.io/OneOfOneCards/` (production) et
   `.../preprod/` (préproduction) ; les adresses `1o1cards.cc` n'apparaissent qu'après la configuration DNS et GitHub Pages.
 
 ## Commandes de référence

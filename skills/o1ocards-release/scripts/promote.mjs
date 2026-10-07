@@ -6,7 +6,7 @@
 //   node promote.mjs apply --yes [--merge]        fusionne preprod dans main, crée une étiquette, déploie la production
 //   node promote.mjs rollback <étiquette> --yes   redéploie le site de production d'une version précédente
 //
-// Options : --repo owner/nom (défaut iamtsuba/OneOfOnePack)  --remote URL (remplace --repo/GITHUB_TOKEN, pour tester)
+// Options : --repo owner/nom (défaut iamtsuba/OneOfOneCards)  --remote URL (remplace --repo/GITHUB_TOKEN, pour tester)
 //           --dir DOSSIER (copie de travail réutilisable)  --skip-install  --reuse-modules DOSSIER  --skip-tests
 // Accès : variable GITHUB_TOKEN (jeton « Contents : read and write » sur le dépôt). Le jeton n'est jamais affiché.
 // Ce script ne touche JAMAIS à la base de données : le SQL est préparé pour que l'utilisateur l'exécute lui-même.
@@ -19,7 +19,7 @@ const [cmd = 'help', ...rest] = process.argv.slice(2)
 const flag = (n) => rest.includes(`--${n}`)
 const opt = (n, d) => { const i = rest.indexOf(`--${n}`); return i >= 0 ? rest[i + 1] : d }
 
-const repo = opt('repo', process.env.GITHUB_REPO || 'iamtsuba/OneOfOnePack')
+const repo = opt('repo', process.env.GITHUB_REPO || 'iamtsuba/OneOfOneCards')
 const token = process.env.GITHUB_TOKEN || ''
 let remote = opt('remote', process.env.DEPLOY_REMOTE || '')
 if (!remote) {

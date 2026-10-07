@@ -6,7 +6,7 @@
 //   node scripts/deploy.mjs <prod|preprod> [--yes] [--dry-run] [--no-build] [--remote URL] [--branch gh-pages] [--cname 1o1cards.cc]
 //
 // Accès : variable GITHUB_TOKEN (jeton avec droit « Contents : read and write » sur le dépôt) et, si besoin, GITHUB_REPO
-// (défaut iamtsuba/OneOfOnePack). --remote remplace les deux (utile pour tester avec un dépôt local).
+// (défaut iamtsuba/OneOfOneCards). --remote remplace les deux (utile pour tester avec un dépôt local).
 // La production exige --yes : c'est un garde-fou contre un déploiement accidentel.
 import fs from 'node:fs'
 import os from 'node:os'
@@ -23,7 +23,7 @@ if (!['prod', 'preprod'].includes(env)) { console.error('Usage : node scripts/de
 if (env === 'prod' && !flag('yes') && !flag('dry-run')) { console.error('Déploiement en PRODUCTION : relance avec --yes pour confirmer.'); process.exit(2) }
 
 const branch = opt('branch', 'gh-pages')
-const repo = process.env.GITHUB_REPO || 'iamtsuba/OneOfOnePack'
+const repo = process.env.GITHUB_REPO || 'iamtsuba/OneOfOneCards'
 const token = process.env.GITHUB_TOKEN || ''
 let remote = opt('remote', process.env.DEPLOY_REMOTE || '')
 if (!remote) {

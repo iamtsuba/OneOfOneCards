@@ -21,6 +21,12 @@ fonctions séparées : la progression en préproduction n'affecte jamais la prod
 Le site est publié sur GitHub Pages (branche `gh-pages`) : la production à la racine, la préproduction dans le dossier `preprod/`.
 Le fichier `CNAME` (domaine) est conservé à chaque déploiement.
 
+### Adresses provisoires (avant la configuration du domaine)
+
+Tant que `1o1cards.cc` n'est pas relié à GitHub Pages, les sites sont accessibles sur `https://iamtsuba.github.io/OneOfOneCards/`
+(production) et `https://iamtsuba.github.io/OneOfOneCards/preprod/` (préproduction). Ces adresses dépendent du nom du dépôt : si le
+dépôt est renommé, elles changent et il faut mettre à jour les secrets `SITE_URL` / `PP_SITE_URL` et l'adresse du site dans Supabase.
+
 ## Modèle SQL : un seul fichier source
 
 Tout le SQL part de `supabase/schema.template.sql`, où `{{P}}` désigne le préfixe. `npm run build:schema` génère
