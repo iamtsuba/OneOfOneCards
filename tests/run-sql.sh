@@ -70,6 +70,10 @@ step "aucune table hors préfixe dans le schéma public"
 extra="$(val o1o_test "select string_agg(relname, ', ') from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and c.relname not like 'o1ocards\\_%' and c.relname not like 'pp\\_o1ocards\\_%'")"
 [ -z "$extra" ] && ok || ko "tables inattendues : $extra"
 
+step "boutique : visible par défaut en préprod, masquée en prod"
+shop="$(val o1o_test "select (select value from pp_o1ocards_config where key='shop_enabled') || '/' || (select value from o1ocards_config where key='shop_enabled')")"
+[ "$shop" = "1/0" ] && ok || ko "attendu 1/0 (préprod/prod), obtenu $shop"
+
 snapshot() { # empreinte des données d'un environnement
   val o1o_test "select md5(coalesce((select string_agg(x::text, '|' order by x::text) from ${1}cards x), '') || coalesce((select string_agg(x::text, '|' order by x::text) from ${1}profiles x), '') || coalesce((select string_agg(x::text, '|' order by x::text) from ${1}listings x), ''))"
 }

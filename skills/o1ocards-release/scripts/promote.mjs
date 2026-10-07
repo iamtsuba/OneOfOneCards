@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 // Livraison de la préproduction vers la production pour 1/1 Cards.
 //
-//   node promote.mjs status                       versions en ligne (prod et préprod) et avance de preprod sur main
+//   node promote.mjs status                       avance de preprod sur main et état des déploiements Cloudflare
 //   node promote.mjs plan  [--out DIR]            ce qui va être livré, vérifications, fichiers SQL/fonctions à présenter
-//   node promote.mjs apply --yes [--merge]        fusionne preprod dans main, crée une étiquette, déploie la production
-//   node promote.mjs rollback <étiquette> --yes   redéploie le site de production d'une version précédente
+//   node promote.mjs apply --yes [--merge]        fusionne preprod dans main, crée une étiquette, pousse : Cloudflare publie la production
+//   node promote.mjs rollback <étiquette> --yes   remet main (donc le site) dans l'état d'une livraison précédente
+//
+// Le site est hébergé sur Cloudflare Pages, relié au dépôt : un push sur main publie https://1o1cards.cc/, un push sur preprod publie
+// https://pp.1o1cards.cc/. Ce script ne déploie donc rien lui-même : il fusionne, étiquette, pousse, puis suit le déploiement.
 //
 // Options : --repo owner/nom (défaut iamtsuba/OneOfOneCards)  --remote URL (remplace --repo/GITHUB_TOKEN, pour tester)
-//           --dir DOSSIER (copie de travail réutilisable)  --skip-install  --reuse-modules DOSSIER  --skip-tests
+//           --dir DOSSIER (copie de travail réutilisable)  --skip-install  --reuse-modules DOSSIER  --skip-tests  --wait SECONDES (suivi du déploiement, défaut 420)
 // Accès : variable GITHUB_TOKEN (jeton « Contents : read and write » sur le dépôt). Le jeton n'est jamais affiché.
 // Ce script ne touche JAMAIS à la base de données : le SQL est préparé pour que l'utilisateur l'exécute lui-même.
 import fs from 'node:fs'
@@ -20,8 +23,9 @@ const flag = (n) => rest.includes(`--${n}`)
 const opt = (n, d) => { const i = rest.indexOf(`--${n}`); return i >= 0 ? rest[i + 1] : d }
 
 const repo = opt('repo', process.env.GITHUB_REPO || 'iamtsuba/OneOfOneCards')
+const SITES = { prod: 'https://1o1cards.cc/', preprod: 'https://pp.1o1cards.cc/' }
 const token = process.env.GITHUB_TOKEN || ''
-let remote = opt('remote', process.env.DEPLOY_REMOTE || '')
+let remote = opt('remote', process.env.PROMOTE_REMOTE || '')
 if (!remote) {
   if (!token && cmd !== 'help') { console.error('GITHUB_TOKEN manquant : demande un jeton à l\'utilisateur (Contents : read and write sur le dépôt), ou passe --remote.'); process.exit(2) }
   remote = `https://x-access-token:${token}@github.com/${repo}.git`
@@ -29,7 +33,7 @@ if (!remote) {
 const mask = (s) => { s = String(s); if (token) s = s.replaceAll(token, '***'); return s.replace(/x-access-token:[^@]+@/g, 'x-access-token:***@') }
 
 function run(command, args, { cwd, inherit = false, allowFail = false } = {}) {
-  const r = spawnSync(command, args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0', DEPLOY_REMOTE: remote }, stdio: inherit ? 'inherit' : ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 })
+  const r = spawnSync(command, args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, stdio: inherit ? 'inherit' : ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 })
   if (r.status !== 0 && !allowFail) throw new Error(mask(`${command} ${args.slice(0, 3).join(' ')} a échoué : ${(r.stderr || r.stdout || '').toString().trim().slice(-600)}`))
   return { ok: r.status === 0, out: (r.stdout || '').toString().trim(), err: (r.stderr || '').toString().trim() }
 }
@@ -65,23 +69,59 @@ function install(dir) {
 }
 const short = (dir, ref) => git(dir, 'rev-parse', '--short', ref)
 
-function deployed(dir, envName) {
-  gitTry(dir, 'fetch', '--quiet', 'origin', '+refs/heads/gh-pages:refs/remotes/origin/gh-pages')
-  const file = envName === 'prod' ? 'version.json' : 'preprod/version.json'
-  const r = gitTry(dir, 'show', `origin/gh-pages:${file}`)
-  if (!r.ok) return null
-  try { return JSON.parse(r.out) } catch { return null }
+// Suivi du déploiement Cloudflare Pages : l'intégration GitHub de Cloudflare publie des « déploiements » et des états sur chaque commit.
+// Meilleur effort : si GitHub n'en expose aucun (ou en test avec --remote), on renvoie « indisponible » et on demande de contrôler version.json.
+const normalize = (state) => {
+  const x = String(state || '').toLowerCase()
+  if (['success', 'neutral', 'skipped'].includes(x)) return 'ok'
+  if (['failure', 'error', 'cancelled', 'timed_out', 'action_required', 'inactive'].includes(x)) return 'échec'
+  if (['pending', 'in_progress', 'queued', 'waiting', 'requested'].includes(x)) return 'en cours'
+  return 'inconnu'
 }
-const describeDeployed = (v, headSha) => (!v ? 'aucune version en ligne' : `commit ${String(v.commit).slice(0, 7)} (${v.branch || '?'}), compilé le ${v.builtAt}${headSha && v.commit !== headSha ? ' : DIFFÉRENT de la tête de branche' : ' : à jour'}`)
+async function ciInfo(sha) {
+  if (!token || remote.startsWith('file:')) return { available: false, items: [] }
+  const api = async (p) => {
+    try {
+      const r = await fetch(`https://api.github.com/repos/${repo}/${p}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'o1ocards-release' } })
+      return r.ok ? await r.json() : null
+    } catch { return null }
+  }
+  const items = []
+  const isCf = (...v) => v.some((x) => /cloudflare|pages\.dev|o1ocards/i.test(String(x || '')))
+  for (const c of (await api(`commits/${sha}/check-runs?per_page=50`))?.check_runs ?? [])
+    if (isCf(c.name, c.details_url, c.app?.slug, c.app?.name)) items.push({ name: c.name, state: normalize(c.status === 'completed' ? c.conclusion : c.status), url: c.details_url || c.html_url })
+  for (const st of (await api(`commits/${sha}/status`))?.statuses ?? [])
+    if (isCf(st.context, st.target_url)) items.push({ name: st.context, state: normalize(st.state), url: st.target_url })
+  for (const d of (await api(`deployments?sha=${sha}&per_page=10`)) ?? []) {
+    if (!isCf(d.creator?.login, d.environment, d.description)) continue
+    const last = ((await api(`deployments/${d.id}/statuses?per_page=1`)) ?? [])[0]
+    items.push({ name: `Déploiement ${d.environment}`, state: normalize(last?.state), url: last?.environment_url || last?.target_url || '' })
+  }
+  return { available: true, items }
+}
+const describeCi = (info) => (!info.available ? 'suivi indisponible depuis ici' : !info.items.length ? 'aucun déploiement Cloudflare trouvé pour ce commit' : info.items.map((i) => `${i.name} : ${i.state}${i.url ? ` (${i.url})` : ''}`).join(' ; '))
+async function waitDeploy(sha, seconds) {
+  const info0 = await ciInfo(sha)
+  if (!info0.available) return { state: 'indisponible', info: info0 }
+  const t0 = Date.now()
+  for (;;) {
+    const info = await ciInfo(sha)
+    if (info.items.length && info.items.every((i) => i.state === 'ok' || i.state === 'échec')) return { state: info.items.some((i) => i.state === 'échec') ? 'échec' : 'ok', info }
+    if (!info.items.length && Date.now() - t0 > 150000) return { state: 'aucun', info }
+    if (Date.now() - t0 > seconds * 1000) return { state: 'délai dépassé', info }
+    await new Promise((r) => setTimeout(r, 15000))
+  }
+}
 
 // ---------- status ----------
-function status() {
+async function status() {
   const dir = prepare()
   const main = git(dir, 'rev-parse', 'origin/main'), pre = git(dir, 'rev-parse', 'origin/preprod')
   const ahead = git(dir, 'rev-list', '--count', 'origin/main..origin/preprod'), behind = git(dir, 'rev-list', '--count', 'origin/preprod..origin/main')
-  console.log(`Branche main (production) : ${main.slice(0, 7)}\nBranche preprod           : ${pre.slice(0, 7)}  (${ahead} commit(s) d'avance, ${behind} de retard sur main)`)
-  console.log(`Site de production en ligne  : ${describeDeployed(deployed(dir, 'prod'), main)}`)
-  console.log(`Site de préproduction en ligne : ${describeDeployed(deployed(dir, 'preprod'), pre)}`)
+  console.log(`Branche main (production)  : ${main.slice(0, 7)}  -> ${SITES.prod}\nBranche preprod            : ${pre.slice(0, 7)}  -> ${SITES.preprod}  (${ahead} commit(s) d'avance, ${behind} de retard sur main)`)
+  console.log(`Déploiement de main (prod)    : ${describeCi(await ciInfo(main))}`)
+  console.log(`Déploiement de preprod (préprod) : ${describeCi(await ciInfo(pre))}`)
+  console.log(`Pour savoir quel code est en ligne : ouvrir ${SITES.prod}version.json et ${SITES.preprod}version.json (champ « commit »).`)
   const tags = git(dir, 'tag', '--list', 'release-*', '--sort=-creatordate').split('\n').filter(Boolean).slice(0, 5)
   console.log(`Dernières livraisons : ${tags.length ? tags.join(', ') : 'aucune'}`)
   return dir
@@ -101,7 +141,7 @@ const DESTRUCTIVE = [
 const hasDeno = (dir) => [process.env.DENO, path.join(dir, 'node_modules/.bin/deno')].some((p) => p && fs.existsSync(p)) || run('deno', ['--version'], { allowFail: true }).ok
 const hasPg = () => fs.existsSync('/usr/lib/postgresql') || run('initdb', ['--version'], { allowFail: true }).ok
 
-function plan() {
+async function plan() {
   const dir = prepare()
   const out = path.resolve(opt('out', 'release-out'))
   fs.rmSync(out, { recursive: true, force: true }); fs.mkdirSync(out, { recursive: true })
@@ -126,13 +166,14 @@ function plan() {
   P(`- Fonctions Edge : ${cat(/^supabase\/functions\//).length} fichier(s)`)
   P(`- Scripts, tests et documentation : ${cat(/^(scripts|tests|docs|README)/).length} fichier(s)`)
 
-  // état du site de préproduction en ligne
+  // la préproduction publiée correspond-elle au code livré ?
   const preHead = git(dir, 'rev-parse', pre)
-  const live = deployed(dir, 'preprod')
+  const live = await ciInfo(preHead)
   P('\n## La préproduction en ligne correspond-elle au code livré ?\n')
-  if (!live) result.warnings.push('Aucune version de préproduction en ligne : déploie-la (`npm run deploy:preprod`) et teste avant de livrer.')
-  else if (live.commit !== preHead) result.warnings.push(`La préproduction en ligne (commit ${String(live.commit).slice(0, 7)}) n'est pas la tête de la branche preprod (${preHead.slice(0, 7)}) : redéploie-la et teste avant de livrer.`)
-  P(`- ${describeDeployed(live, preHead)}`)
+  if (!live.available || !live.items.length) result.warnings.push(`Le déploiement de la préproduction n'est pas vérifiable d'ici : ouvre ${SITES.preprod}version.json et vérifie que le commit commence par ${preHead.slice(0, 7)}, puis teste le site avant de livrer.`)
+  else if (live.items.some((i) => i.state === 'échec')) result.warnings.push('Le dernier déploiement de la préproduction a ÉCHOUÉ côté Cloudflare : corrige-le avant de livrer.')
+  else if (live.items.some((i) => i.state !== 'ok')) result.warnings.push('Le déploiement de la préproduction est encore en cours ou dans un état inconnu : attends sa fin et teste le site.')
+  P(`- ${describeCi(live)}`)
 
   // vérifications sur le code de preprod
   P('\n## Vérifications automatiques (sur le code de preprod)\n')
@@ -149,7 +190,7 @@ function plan() {
   const has = (f) => fs.existsSync(path.join(dir, f))
   check('SQL généré à jour', 'node', ['scripts/build-schema.mjs', '--check'], { skipIf: has('scripts/build-schema.mjs') ? '' : 'script absent' })
   check('Fonctions Edge générées à jour', 'node', ['scripts/build-functions.mjs', '--check'], { skipIf: has('scripts/build-functions.mjs') ? '' : 'script absent' })
-  check('Compilation de la production', 'npm', ['run', 'build:prod'])
+  check('Compilation de la production (comme le fera Cloudflare)', 'npm', ['run', 'build:prod'])
   const skipTests = flag('skip-tests')
   check('Tests du front', 'node', ['tests/front.test.mjs'], { skipIf: skipTests ? '--skip-tests' : has('tests/front.test.mjs') ? '' : 'test absent' })
   check('Tests des fonctions Edge', 'node', ['tests/functions.test.mjs'], { skipIf: skipTests ? '--skip-tests' : !has('tests/functions.test.mjs') ? 'test absent' : hasDeno(dir) ? '' : 'Deno absent (npm i --no-save deno)' })
@@ -157,7 +198,7 @@ function plan() {
 
   // SQL à exécuter en production
   P('\n## Base de données de production\n')
-  P('Le SQL doit être exécuté **par l\'utilisateur** dans le SQL Editor de Supabase, **avant** la livraison du site.\n')
+  P('Le SQL doit être exécuté **par l\'utilisateur** dans le SQL Editor de Supabase, **avant** la livraison du site (le push sur `main` publie le site automatiquement).\n')
   const gen = 'supabase/generated/schema.prod.sql'
   const onMain = gitTry(dir, 'cat-file', '-e', `${main}:${gen}`).ok
   const migChanges = git(dir, 'diff', '--name-status', '--no-renames', main, pre, '--', 'supabase/migrations').split('\n').filter(Boolean).map((l) => l.split('\t'))
@@ -222,7 +263,7 @@ function plan() {
 }
 
 // ---------- apply ----------
-function apply() {
+async function apply() {
   if (!flag('yes')) { console.error('Livraison en PRODUCTION : relance avec --yes après confirmation explicite de l\'utilisateur.'); process.exit(2) }
   const dir = prepare()
   const commits = git(dir, 'log', '--no-merges', '--format=%h %s', 'origin/main..origin/preprod').split('\n').filter(Boolean)
@@ -232,37 +273,49 @@ function apply() {
   if (ff) git(dir, 'merge', '--ff-only', '--quiet', 'origin/preprod')
   else if (flag('merge')) git(dir, 'merge', '--no-ff', '--quiet', '-m', 'Livraison de la préproduction en production', 'origin/preprod')
   else { console.error('main a des commits absents de preprod : fusion impossible sans --merge. Vérifie ce qu\'il contient (git log preprod..main) avant de continuer.'); process.exit(1) }
+  // Cloudflare compilera main : on s'assure d'abord que la compilation de production réussit, avant de pousser
   install(dir)
+  console.log('Compilation de contrôle de la production…')
+  run('npm', ['run', 'build:prod'], { cwd: dir })
+  const head = git(dir, 'rev-parse', 'HEAD')
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '').replace('T', '-').slice(0, 13)
   const tag = `release-${stamp}`
   git(dir, 'tag', '-a', tag, '-m', `Livraison ${tag}\n\n${commits.slice(0, 30).join('\n')}`)
   git(dir, 'push', '--quiet', 'origin', 'main'); git(dir, 'push', '--quiet', 'origin', tag)
-  console.log(`main mis à jour (${short(dir, 'HEAD')}), étiquette ${tag} poussée. Déploiement du site de production…`)
-  run('node', ['scripts/deploy.mjs', 'prod', '--yes'], { cwd: dir, inherit: true })
-  const v = deployed(dir, 'prod'), head = git(dir, 'rev-parse', 'HEAD')
-  console.log(`\nVérification : ${describeDeployed(v, head)}`)
-  console.log(`\nLivraison terminée : ${tag}\nÀ faire maintenant : parcourir la liste de contrôle de la production (connexion, ouverture d'un booster, collection, marché, boutique).\nRetour arrière du site : node promote.mjs rollback ${tag} --yes   (voir le SKILL.md pour la base de données)`)
-  if (!v || v.commit !== head) process.exitCode = 1
+  console.log(`main mis à jour (${head.slice(0, 7)}), étiquette ${tag} poussée. Cloudflare publie ${SITES.prod}…`)
+  const res = await waitDeploy(head, Number(opt('wait', '420')))
+  console.log(`\nSuivi du déploiement : ${res.state}${res.info.items.length ? ' — ' + describeCi(res.info) : ''}`)
+  if (['indisponible', 'aucun'].includes(res.state)) console.log(`Le suivi automatique n'est pas possible : ouvre ${SITES.prod}version.json dans une à deux minutes ; le commit doit commencer par ${head.slice(0, 7)}.`)
+  console.log(`\nLivraison poussée : ${tag}\nÀ faire maintenant : parcourir la liste de contrôle de la production (connexion, ouverture d'un booster, collection, marché, boutique).\nRetour arrière : tableau de bord Cloudflare > projet de production > Deployments > Rollback (immédiat), ou node promote.mjs rollback ${tag} --yes`)
+  if (['échec', 'délai dépassé'].includes(res.state)) process.exitCode = 1
 }
 
 // ---------- rollback ----------
-function rollback() {
+async function rollback() {
   const tag = rest.find((a) => !a.startsWith('--'))
   if (!tag) { console.error('Usage : promote.mjs rollback <étiquette> --yes   (étiquettes : promote.mjs status)'); process.exit(2) }
   if (!flag('yes')) { console.error('Retour arrière en PRODUCTION : relance avec --yes après confirmation explicite de l\'utilisateur.'); process.exit(2) }
   const dir = prepare()
   if (!gitTry(dir, 'rev-parse', '--verify', `refs/tags/${tag}`).ok) { console.error(`Étiquette ${tag} introuvable.`); process.exit(1) }
-  git(dir, 'checkout', '--quiet', '--detach', `refs/tags/${tag}`)
-  install(dir)
-  run('node', ['scripts/deploy.mjs', 'prod', '--yes'], { cwd: dir, inherit: true })
-  console.log(`\nSite de production remis dans l'état de ${tag}. La branche main n'a pas changé : crée un commit de retour (git revert) si la version précédente doit y rester.\nLa base de données n'est PAS modifiée : une migration déjà exécutée ne s'annule pas avec cette commande.`)
+  git(dir, 'checkout', '--quiet', '-B', 'main', 'origin/main')
+  // Un nouveau commit qui remet exactement les fichiers de l'étiquette (l'historique est conservé, aucun push forcé)
+  git(dir, 'read-tree', '--reset', '-u', `refs/tags/${tag}`)
+  const changed = git(dir, 'status', '--porcelain').split('\n').filter(Boolean).length
+  if (!changed) { console.log(`main est déjà dans l'état de ${tag} : rien à faire.`); return }
+  git(dir, 'commit', '--quiet', '-m', `Retour à ${tag}`)
+  const head = git(dir, 'rev-parse', 'HEAD')
+  git(dir, 'push', '--quiet', 'origin', 'main')
+  console.log(`main remis dans l'état de ${tag} (commit ${head.slice(0, 7)}, ${changed} fichier(s) modifiés). Cloudflare publie ${SITES.prod}…`)
+  const res = await waitDeploy(head, Number(opt('wait', '420')))
+  console.log(`Suivi du déploiement : ${res.state}${res.info.items.length ? ' — ' + describeCi(res.info) : ''}`)
+  console.log(`\nLa base de données n'est PAS modifiée : une migration déjà exécutée ne s'annule pas avec cette commande.\nPour un retour immédiat sans passer par Git : Cloudflare > projet de production > Deployments > Rollback.`)
 }
 
 try {
-  if (cmd === 'status') status()
-  else if (cmd === 'plan') plan()
-  else if (cmd === 'apply') apply()
-  else if (cmd === 'rollback') rollback()
+  if (cmd === 'status') await status()
+  else if (cmd === 'plan') await plan()
+  else if (cmd === 'apply') await apply()
+  else if (cmd === 'rollback') await rollback()
   else { console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 15).map((l) => l.replace(/^\/\/ ?/, '')).join('\n')) }
 } catch (e) {
   console.error(mask(e.message)); process.exit(1)

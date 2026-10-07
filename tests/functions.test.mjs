@@ -12,7 +12,7 @@ const ROOT = path.join(root, 'supabase', 'functions')
 const DENO = [process.env.DENO, path.join(root, 'node_modules/.bin/deno'), '/tmp/denoenv/node_modules/.bin/deno'].find((p) => p && fs.existsSync(p)) || 'deno'
 const ENVS = [
   { name: 'prod', dir: 'o1ocards', prefix: 'o1ocards_', sp: '', site: 'https://1o1cards.cc/', whsec: 'whsec_prod', otherWhsec: 'whsec_preprod', port: 8801, mockPort: 8899 },
-  { name: 'preprod', dir: 'pp-o1ocards', prefix: 'pp_o1ocards_', sp: 'PP_', site: 'https://1o1cards.cc/preprod/', whsec: 'whsec_preprod', otherWhsec: 'whsec_prod', port: 8821, mockPort: 8898 },
+  { name: 'preprod', dir: 'pp-o1ocards', prefix: 'pp_o1ocards_', sp: 'PP_', site: 'https://pp.1o1cards.cc/', whsec: 'whsec_preprod', otherWhsec: 'whsec_prod', port: 8821, mockPort: 8898 },
 ].filter((e) => !process.argv[2] || e.name === process.argv[2])
 
 let totalBad = 0

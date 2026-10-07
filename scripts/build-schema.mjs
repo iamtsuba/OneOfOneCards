@@ -6,6 +6,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 export const ENVS = { prod: 'o1ocards_', preprod: 'pp_o1ocards_' }
+// Valeurs par défaut propres à chaque environnement (graines de la base, jamais écrasées si la ligne existe déjà) :
+// la boutique est visible d'emblée en préproduction pour pouvoir tester les achats, masquée en production tant que Stripe n'est pas prêt.
+const VARS = { prod: { SHOP_ENABLED: '0' }, preprod: { SHOP_ENABLED: '1' } }
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const sqlDir = path.join(root, 'supabase')
 const outDir = path.join(sqlDir, 'generated')
@@ -16,7 +19,9 @@ const banner = (env, prefix, source) =>
   `-- Environnement : ${env} | préfixe des tables et des fonctions : ${prefix}\n\n`
 
 function render(template, env, prefix, source) {
-  const out = banner(env, prefix, source) + template.replaceAll('{{P}}', prefix)
+  let body = template.replaceAll('{{P}}', prefix)
+  for (const [k, v] of Object.entries(VARS[env])) body = body.replaceAll(`{{${k}}}`, v)
+  const out = banner(env, prefix, source) + body
   if (out.includes('{{')) throw new Error(`Variable non remplacée dans ${source}`)
   // PostgreSQL tronque silencieusement les noms au-delà de 63 caractères : on refuse plutôt que de risquer des collisions
   for (const m of out.matchAll(new RegExp(`${prefix}[a-z0-9_]+`, 'g'))) {

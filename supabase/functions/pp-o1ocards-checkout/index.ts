@@ -4,7 +4,7 @@
 //
 // Secrets requis (Supabase > Edge Functions > Secrets) :
 //   PP_STRIPE_SECRET_KEY : clé secrète Stripe (TOUJOURS une clé sk_test_ : les clés sk_live_ sont refusées en préproduction)
-//   PP_SITE_URL          : adresse de l'application (ex. https://1o1cards.cc/preprod/)
+//   PP_SITE_URL          : adresse de l'application (ex. https://pp.1o1cards.cc/)
 // Secrets facultatifs :
 //   PP_STRIPE_TAX_CODE         : code fiscal du produit (défaut txcd_10201000, jeu vidéo numérique : exigé par Managed Payments)
 //   PP_STRIPE_MANAGED_PAYMENTS : mettre "false" pour ne pas utiliser Managed Payments (Stripe comme vendeur officiel)

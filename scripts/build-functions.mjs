@@ -18,7 +18,7 @@ const ENVS = {
   preprod: {
     prefix: 'pp_o1ocards_', sp: 'PP_', dir: 'pp-o1ocards',
     keyHint: 'TOUJOURS une clé sk_test_ : les clés sk_live_ sont refusées en préproduction',
-    siteHint: 'ex. https://1o1cards.cc/preprod/',
+    siteHint: 'ex. https://pp.1o1cards.cc/',
     fallbackNote: '\n//   (les réglages facultatifs retombent sur ceux de la production s\'ils ne sont pas définis ; jamais les clés Stripe)',
   },
 }

@@ -113,7 +113,7 @@ export function LegalDocument({ legal = {}, config = {} }) {
       <h2>Mentions légales</h2>
       <p>
         Éditeur et directeur de la publication : <V value={legal.seller_name} />, <V value={legal.seller_address} />.
-        Contact : <V value={mail} />. Hébergement : site hébergé par GitHub (GitHub Pages), données hébergées par Supabase.
+        Contact : <V value={mail} />. Hébergement : site hébergé par Cloudflare (Cloudflare Pages), données hébergées par Supabase.
       </p>
     </article>
   )
