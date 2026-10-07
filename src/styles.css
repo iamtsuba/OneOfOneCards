@@ -392,11 +392,12 @@ textarea { width: 100%; padding: 10px 14px; border: 1.5px solid var(--line); bor
 .env-banner { position: sticky; top: 0; z-index: 90; padding: 6px 12px; padding-top: calc(6px + env(safe-area-inset-top)); background: repeating-linear-gradient(135deg, #ffd23f 0 14px, #f5c000 14px 28px); color: #3b2a00; font-size: 13px; text-align: center; }
 
 /* ---------- En-tête : cloche de notifications ---------- */
-.topbar-actions { display: flex; align-items: center; gap: 8px; }
-.bell-wrap { position: relative; }
+.topbar-actions { position: relative; display: flex; align-items: center; gap: 8px; }
+.bell-wrap { display: contents; }
 .bell-btn { position: relative; display: grid; place-items: center; width: 40px; height: 40px; border: 0; border-radius: 50%; background: var(--surface); color: var(--ink); cursor: pointer; box-shadow: inset 0 0 0 1.5px var(--line); }
 .bell-badge { position: absolute; top: -4px; right: -4px; }
-.bell-popup { position: absolute; top: calc(100% + 10px); right: 0; z-index: 30; width: min(88vw, 360px); max-height: 70vh; overflow-y: auto; background: var(--surface); border-radius: 16px; box-shadow: 0 10px 30px rgba(20,25,60,.22); padding: 10px; display: grid; gap: 8px; }
+/* Ancrée au groupe d'actions (pas au bouton seul) et bornée à la largeur de l'écran : jamais de débordement sur mobile */
+.bell-popup { position: absolute; top: calc(100% + 10px); right: 0; z-index: 30; width: min(92vw, 360px); max-height: min(70vh, 480px); overflow-y: auto; background: var(--surface); border-radius: 16px; box-shadow: 0 10px 30px rgba(20,25,60,.22); padding: 10px; display: grid; gap: 8px; }
 .bell-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 6px; }
 .bell-empty { padding: 14px 6px; }
 .bell-list { display: grid; gap: 2px; }

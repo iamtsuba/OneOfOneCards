@@ -104,14 +104,14 @@ function Game({ session }) {
       <header className="topbar">
         <Brand />
         <div className="topbar-actions">
-          <NotificationBell
-            onOpenListing={(id) => { setMarketView('browse'); setMarketListingId(id); setTab('market') }}
-            onOpenOffers={() => { setMarketView('offers'); setMarketListingId(null); setTab('market') }}
-          />
           <button className="coin-pill" onClick={() => { setMarketView('browse'); setMarketListingId(null); setTab('market') }} aria-label={`${fmtCoins(status.coins)}, ouvrir le marché`}>
             <i className="coin" aria-hidden="true">1</i>
             {fmtCoins(status.coins)}
           </button>
+          <NotificationBell
+            onOpenListing={(id) => { setMarketView('browse'); setMarketListingId(id); setTab('market') }}
+            onOpenOffers={() => { setMarketView('offers'); setMarketListingId(null); setTab('market') }}
+          />
         </div>
       </header>
       <main>
