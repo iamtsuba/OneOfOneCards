@@ -12,6 +12,7 @@ import Market from './components/Market'
 import Profile from './components/Profile'
 import RewardModal from './components/RewardModal'
 import EnvBanner from './components/EnvBanner'
+import NotificationBell from './components/NotificationBell'
 
 export default function App() {
   const [session, setSession] = useState(undefined)
@@ -37,6 +38,7 @@ export default function App() {
 function Game({ session }) {
   const [tab, setTab] = useState('boosters')
   const [marketView, setMarketView] = useState('browse')
+  const [marketListingId, setMarketListingId] = useState(null)
   const [revealing, setRevealing] = useState(false)
   const [rarities, setRarities] = useState(null)
   const [catalogRaw, setCatalogRaw] = useState(null)
@@ -101,15 +103,21 @@ function Game({ session }) {
     <GameContext.Provider value={ctx}>
       <header className="topbar">
         <Brand />
-        <button className="coin-pill" onClick={() => { setMarketView('browse'); setTab('market') }} aria-label={`${fmtCoins(status.coins)}, ouvrir le marché`}>
-          <i className="coin" aria-hidden="true">1</i>
-          {fmtCoins(status.coins)}
-        </button>
+        <div className="topbar-actions">
+          <NotificationBell
+            onOpenListing={(id) => { setMarketView('browse'); setMarketListingId(id); setTab('market') }}
+            onOpenOffers={() => { setMarketView('offers'); setMarketListingId(null); setTab('market') }}
+          />
+          <button className="coin-pill" onClick={() => { setMarketView('browse'); setMarketListingId(null); setTab('market') }} aria-label={`${fmtCoins(status.coins)}, ouvrir le marché`}>
+            <i className="coin" aria-hidden="true">1</i>
+            {fmtCoins(status.coins)}
+          </button>
+        </div>
       </header>
       <main>
         {tab === 'boosters' && <Boosters goCollection={() => setTab('collection')} />}
-        {tab === 'collection' && <Collection goMarket={(v) => { setMarketView(v || 'browse'); setTab('market') }} />}
-        {tab === 'market' && <Market key={marketView} initialView={marketView} />}
+        {tab === 'collection' && <Collection goMarket={(v) => { setMarketView(v || 'browse'); setMarketListingId(null); setTab('market') }} />}
+        {tab === 'market' && <Market key={`${marketView}-${marketListingId || ''}`} initialView={marketView} initialListingId={marketListingId} />}
         {tab === 'profile' && <Profile session={session} />}
       </main>
       {!revealing && (status.unseen_rewards ?? []).length > 0 && (
@@ -121,7 +129,7 @@ function Game({ session }) {
           }}
         />
       )}
-      <TabBar tab={tab} onChange={(t) => { if (t === 'market') setMarketView('browse'); setTab(t) }} boosters={status.boosters + (status.bonus_boosters || 0)} />
+      <TabBar tab={tab} onChange={(t) => { if (t === 'market') { setMarketView('browse'); setMarketListingId(null) } setTab(t) }} boosters={status.boosters + (status.bonus_boosters || 0)} />
     </GameContext.Provider>
   )
 }

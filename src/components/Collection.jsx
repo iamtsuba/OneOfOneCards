@@ -34,6 +34,7 @@ export default function Collection({ goMarket }) {
   }, [catId, version])
 
   const changed = () => { setSelected(null); setVersion((v) => v + 1) }
+  const refresh = () => setVersion((v) => v + 1)
   const pickCategory = (id) => { setCatId(id); setTypeId(null) }
 
   const catStats = stats?.categories?.find((c) => c.id === catId)
@@ -119,7 +120,7 @@ export default function Collection({ goMarket }) {
       )}
 
       {selected && (
-        <CardModal sel={selected} rarity={rarityMap[selected.rarityId]} onClose={() => setSelected(null)} onChanged={changed} goMarket={(v) => { setSelected(null); goMarket(v) }} />
+        <CardModal sel={selected} rarity={rarityMap[selected.rarityId]} onClose={() => setSelected(null)} onChanged={changed} onRefresh={refresh} goMarket={(v) => { setSelected(null); goMarket(v) }} />
       )}
     </section>
   )
@@ -287,6 +288,8 @@ function Album({ type, seriesCount, rarities, rarityMap, version, onBack, onSele
   if (series == null) return <p className="muted">Chargement…</p>
 
   const taken = new Set(state.taken)
+  const owners = state.owners || {}
+  const favs = new Set(state.favorites || [])
   const have = Object.keys(state.mine).length
   const free = series - have - taken.size
 
@@ -334,17 +337,24 @@ function Album({ type, seriesCount, rarities, rarityMap, version, onBack, onSele
             )
           }
           if (taken.has(n)) {
+            const owner = owners[n] || {}
             return (
               <li key={n}>
-                <Card typeId={type.id} series={series} number={n} rarity={rarity} tone="taken" size="sm"
-                  onClick={() => onSelect({ typeId: type.id, series, number: n, rarityId: rid, state: 'taken' })} />
+                <Card typeId={type.id} series={series} number={n} rarity={rarity} tone="taken" size="sm" favorite={favs.has(n)}
+                  onClick={() => onSelect({
+                    typeId: type.id, series, number: n, rarityId: rid, state: 'taken',
+                    ownerId: owner.owner_id, ownerName: owner.owner_name, favorited: favs.has(n),
+                  })} />
               </li>
             )
           }
           return (
             <li key={n}>
-              <button className="slot" aria-label={`Carte ${n}, encore dans les boosters`}
-                onClick={() => onSelect({ typeId: type.id, series, number: n, rarityId: rid, state: 'free' })}>{n}</button>
+              <button className={`slot ${favs.has(n) ? 'favorite' : ''}`} aria-label={`Carte ${n}, encore dans les boosters${favs.has(n) ? ', favorite' : ''}`}
+                onClick={() => onSelect({ typeId: type.id, series, number: n, rarityId: rid, state: 'free', favorited: favs.has(n) })}>
+                {n}
+                {favs.has(n) && <span className="slot-favorite" aria-hidden="true">♥</span>}
+              </button>
             </li>
           )
         })}

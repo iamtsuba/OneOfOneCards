@@ -7,7 +7,7 @@ const MINE = { '--c1': '#3fcf8e', '--c2': '#12804f', '--ct': '#ffffff' }
 // Carte numérotée : couleur de la catégorie en fond, cadre et bandeau à la couleur de la rareté,
 // illustration du type au centre, numérotation en bas.
 // tone : 'mine' (verte, à moi) | 'taken' (transparente, tirée par un autre joueur)
-export default function Card({ typeId, series, number, rarity, size = 'md', tone, listed = false, glow = false, shine = false, onClick }) {
+export default function Card({ typeId, series, number, rarity, size = 'md', tone, listed = false, favorite = false, glow = false, shine = false, onClick }) {
   const game = useGame()
   const type = game?.catalog?.typeMap?.[typeId]
   const category = type ? game.catalog.categoryMap[type.category_id] : null
@@ -21,7 +21,7 @@ export default function Card({ typeId, series, number, rarity, size = 'md', tone
     .filter(Boolean)
     .join(' ')
   const state = tone === 'mine' ? ', à toi' : tone === 'taken' ? ', déjà tirée par un autre joueur' : ''
-  const label = `${type?.name ?? 'Carte'}, ${rarity?.name ?? ''} ${number} sur ${series}${state}${listed ? ', en vente' : ''}`
+  const label = `${type?.name ?? 'Carte'}, ${rarity?.name ?? ''} ${number} sur ${series}${state}${listed ? ', en vente' : ''}${favorite ? ', favorite' : ''}`
   const Tag = onClick ? 'button' : 'div'
   return (
     <Tag className={cls} style={style} onClick={onClick} aria-label={label} type={onClick ? 'button' : undefined}>
@@ -34,6 +34,7 @@ export default function Card({ typeId, series, number, rarity, size = 'md', tone
           <span className="m">/ {series}</span>
         </div>
         {listed && <span className="card-listed">En vente</span>}
+        {favorite && <span className="card-favorite" aria-hidden="true">♥</span>}
       </div>
     </Tag>
   )

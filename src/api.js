@@ -32,6 +32,21 @@ export const marketList = ({ kind = null, sort = 'ending', limit = 60, offset = 
   rpc('market_list', { p_kind: kind, p_sort: sort, p_limit: limit, p_offset: offset })
 export const marketMine = () => rpc('market_mine')
 
+// Favoris
+export const toggleFavorite = (type, series, number) => rpc('toggle_favorite', { p_type: type, p_series: series, p_number: number })
+export const listFavorites = () => rpc('list_favorites')
+
+// Offres directes
+export const makeOffer = (type, series, number, amount) =>
+  rpc('make_offer', { p_type: type, p_series: series, p_number: number, p_amount: amount })
+export const cancelOffer = (id) => rpc('cancel_offer', { p_id: id })
+export const respondOffer = (id, accept) => rpc('respond_offer', { p_id: id, p_accept: accept })
+export const myOffers = () => rpc('my_offers')
+
+// Notifications
+export const notificationsList = (limit = 30) => rpc('notifications_list', { p_limit: limit })
+export const notificationsMarkRead = (ids = null) => rpc('notifications_mark_read', { p_ids: ids })
+
 // Boutique : demande une page de paiement Stripe et renvoie son adresse
 export async function startCheckout(consent) {
   const { data, error } = await supabase.functions.invoke(CHECKOUT_FUNCTION, { body: { consent } })
@@ -142,6 +157,11 @@ export function explain(e) {
   if (m.includes('has_bids')) return 'Des offres ont été faites : l’annonce ne peut plus être retirée.'
   if (m.includes('listing_unavailable')) return 'Cette annonce n’est plus disponible.'
   if (m.includes('invalid_price')) return 'Prix invalide : entre un nombre entier de pièces, minimum 1.'
+  if (m.includes('own_card')) return 'Cette carte est déjà à toi.'
+  if (m.includes('card_not_taken')) return 'Cette carte n’a pas encore été tirée : impossible de faire une offre.'
+  if (m.includes('buyer_insufficient_coins')) return 'L’acheteur n’a plus assez de pièces pour cette offre.'
+  if (m.includes('card_in_auction')) return 'Cette carte est aux enchères avec des offres en cours : accepte d’abord l’issue de l’enchère.'
+  if (m.includes('offer_unavailable')) return 'Cette offre n’est plus disponible.'
   if (/Could not find the function|schema cache|does not exist|relation .* not/i.test(m))
     return 'La base de données n’est pas à jour : exécute supabase/schema.sql dans le SQL Editor de Supabase.'
   if (/Invalid login credentials/i.test(m)) return 'Email ou mot de passe incorrect.'

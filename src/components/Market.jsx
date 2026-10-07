@@ -1,33 +1,46 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as api from '../api'
 import { explain } from '../api'
-import { useGame, useNow, fmt, fmtClock, fmtCoins } from '../game'
+import { useGame, useNow, fmt, fmtAgo, fmtClock, fmtCoins } from '../game'
 import Card from './Card'
 
 const KINDS = [[null, 'Toutes'], ['auction', 'Enchères'], ['buy_now', 'Achat direct']]
 const SORTS = [['ending', 'Fin proche'], ['price', 'Prix croissant'], ['rarity', 'Plus rares'], ['recent', 'Récentes']]
+const VIEWS = [['browse', 'À vendre'], ['mine', 'Mes ventes'], ['offers', 'Mes offres'], ['favorites', 'Favoris']]
 
-export default function Market({ initialView = 'browse' }) {
+export default function Market({ initialView = 'browse', initialListingId = null }) {
   const { status, setStatus, refreshStatus, rarityMap, catalog } = useGame()
   const [view, setView] = useState(initialView)
   const [kind, setKind] = useState(null)
   const [sort, setSort] = useState('ending')
   const [browse, setBrowse] = useState([])
   const [mine, setMine] = useState([])
+  const [offers, setOffers] = useState([])
+  const [favorites, setFavorites] = useState([])
   const [skew, setSkew] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [selectedId, setSelectedId] = useState(null)
   const now = useNow()
   const lastLoad = useRef(0)
+  const consumedInitial = useRef(false)
 
   const load = useCallback(async () => {
     lastLoad.current = Date.now()
     try {
-      const rows = view === 'browse' ? await api.marketList({ kind, sort, limit: 60 }) : await api.marketMine()
-      if (rows[0]?.server_now) setSkew(new Date(rows[0].server_now).getTime() - Date.now())
-      if (view === 'browse') setBrowse(rows)
-      else setMine(rows.map((r) => ({ ...r, is_mine: r.role === 'seller' })))
+      if (view === 'browse') {
+        const rows = await api.marketList({ kind, sort, limit: 60 })
+        if (rows[0]?.server_now) setSkew(new Date(rows[0].server_now).getTime() - Date.now())
+        setBrowse(rows)
+      } else if (view === 'mine') {
+        const rows = await api.marketMine()
+        if (rows[0]?.server_now) setSkew(new Date(rows[0].server_now).getTime() - Date.now())
+        setMine(rows.map((r) => ({ ...r, is_mine: r.role === 'seller' })))
+      } else if (view === 'offers') {
+        setOffers(await api.myOffers())
+      } else if (view === 'favorites') {
+        setFavorites(await api.listFavorites())
+      }
       setError('')
     } catch (e) {
       setError(explain(e))
@@ -43,6 +56,15 @@ export default function Market({ initialView = 'browse' }) {
     return () => clearInterval(id)
   }, [load])
 
+  // Arrivée depuis une notification : ouvre directement l'annonce visée, une seule fois
+  useEffect(() => {
+    if (consumedInitial.current || !initialListingId || view !== 'browse') return
+    if (browse.some((r) => r.listing_id === initialListingId)) {
+      setSelectedId(initialListingId)
+      consumedInitial.current = true
+    }
+  }, [browse, initialListingId, view])
+
   const rows = view === 'browse' ? browse : mine
   const ended = rows.some((r) => r.status !== 'sold' && r.status !== 'expired' && r.status !== 'cancelled' && r.ends_at && new Date(r.ends_at).getTime() <= now + skew)
   useEffect(() => {
@@ -51,7 +73,7 @@ export default function Market({ initialView = 'browse' }) {
     return () => clearTimeout(t)
   }, [ended, now, load, refreshStatus])
 
-  const selected = rows.find((r) => r.listing_id === selectedId)
+  const selected = browse.find((r) => r.listing_id === selectedId) || mine.find((r) => r.listing_id === selectedId) || favorites.find((r) => r.listing_id === selectedId)
   const left = (r) => (r.ends_at ? new Date(r.ends_at).getTime() - (now + skew) : null)
 
   return (
@@ -66,8 +88,9 @@ export default function Market({ initialView = 'browse' }) {
       )}
 
       <div className="segmented" role="tablist" aria-label="Marché">
-        <button role="tab" aria-selected={view === 'browse'} className={view === 'browse' ? 'on' : ''} onClick={() => setView('browse')}>À vendre</button>
-        <button role="tab" aria-selected={view === 'mine'} className={view === 'mine' ? 'on' : ''} onClick={() => setView('mine')}>Mes ventes et enchères</button>
+        {VIEWS.map(([v, label]) => (
+          <button key={v} role="tab" aria-selected={view === v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>{label}</button>
+        ))}
       </div>
 
       {error && <p className="msg error" role="alert">{error}</p>}
@@ -147,6 +170,14 @@ export default function Market({ initialView = 'browse' }) {
         </>
       )}
 
+      {view === 'offers' && (
+        <OffersPanel rows={offers} loading={loading} rarityMap={rarityMap} catalog={catalog} status={status} setStatus={setStatus} reload={load} />
+      )}
+
+      {view === 'favorites' && (
+        <FavoritesPanel rows={favorites} loading={loading} rarityMap={rarityMap} catalog={catalog} reload={load} onOpenListing={(id) => setSelectedId(id)} />
+      )}
+
       {selected && (
         <ListingModal
           row={selected}
@@ -182,6 +213,129 @@ function describe(r, ms) {
   }
   if (r.role === 'buyer') return `${r.kind === 'auction' ? 'Enchère gagnée' : 'Achetée'} pour ${fmtCoins(r.final_price)}. La carte est à toi.`
   return `Enchère perdue (ta mise : ${fmtCoins(r.my_bid)}). Tes pièces t’ont été rendues.`
+}
+
+const OFFER_STATUS_LABEL = { pending: 'En attente', accepted: 'Acceptée', declined: 'Refusée', cancelled: 'Annulée' }
+
+function OffersPanel({ rows, loading, rarityMap, catalog, status, setStatus, reload }) {
+  const [busyId, setBusyId] = useState(null)
+  const [error, setError] = useState('')
+
+  async function act(id, fn) {
+    setBusyId(id)
+    setError('')
+    try {
+      const res = await fn()
+      if (res?.status) setStatus(res.status)
+      await reload()
+    } catch (e) {
+      setError(explain(e))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  if (!loading && rows.length === 0) {
+    return (
+      <div className="empty">
+        <p><strong>Aucune offre pour l’instant.</strong></p>
+        <p>Propose un prix pour la carte d’un autre joueur depuis sa collection, ou attends une offre sur une de tes cartes.</p>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      {error && <p className="msg error" role="alert">{error}</p>}
+      <ul className="mine-list">
+        {rows.map((r) => (
+          <li key={r.offer_id}>
+            <div className="mine-row offer-row">
+              <div className="mine-card"><Card typeId={r.card_type} series={r.card_series} number={r.card_number} rarity={rarityMap[r.rarity_id]} size="sm" /></div>
+              <div className="mine-text">
+                <strong>{catalog.typeMap[r.card_type]?.name} {r.card_number}/{r.card_series}</strong>
+                <span>
+                  {r.role === 'buyer' ? `Ton offre à ${r.counterpart_name} : ` : `Offre de ${r.counterpart_name} : `}
+                  {fmtCoins(r.amount)} · {OFFER_STATUS_LABEL[r.status] ?? r.status} · {fmtAgo(r.created_at)}
+                </span>
+                {r.status === 'pending' && r.role === 'seller' && (
+                  <div className="row">
+                    <button className="btn accent sm" disabled={busyId === r.offer_id} onClick={() => act(r.offer_id, () => api.respondOffer(r.offer_id, true))}>Accepter</button>
+                    <button className="btn ghost sm" disabled={busyId === r.offer_id} onClick={() => act(r.offer_id, () => api.respondOffer(r.offer_id, false))}>Refuser</button>
+                  </div>
+                )}
+                {r.status === 'pending' && r.role === 'buyer' && (
+                  <div className="row">
+                    <button className="btn ghost sm" disabled={busyId === r.offer_id} onClick={() => act(r.offer_id, () => api.cancelOffer(r.offer_id))}>Retirer l’offre</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </>
+  )
+}
+
+function FavoritesPanel({ rows, loading, rarityMap, catalog, reload, onOpenListing }) {
+  const [busyKey, setBusyKey] = useState(null)
+  const [error, setError] = useState('')
+
+  async function unfav(r) {
+    const key = `${r.card_type}-${r.card_series}-${r.card_number}`
+    setBusyKey(key)
+    setError('')
+    try {
+      await api.toggleFavorite(r.card_type, r.card_series, r.card_number)
+      await reload()
+    } catch (e) {
+      setError(explain(e))
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
+  if (!loading && rows.length === 0) {
+    return (
+      <div className="empty">
+        <p><strong>Aucun favori pour l’instant.</strong></p>
+        <p>Dans ta collection, ouvre une carte que tu n’as pas et mets-la en favori (♡) pour être prévenu si elle arrive sur le marché.</p>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      {error && <p className="msg error" role="alert">{error}</p>}
+      <ul className="mine-list">
+        {rows.map((r) => {
+          const key = `${r.card_type}-${r.card_series}-${r.card_number}`
+          return (
+            <li key={key}>
+              <div className="mine-row offer-row">
+                <div className="mine-card"><Card typeId={r.card_type} series={r.card_series} number={r.card_number} rarity={rarityMap[r.rarity_id]} size="sm" /></div>
+                <div className="mine-text">
+                  <strong>{catalog.typeMap[r.card_type]?.name} {r.card_number}/{r.card_series}</strong>
+                  {r.listing_id ? (
+                    <span>En vente à {fmtCoins(r.listing_price)} ({r.listing_kind === 'auction' ? 'enchère' : 'achat direct'}).</span>
+                  ) : r.owner_name ? (
+                    <span>Possédée par {r.owner_name}, pas en vente actuellement.</span>
+                  ) : (
+                    <span>Encore dans les boosters.</span>
+                  )}
+                  <div className="row">
+                    {r.listing_id && <button className="btn accent sm" onClick={() => onOpenListing(r.listing_id)}>Voir l’annonce</button>}
+                    <button className="btn ghost sm" disabled={busyKey === key} onClick={() => unfav(r)}>Retirer des favoris</button>
+                  </div>
+                </div>
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+    </>
+  )
 }
 
 function ListingModal({ row, ms, rarity, coins, onClose, onStatus, reload }) {

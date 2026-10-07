@@ -287,6 +287,71 @@ create table if not exists public.{{P}}bids (
 );
 create index if not exists {{P}}bids_bidder_idx on public.{{P}}bids (bidder_id, listing_id);
 
+-- ---------- Favoris : suivre une carte qu'on ne possède pas ----------
+create table if not exists public.{{P}}favorites (
+  user_id    uuid not null references auth.users (id) on delete cascade,
+  type_id    int  not null references public.{{P}}types (id) on delete cascade,
+  series     int  not null,
+  number     int  not null,
+  created_at timestamptz not null default now(),
+  primary key (user_id, type_id, series, number)
+);
+create index if not exists {{P}}favorites_card_idx on public.{{P}}favorites (type_id, series, number);
+
+-- ---------- Offres directes : proposer un prix pour la carte d'un autre joueur, en vente ou non ----------
+create table if not exists public.{{P}}offers (
+  id           bigint generated always as identity primary key,
+  type_id      int  not null,
+  series       int  not null,
+  number       int  not null,
+  buyer_id     uuid not null references auth.users (id) on delete cascade,
+  seller_id    uuid not null references auth.users (id) on delete cascade,
+  amount       int  not null check (amount >= 1),
+  status       text not null default 'pending' check (status in ('pending', 'accepted', 'declined', 'cancelled')),
+  created_at   timestamptz not null default now(),
+  responded_at timestamptz
+);
+-- Une seule offre active à la fois par acheteur et par carte : en refaire une remplace la précédente (montant mis à jour)
+create unique index if not exists {{P}}offers_one_pending on public.{{P}}offers (type_id, series, number, buyer_id) where status = 'pending';
+create index if not exists {{P}}offers_seller_idx on public.{{P}}offers (seller_id, status, created_at desc);
+create index if not exists {{P}}offers_buyer_idx on public.{{P}}offers (buyer_id, status, created_at desc);
+
+-- ---------- Notifications : cloche en haut de l'application ----------
+create table if not exists public.{{P}}notifications (
+  id         bigint generated always as identity primary key,
+  user_id    uuid not null references auth.users (id) on delete cascade,
+  kind       text not null check (kind in ('favorite_listed', 'offer_received', 'offer_accepted', 'offer_declined')),
+  type_id    int,
+  series     int,
+  number     int,
+  listing_id bigint,
+  offer_id   bigint,
+  amount     int,
+  actor_name text,
+  read       boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create index if not exists {{P}}notifications_user_idx on public.{{P}}notifications (user_id, read, created_at desc);
+
+-- Une carte favorite d'un joueur vient d'être mise en vente : on le prévient (sauf si c'est lui le vendeur)
+create or replace function public.{{P}}notify_favorites()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare v_seller_name text;
+begin
+  select username into v_seller_name from public.{{P}}profiles where id = new.seller_id;
+  insert into public.{{P}}notifications (user_id, kind, type_id, series, number, listing_id, amount, actor_name)
+  select f.user_id, 'favorite_listed', new.type_id, new.series, new.number, new.id, new.price, v_seller_name
+  from public.{{P}}favorites f
+  where f.type_id = new.type_id and f.series = new.series and f.number = new.number
+    and f.user_id <> new.seller_id;
+  return new;
+end $$;
+
+drop trigger if exists {{P}}listings_notify_trg on public.{{P}}listings;
+create trigger {{P}}listings_notify_trg
+  after insert on public.{{P}}listings
+  for each row execute function public.{{P}}notify_favorites();
+
 -- Informations légales du vendeur et textes de consentement (affichés dans les conditions de vente).
 -- À compléter avant de vendre pour de vrai : voir README.
 create table if not exists public.{{P}}legal (
@@ -368,6 +433,9 @@ alter table public.{{P}}consents     enable row level security;
 alter table public.{{P}}secrets      enable row level security;
 alter table public.{{P}}admin_log    enable row level security;
 alter table public.{{P}}series_rewards enable row level security;
+alter table public.{{P}}favorites     enable row level security;
+alter table public.{{P}}offers        enable row level security;
+alter table public.{{P}}notifications enable row level security;
 
 drop policy if exists {{P}}legal_read on public.{{P}}legal;
 create policy {{P}}legal_read on public.{{P}}legal
@@ -409,6 +477,7 @@ revoke insert, update, delete on public.{{P}}config, public.{{P}}rarities, publi
   public.{{P}}categories, public.{{P}}types, public.{{P}}cards from anon, authenticated;
 revoke all on public.{{P}}series_taken, public.{{P}}listings, public.{{P}}bids, public.{{P}}golden_contents,
   public.{{P}}secrets, public.{{P}}admin_log, public.{{P}}series_rewards from anon, authenticated;
+revoke all on public.{{P}}favorites, public.{{P}}offers, public.{{P}}notifications from anon, authenticated;
 revoke insert, update, delete on public.{{P}}purchases, public.{{P}}legal, public.{{P}}consents from anon, authenticated;
 
 -- ---------- Fonctions utilitaires ----------
@@ -616,6 +685,7 @@ begin
       update public.{{P}}profiles set coins = coins + r.current_bid where id = r.seller_id;
       update public.{{P}}cards set owner_id = r.current_bidder, obtained_at = now()
       where type_id = r.type_id and series = r.series and number = r.number;
+      delete from public.{{P}}favorites where user_id = r.current_bidder and type_id = r.type_id and series = r.series and number = r.number;
       update public.{{P}}listings
       set status = 'sold', buyer_id = r.current_bidder, final_price = r.current_bid, closed_at = now()
       where id = r.id;
@@ -937,7 +1007,9 @@ end $$;
 -- État d'une série d'un type : mes cartes (avec l'annonce éventuelle) et celles prises par d'autres joueurs
 create or replace function public.{{P}}type_state(p_type int, p_series int)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare uid uuid := auth.uid(); v_mine jsonb; v_taken jsonb; v_reward text; v_min int := coalesce(public.{{P}}cfg('series_reward_min_size'), 0)::int;
+declare
+  uid uuid := auth.uid(); v_mine jsonb; v_taken jsonb; v_owners jsonb; v_favs jsonb; v_reward text;
+  v_min int := coalesce(public.{{P}}cfg('series_reward_min_size'), 0)::int;
 begin
   if uid is null then raise exception 'not_authenticated'; end if;
   perform public.{{P}}settle_due();
@@ -949,10 +1021,19 @@ begin
   select coalesce(jsonb_agg(c.number order by c.number), '[]'::jsonb) into v_taken
   from public.{{P}}cards c
   where c.type_id = p_type and c.series = p_series and c.owner_id <> uid;
+  -- Propriétaire de chaque carte prise par un autre joueur (pour proposer une offre d'achat direct)
+  select coalesce(jsonb_object_agg(c.number::text, jsonb_build_object('owner_id', c.owner_id, 'owner_name', pr.username)), '{}'::jsonb) into v_owners
+  from public.{{P}}cards c
+  join public.{{P}}profiles pr on pr.id = c.owner_id
+  where c.type_id = p_type and c.series = p_series and c.owner_id <> uid;
+  -- Mes favoris dans cette série (carte prise ou encore dans les boosters)
+  select coalesce(jsonb_agg(f.number order by f.number), '[]'::jsonb) into v_favs
+  from public.{{P}}favorites f
+  where f.user_id = uid and f.type_id = p_type and f.series = p_series;
   select case when r.user_id is null then 'none' when r.user_id = uid then 'mine' else 'other' end into v_reward
   from (select 1) x left join public.{{P}}series_rewards r on r.type_id = p_type and r.series = p_series;
-  return jsonb_build_object('mine', v_mine, 'taken', v_taken, 'reward', v_reward,
-                            'reward_eligible', v_min >= 1 and p_series >= v_min);
+  return jsonb_build_object('mine', v_mine, 'taken', v_taken, 'owners', v_owners, 'favorites', v_favs,
+                            'reward', v_reward, 'reward_eligible', v_min >= 1 and p_series >= v_min);
 end $$;
 
 -- Statistiques de collection : par catégorie, par type et par rareté (pour la catégorie demandée)
@@ -1231,6 +1312,7 @@ begin
   update public.{{P}}cards set owner_id = uid, obtained_at = now()
   where type_id = l.type_id and series = l.series and number = l.number and owner_id = l.seller_id;
   if not found then raise exception 'listing_unavailable'; end if;
+  delete from public.{{P}}favorites where user_id = uid and type_id = l.type_id and series = l.series and number = l.number;
   update public.{{P}}listings
   set status = 'sold', buyer_id = uid, final_price = l.price, closed_at = now() where id = l.id;
   return jsonb_build_object('status', public.{{P}}status_json(p));
@@ -1400,6 +1482,226 @@ begin
   order by case when l.status = 'active' then 0 else 1 end,
            l.ends_at asc nulls last, l.closed_at desc nulls last, l.id desc
   limit 100;
+end $$;
+
+-- ---------- Favoris ----------
+-- Ajoute ou retire une carte de mes favoris (impossible sur une carte qui m'appartient déjà)
+create or replace function public.{{P}}toggle_favorite(p_type int, p_series int, p_number int)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); v_owner uuid; v_rows int;
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  perform public.{{P}}ensure_profile(uid);
+  select owner_id into v_owner from public.{{P}}cards where type_id = p_type and series = p_series and number = p_number;
+  if v_owner = uid then raise exception 'own_card'; end if;
+  delete from public.{{P}}favorites where user_id = uid and type_id = p_type and series = p_series and number = p_number;
+  get diagnostics v_rows = row_count;
+  if v_rows = 0 then
+    insert into public.{{P}}favorites (user_id, type_id, series, number) values (uid, p_type, p_series, p_number);
+    return jsonb_build_object('favorited', true);
+  end if;
+  return jsonb_build_object('favorited', false);
+end $$;
+
+-- Mes cartes favorites et leur état actuel (propriétaire, en vente ou non)
+create or replace function public.{{P}}list_favorites()
+returns table (
+  card_type     int,
+  card_series   int,
+  card_number   int,
+  rarity_id     text,
+  owner_id      uuid,
+  owner_name    text,
+  listing_id    bigint,
+  listing_kind  text,
+  listing_price int,
+  created_at    timestamptz
+)
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid();
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  return query
+  select f.type_id, f.series, f.number, public.{{P}}rarity_id(f.number, f.series),
+         c.owner_id, p.username, l.id, l.kind,
+         case when l.kind = 'auction' then coalesce(l.current_bid, l.price) else l.price end,
+         f.created_at
+  from public.{{P}}favorites f
+  left join public.{{P}}cards c on c.type_id = f.type_id and c.series = f.series and c.number = f.number
+  left join public.{{P}}profiles p on p.id = c.owner_id
+  left join public.{{P}}listings l
+         on l.type_id = f.type_id and l.series = f.series and l.number = f.number and l.status = 'active'
+  where f.user_id = uid
+  order by f.created_at desc
+  limit 200;
+end $$;
+
+-- ---------- Offres directes ----------
+-- Propose un prix pour la carte d'un autre joueur (qu'elle soit en vente ou non). Refaire une offre remplace la précédente.
+create or replace function public.{{P}}make_offer(p_type int, p_series int, p_number int, p_amount int)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); v_owner uuid; v_id bigint; v_buyer_name text;
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  perform public.{{P}}ensure_profile(uid);
+  if p_amount is null or p_amount < 1 or p_amount > 100000000 then raise exception 'invalid_price'; end if;
+  select owner_id into v_owner from public.{{P}}cards where type_id = p_type and series = p_series and number = p_number;
+  if v_owner is null then raise exception 'card_not_taken'; end if;
+  if v_owner = uid then raise exception 'own_card'; end if;
+
+  insert into public.{{P}}offers (type_id, series, number, buyer_id, seller_id, amount)
+  values (p_type, p_series, p_number, uid, v_owner, p_amount)
+  on conflict (type_id, series, number, buyer_id) where status = 'pending'
+  do update set amount = excluded.amount, created_at = now()
+  returning id into v_id;
+
+  select username into v_buyer_name from public.{{P}}profiles where id = uid;
+  insert into public.{{P}}notifications (user_id, kind, type_id, series, number, offer_id, amount, actor_name)
+  values (v_owner, 'offer_received', p_type, p_series, p_number, v_id, p_amount, v_buyer_name);
+
+  return jsonb_build_object('offer_id', v_id);
+end $$;
+
+-- L'acheteur retire sa propre offre tant qu'elle est en attente
+create or replace function public.{{P}}cancel_offer(p_id bigint)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); o public.{{P}}offers;
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  select * into o from public.{{P}}offers where id = p_id for update;
+  if not found or o.status <> 'pending' then raise exception 'offer_unavailable'; end if;
+  if o.buyer_id <> uid then raise exception 'not_owner'; end if;
+  update public.{{P}}offers set status = 'cancelled', responded_at = now() where id = p_id;
+  return jsonb_build_object('ok', true);
+end $$;
+
+-- Le propriétaire répond à une offre reçue. Les pièces de l'acheteur ne sont débitées que s'il accepte.
+-- Toute annonce active sur la carte est retirée (la propriété change) ; une enchère déjà surenchérie bloque l'acceptation.
+create or replace function public.{{P}}respond_offer(p_id bigint, p_accept boolean)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); o public.{{P}}offers; v_owner uuid; bal bigint; p public.{{P}}profiles;
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  select * into o from public.{{P}}offers where id = p_id for update;
+  if not found or o.status <> 'pending' then raise exception 'offer_unavailable'; end if;
+  if o.seller_id <> uid then raise exception 'not_owner'; end if;
+
+  if not p_accept then
+    update public.{{P}}offers set status = 'declined', responded_at = now() where id = p_id;
+    insert into public.{{P}}notifications (user_id, kind, type_id, series, number, offer_id, amount)
+    values (o.buyer_id, 'offer_declined', o.type_id, o.series, o.number, o.id, o.amount);
+    p := public.{{P}}sync(uid);
+    return jsonb_build_object('status', public.{{P}}status_json(p));
+  end if;
+
+  perform 1 from public.{{P}}listings
+  where type_id = o.type_id and series = o.series and number = o.number and status = 'active' and kind = 'auction' and bid_count > 0
+  for update;
+  if found then raise exception 'card_in_auction'; end if;
+
+  select owner_id into v_owner from public.{{P}}cards
+  where type_id = o.type_id and series = o.series and number = o.number for update;
+  if v_owner is distinct from uid then
+    update public.{{P}}offers set status = 'cancelled', responded_at = now() where id = p_id;
+    raise exception 'not_owner';
+  end if;
+
+  perform 1 from public.{{P}}profiles where id in (uid, o.buyer_id) order by id for update;
+  select coins into bal from public.{{P}}profiles where id = o.buyer_id;
+  if bal < o.amount then raise exception 'buyer_insufficient_coins'; end if;
+
+  update public.{{P}}profiles set coins = coins - o.amount where id = o.buyer_id;
+  update public.{{P}}profiles set coins = coins + o.amount where id = uid returning * into p;
+  update public.{{P}}cards set owner_id = o.buyer_id, obtained_at = now()
+  where type_id = o.type_id and series = o.series and number = o.number;
+  delete from public.{{P}}favorites where user_id = o.buyer_id and type_id = o.type_id and series = o.series and number = o.number;
+
+  update public.{{P}}listings set status = 'cancelled', closed_at = now()
+  where type_id = o.type_id and series = o.series and number = o.number and status = 'active';
+
+  update public.{{P}}offers set status = 'accepted', responded_at = now() where id = p_id;
+  update public.{{P}}offers set status = 'cancelled', responded_at = now()
+  where type_id = o.type_id and series = o.series and number = o.number and status = 'pending' and id <> p_id;
+
+  insert into public.{{P}}notifications (user_id, kind, type_id, series, number, offer_id, amount)
+  values (o.buyer_id, 'offer_accepted', o.type_id, o.series, o.number, o.id, o.amount);
+
+  return jsonb_build_object('status', public.{{P}}status_json(p));
+end $$;
+
+-- Mes offres envoyées et reçues (en cours + 7 derniers jours)
+create or replace function public.{{P}}my_offers()
+returns table (
+  offer_id         bigint,
+  card_type        int,
+  card_series      int,
+  card_number      int,
+  rarity_id        text,
+  role             text,
+  counterpart_name text,
+  amount           int,
+  status           text,
+  created_at       timestamptz,
+  responded_at     timestamptz
+)
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid();
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  return query
+  select o.id, o.type_id, o.series, o.number, public.{{P}}rarity_id(o.number, o.series),
+         case when o.buyer_id = uid then 'buyer' else 'seller' end,
+         p.username, o.amount, o.status, o.created_at, o.responded_at
+  from public.{{P}}offers o
+  join public.{{P}}profiles p on p.id = (case when o.buyer_id = uid then o.seller_id else o.buyer_id end)
+  where (o.buyer_id = uid or o.seller_id = uid)
+    and (o.status = 'pending' or o.responded_at > now() - interval '7 days')
+  order by case when o.status = 'pending' then 0 else 1 end, o.created_at desc
+  limit 100;
+end $$;
+
+-- ---------- Notifications ----------
+create or replace function public.{{P}}notifications_list(p_limit int default 30)
+returns table (
+  id           bigint,
+  kind         text,
+  card_type    int,
+  card_series  int,
+  card_number  int,
+  rarity_id    text,
+  listing_id   bigint,
+  offer_id     bigint,
+  amount       int,
+  actor_name   text,
+  read         boolean,
+  created_at   timestamptz,
+  unread_total bigint
+)
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid();
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  return query
+  select n.id, n.kind, n.type_id, n.series, n.number, public.{{P}}rarity_id(n.number, n.series),
+         n.listing_id, n.offer_id, n.amount, n.actor_name, n.read, n.created_at,
+         (select count(*) from public.{{P}}notifications nn where nn.user_id = uid and not nn.read)
+  from public.{{P}}notifications n
+  where n.user_id = uid
+  order by n.created_at desc
+  limit least(greatest(p_limit, 1), 100);
+end $$;
+
+create or replace function public.{{P}}notifications_mark_read(p_ids bigint[] default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid();
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  if p_ids is null then
+    update public.{{P}}notifications set read = true where user_id = uid and not read;
+  else
+    update public.{{P}}notifications set read = true where user_id = uid and id = any(p_ids);
+  end if;
+  return jsonb_build_object('ok', true);
 end $$;
 
 -- Crédite un achat Stripe. Appelée uniquement par la fonction serveur du webhook Stripe (rôle service_role).
@@ -1680,6 +1982,14 @@ revoke all on function public.{{P}}admin_delete_type(text, int)                 
 revoke all on function public.{{P}}admin_set_config(text, text, numeric)             from public, anon;
 revoke all on function public.{{P}}admin_save_rarity(text, text, text, int, text, text, text) from public, anon;
 revoke all on function public.{{P}}admin_set_legal(text, text, text)                 from public, anon;
+revoke all on function public.{{P}}toggle_favorite(int, int, int)                    from public, anon;
+revoke all on function public.{{P}}list_favorites()                                  from public, anon;
+revoke all on function public.{{P}}make_offer(int, int, int, int)                    from public, anon;
+revoke all on function public.{{P}}cancel_offer(bigint)                              from public, anon;
+revoke all on function public.{{P}}respond_offer(bigint, boolean)                    from public, anon;
+revoke all on function public.{{P}}my_offers()                                       from public, anon;
+revoke all on function public.{{P}}notifications_list(int)                           from public, anon;
+revoke all on function public.{{P}}notifications_mark_read(bigint[])                 from public, anon;
 
 grant execute on function public.{{P}}status()                                          to authenticated;
 grant execute on function public.{{P}}open_booster()                                    to authenticated;
@@ -1707,3 +2017,11 @@ grant execute on function public.{{P}}admin_delete_type(text, int)              
 grant execute on function public.{{P}}admin_set_config(text, text, numeric)             to authenticated;
 grant execute on function public.{{P}}admin_save_rarity(text, text, text, int, text, text, text) to authenticated;
 grant execute on function public.{{P}}admin_set_legal(text, text, text)                 to authenticated;
+grant execute on function public.{{P}}toggle_favorite(int, int, int)                    to authenticated;
+grant execute on function public.{{P}}list_favorites()                                  to authenticated;
+grant execute on function public.{{P}}make_offer(int, int, int, int)                    to authenticated;
+grant execute on function public.{{P}}cancel_offer(bigint)                              to authenticated;
+grant execute on function public.{{P}}respond_offer(bigint, boolean)                    to authenticated;
+grant execute on function public.{{P}}my_offers()                                       to authenticated;
+grant execute on function public.{{P}}notifications_list(int)                           to authenticated;
+grant execute on function public.{{P}}notifications_mark_read(bigint[])                 to authenticated;
