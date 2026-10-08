@@ -60,6 +60,15 @@ select (r->>'golden') golden, r->>'category_id' cat, jsonb_array_length(r->'card
   (select bool_and((c->>'type_id')::int between 9 and 16) from jsonb_array_elements(r->'cards') c) types_cat2
 from gold;
 select 'cartes dorées distinctes', count(*) = count(distinct (c->>'type_id', c->>'series', c->>'number')) from gold, jsonb_array_elements(r->'cards') c;
+
+\echo '=== 5bis. booster doré : chance bonus d''une Unique (1/1), forcée à 100 % pour le test'
+update public.{{P}}config set value = 1 where key = 'golden_unique_chance';
+create temp table gold2 as select public.{{P}}open_booster() r from generate_series(1,3);
+select jsonb_array_length(r->'cards') as nb_cartes_dont_bonus,
+  (select bool_or(c->>'rarity_id' = 'unique') from jsonb_array_elements(r->'cards') c) as contient_une_unique
+from gold2;
+update public.{{P}}config set value = 0 where key = 'golden_unique_chance';
+
 update public.{{P}}config set value = 0 where key = 'golden_booster_chance';
 
 \echo '=== 6. toutes les catégories épuisées -> pool_empty ; boosters non consommés'

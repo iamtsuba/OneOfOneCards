@@ -52,6 +52,7 @@ export default function Odds({ category }) {
             <p className="fine">
               Booster doré : {golden.chance > 0 ? fmtShare(golden.chance) : 'désactivé'} par booster
               {goldenList ? `, il contient ${goldenList}` : ''}.
+              {golden.unique_chance > 0 && ` Et une chance de ${fmtShare(golden.unique_chance)} d’avoir en plus une carte Unique (1/1) !`}
             </p>
           )}
           <p className="fine">

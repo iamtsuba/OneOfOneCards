@@ -28,6 +28,7 @@ insert into public.{{P}}config (key, value, description) values
   ('auction_min_increment',  1,    'Surenchère minimale (pièces)'),
   ('auction_extend_seconds', 60,   'Si une mise arrive dans les X dernières secondes, le compteur repart à X secondes'),
   ('golden_booster_chance',  0.00000001, 'Chance qu''un booster soit doré (0.00000001 = 0,000001 %). Contenu dans {{P}}golden_contents'),
+  ('golden_unique_chance',   0.005, 'Chance qu''un booster doré contienne EN PLUS une carte Unique (1/1) (0.005 = 0,5 %). S''ajoute au contenu garanti de {{P}}golden_contents, indépendamment de lui'),
   ('series_reward_min_size', 2,    'Une série complétée (toutes ses cartes d''un type) donne un pack doré au premier joueur qui la complète. Taille de série minimale pour être récompensée (0 = désactivé)'),
   ('shop_enabled',           {{SHOP_ENABLED}},    'Boutique Stripe : 1 = visible dans l''application, 0 = masquée (à passer à 1 une fois Stripe configuré). Activée par défaut en préproduction pour pouvoir tester les achats'),
   ('stripe_pack_boosters',   10,   'Boosters bonus ajoutés par achat'),
@@ -833,6 +834,27 @@ begin
       end loop;
     end loop;
   end loop;
+
+  -- Petite chance supplémentaire (indépendante du contenu garanti ci-dessus) d'une carte Unique (1/1) en plus
+  if random() < coalesce(public.{{P}}cfg('golden_unique_chance'), 0)::double precision then
+    t2 := 0;
+    while t2 < 10 loop
+      t2 := t2 + 1;
+      select d2.o_type, d2.o_series, d2.o_number into tid, m, num
+      from public.{{P}}draw_rarity('unique', p_cat) d2;
+      exit when tid is null;
+      insert into public.{{P}}cards (type_id, series, number, owner_id) values (tid, m, num, p_uid)
+      on conflict (type_id, series, number) do nothing;
+      get diagnostics rows = row_count;
+      if rows = 1 then
+        res := res || jsonb_build_array(jsonb_build_object(
+          'type_id', tid, 'series', m, 'number', num, 'rarity_id', public.{{P}}rarity_id(num, m, tid)
+        ));
+        exit;
+      end if;
+    end loop;
+  end if;
+
   return res;
 end $$;
 
@@ -1245,6 +1267,7 @@ begin
 
   select jsonb_build_object(
            'chance', coalesce(public.{{P}}cfg('golden_booster_chance'), 0),
+           'unique_chance', coalesce(public.{{P}}cfg('golden_unique_chance'), 0),
            'contents', coalesce((select jsonb_agg(jsonb_build_object('rarity_id', rarity_id, 'quantity', quantity) order by rarity_id)
                                  from public.{{P}}golden_contents), '[]'::jsonb))
   into v_golden;
