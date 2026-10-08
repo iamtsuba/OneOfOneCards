@@ -73,7 +73,7 @@ export default function Market({ initialView = 'browse', initialListingId = null
     return () => clearTimeout(t)
   }, [ended, now, load, refreshStatus])
 
-  const selected = browse.find((r) => r.listing_id === selectedId) || mine.find((r) => r.listing_id === selectedId) || favorites.find((r) => r.listing_id === selectedId)
+  const selected = browse.find((r) => r.listing_id === selectedId) || mine.find((r) => r.listing_id === selectedId)
   const left = (r) => (r.ends_at ? new Date(r.ends_at).getTime() - (now + skew) : null)
 
   return (
@@ -175,7 +175,7 @@ export default function Market({ initialView = 'browse', initialListingId = null
       )}
 
       {view === 'favorites' && (
-        <FavoritesPanel rows={favorites} loading={loading} rarityMap={rarityMap} catalog={catalog} reload={load} onOpenListing={(id) => setSelectedId(id)} />
+        <FavoritesPanel rows={favorites} loading={loading} rarityMap={rarityMap} catalog={catalog} reload={load} onOpenListing={(id) => { setView('browse'); setSelectedId(id) }} />
       )}
 
       {selected && (
