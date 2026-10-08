@@ -125,7 +125,7 @@ input:focus-visible, select:focus-visible { outline: 3px solid color-mix(in srgb
 .detail-card { width: min(66vw, 280px); }
 
 /* ---------- Cartes ---------- */
-.card { --c1: #f3efe6; --c2: #cfc8b8; --ct: #3a3630; container-type: inline-size; display: block; width: 100%; aspect-ratio: 5 / 7; position: relative; padding: 0; border: 0; background: none; text-align: inherit; }
+.card { --r1: #cfc8b8; --r2: #9a917f; --rt: #3a3630; container-type: inline-size; display: block; width: 100%; aspect-ratio: 5 / 7; position: relative; padding: 0; border: 0; background: none; text-align: inherit; }
 .card.clickable { cursor: pointer; transition: transform .15s; }
 .card.clickable:hover { transform: translateY(-3px); }
 
@@ -281,9 +281,14 @@ button.slot:hover { border-color: var(--ink-soft); color: var(--ink-soft); }
 .check input[type='checkbox'] { flex: none; width: 24px; min-height: 24px; height: 24px; margin: 1px 0 0; padding: 0; accent-color: var(--accent); }
 
 /* ---------- Nouveau design de carte : image au centre, numérotation en bas ---------- */
-.card-face { position: absolute; inset: 0; overflow: hidden; border-radius: 7cqw; border: 2.6cqw solid transparent; color: var(--ct);
-  background: linear-gradient(160deg, var(--c1), var(--c2)) padding-box, linear-gradient(135deg, var(--r1), var(--r2)) border-box;
+.card-face { position: absolute; inset: 0; overflow: hidden; border-radius: 7cqw; border: 2.6cqw solid transparent; color: var(--rt);
+  background: linear-gradient(160deg, var(--r1), var(--r2)) padding-box,
+              linear-gradient(135deg, color-mix(in srgb, var(--r1) 55%, #000), color-mix(in srgb, var(--r2) 55%, #000)) border-box;
   box-shadow: 0 .8cqw 0 rgba(0,0,0,.1), 0 4cqw 7cqw -4cqw rgba(20,25,60,.5); }
+/* À moi : fond vert distinctif (pas une couleur de catégorie), cadre et bandeau restent ceux de la rareté */
+.card.mine .card-face { color: #fff;
+  background: linear-gradient(160deg, #3fcf8e, #12804f) padding-box,
+              linear-gradient(135deg, color-mix(in srgb, var(--r1) 55%, #000), color-mix(in srgb, var(--r2) 55%, #000)) border-box; }
 .card-rarity { position: absolute; top: 2.4cqw; left: 50%; transform: translateX(-50%); padding: .7cqw 4.4cqw; border-radius: 99px; background: linear-gradient(135deg, var(--r1), var(--r2)); color: var(--rt); font-size: 6.2cqw; font-weight: 700; white-space: nowrap; }
 .card-art { position: absolute; left: 6cqw; right: 6cqw; top: 14cqw; height: 66cqw; display: grid; place-items: center; overflow: hidden; border-radius: 5cqw; background: rgba(255,255,255,.55); }
 .card-art .type-art { font-size: 42cqw; line-height: 1; }
