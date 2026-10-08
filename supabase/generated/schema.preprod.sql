@@ -2033,6 +2033,54 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
+-- Ajoute une nouvelle rareté « range » (seul type qu'on peut ajouter : Unique/Alpha/Omega restent uniques par
+-- construction). p_max_series est obligatoire (pas de nouveau plafond ouvert : « Commune » reste la seule rareté
+-- sans limite). Ajoutée automatiquement aux seuils des catégories qui ont déjà les leurs, pour qu'elle y soit
+-- utilisable tout de suite (à ajuster ensuite dans le formulaire de chaque catégorie si besoin).
+create or replace function public.pp_o1ocards_admin_create_rarity(
+  p_password text, p_id text, p_name text, p_max_series int, p_color text, p_color2 text, p_text_color text
+)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare err text := public.pp_o1ocards_admin_guard(p_password); v_id text := lower(trim(coalesce(p_id, '')));
+begin
+  if err is not null then return jsonb_build_object('error', err); end if;
+  if v_id !~ '^[a-z][a-z0-9_]{1,19}$' then raise exception 'invalid_id'; end if;
+  if exists (select 1 from public.pp_o1ocards_rarities where id = v_id) then raise exception 'id_taken'; end if;
+  if char_length(trim(coalesce(p_name, ''))) < 1 or char_length(p_name) > 30 then raise exception 'invalid_name'; end if;
+  if p_max_series is null or p_max_series < 1 then raise exception 'invalid_max_series'; end if;
+  if p_color !~ '^#[0-9a-fA-F]{6}$' or p_color2 !~ '^#[0-9a-fA-F]{6}$' or p_text_color !~ '^#[0-9a-fA-F]{6}$' then
+    raise exception 'invalid_color';
+  end if;
+
+  insert into public.pp_o1ocards_rarities (id, name, kind, max_series, sort_order, color, color2, text_color)
+  values (v_id, trim(p_name), 'range', p_max_series,
+          (select coalesce(max(sort_order), 0) + 1 from public.pp_o1ocards_rarities), p_color, p_color2, p_text_color);
+
+  insert into public.pp_o1ocards_category_rarities (category_id, rarity_id, max_series)
+  select c.id, v_id, p_max_series
+  from public.pp_o1ocards_categories c
+  where exists (select 1 from public.pp_o1ocards_category_rarities cr where cr.category_id = c.id);
+
+  return jsonb_build_object('ok', true, 'id', v_id);
+end $$;
+
+-- Autorisée seulement si aucune carte n'a encore été classée dans cette rareté (sinon leur affichage casserait)
+create or replace function public.pp_o1ocards_admin_delete_rarity(p_password text, p_id text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare err text := public.pp_o1ocards_admin_guard(p_password); v_kind text;
+begin
+  if err is not null then return jsonb_build_object('error', err); end if;
+  select kind into v_kind from public.pp_o1ocards_rarities where id = p_id;
+  if not found then raise exception 'not_found'; end if;
+  if v_kind <> 'range' then raise exception 'rarity_protected'; end if;
+  if exists (select 1 from public.pp_o1ocards_golden_contents where rarity_id = p_id) then raise exception 'rarity_in_use'; end if;
+  if exists (select 1 from public.pp_o1ocards_cards c where public.pp_o1ocards_rarity_id(c.number, c.series, c.type_id) = p_id) then
+    raise exception 'rarity_in_use';
+  end if;
+  delete from public.pp_o1ocards_rarities where id = p_id;
+  return jsonb_build_object('ok', true);
+end $$;
+
 create or replace function public.pp_o1ocards_admin_set_legal(p_password text, p_key text, p_value text)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare err text := public.pp_o1ocards_admin_guard(p_password);
@@ -2087,6 +2135,8 @@ revoke all on function public.pp_o1ocards_admin_save_type(text, int, int, text, 
 revoke all on function public.pp_o1ocards_admin_delete_type(text, int)                      from public, anon;
 revoke all on function public.pp_o1ocards_admin_set_config(text, text, numeric)             from public, anon;
 revoke all on function public.pp_o1ocards_admin_save_rarity(text, text, text, int, text, text, text) from public, anon;
+revoke all on function public.pp_o1ocards_admin_create_rarity(text, text, text, int, text, text, text)   from public, anon;
+revoke all on function public.pp_o1ocards_admin_delete_rarity(text, text)                                from public, anon;
 revoke all on function public.pp_o1ocards_admin_set_legal(text, text, text)                 from public, anon;
 revoke all on function public.pp_o1ocards_toggle_favorite(int, int, int)                    from public, anon;
 revoke all on function public.pp_o1ocards_list_favorites()                                  from public, anon;
@@ -2122,6 +2172,8 @@ grant execute on function public.pp_o1ocards_admin_save_type(text, int, int, tex
 grant execute on function public.pp_o1ocards_admin_delete_type(text, int)                      to authenticated;
 grant execute on function public.pp_o1ocards_admin_set_config(text, text, numeric)             to authenticated;
 grant execute on function public.pp_o1ocards_admin_save_rarity(text, text, text, int, text, text, text) to authenticated;
+grant execute on function public.pp_o1ocards_admin_create_rarity(text, text, text, int, text, text, text)   to authenticated;
+grant execute on function public.pp_o1ocards_admin_delete_rarity(text, text)                                to authenticated;
 grant execute on function public.pp_o1ocards_admin_set_legal(text, text, text)                 to authenticated;
 grant execute on function public.pp_o1ocards_toggle_favorite(int, int, int)                    to authenticated;
 grant execute on function public.pp_o1ocards_list_favorites()                                  to authenticated;

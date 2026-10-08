@@ -394,8 +394,18 @@ function ConfigRow({ row, run, busy }) {
 function RaritiesTab({ data, run, busy }) {
   return (
     <div className="admin-list">
-      <p className="muted">Nom, couleurs et seuils. « Taille de série maximale » : une rareté à seuil concerne les séries jusqu’à cette taille (vide = toutes les autres).</p>
+      <p className="muted">
+        Nom, couleurs et seuils. « Taille de série maximale » : une rareté à seuil concerne les séries jusqu’à cette taille (vide = toutes les
+        autres). Ce sont les seuils globaux, utilisés comme valeurs de départ pour chaque catégorie ; ajuste ensuite chaque catégorie dans l’onglet
+        « Catégories » si elle a besoin de seuils différents.
+      </p>
       {data.rarities.map((r) => <RarityForm key={r.id} rarity={r} run={run} busy={busy} />)}
+      <h3>Nouvelle rareté</h3>
+      <p className="muted">
+        Unique, Alpha et Omega sont fixes (1/1, 1/m, m/m) : on ne peut ajouter qu’une rareté « à seuil », entre les raretés existantes. Elle
+        s’ajoute aux seuils des catégories qui ont déjà les leurs (modifiable ensuite catégorie par catégorie).
+      </p>
+      <NewRarityForm key={`new-rarity-${data.rarities.length}`} run={run} busy={busy} />
     </div>
   )
 }
@@ -419,6 +429,38 @@ function RarityForm({ rarity, run, busy }) {
       </div>
       <div className="row">
         <button className="btn" disabled={busy || !f.name.trim()} onClick={() => run((pw) => api.adminSaveRarity(pw, { id: rarity.id, ...f }), 'Rareté enregistrée.')}>Enregistrer</button>
+        {rarity.kind === 'range' && (
+          <button className="btn ghost danger" disabled={busy} onClick={() => window.confirm(`Supprimer la rareté « ${rarity.name} » ? Impossible si elle est déjà utilisée.`) && run((pw) => api.adminDeleteRarity(pw, rarity.id), 'Rareté supprimée.')}>
+            Supprimer
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function NewRarityForm({ run, busy }) {
+  const [f, setF] = useState({ id: '', name: '', max_series: '', color: '#a5b4fc', color2: '#4338ca', text_color: '#ffffff' })
+  const set = (k) => (v) => setF((cur) => ({ ...cur, [k]: v }))
+  const slug = f.id.trim().toLowerCase().replace(/[^a-z0-9_]/g, '')
+  const valid = /^[a-z][a-z0-9_]{1,19}$/.test(slug) && f.name.trim() && Number(f.max_series) >= 1
+  return (
+    <div className="admin-card" style={{ '--cat1': f.color, '--cat2': f.color2 }}>
+      <div className="admin-card-head"><i className="cat-dot" /><strong>Nouvelle rareté</strong></div>
+      <div className="admin-grid">
+        <label>Identifiant (fixe)<input value={f.id} maxLength={20} placeholder="ex. legendaire" onChange={(e) => set('id')(e.target.value)} /></label>
+        <label>Nom<input value={f.name} maxLength={30} onChange={(e) => set('name')(e.target.value)} /></label>
+        <label>Taille de série maximale<input type="number" min="1" value={f.max_series} placeholder="ex. 15" onChange={(e) => set('max_series')(e.target.value)} /></label>
+      </div>
+      <div className="admin-colors">
+        <Color label="Couleur" value={f.color} onChange={set('color')} />
+        <Color label="Couleur 2" value={f.color2} onChange={set('color2')} />
+        <Color label="Texte" value={f.text_color} onChange={set('text_color')} />
+      </div>
+      <div className="row">
+        <button className="btn" disabled={busy || !valid} onClick={() => run((pw) => api.adminCreateRarity(pw, { ...f, id: slug }), 'Rareté créée.')}>
+          Créer
+        </button>
       </div>
     </div>
   )

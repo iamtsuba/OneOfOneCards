@@ -108,6 +108,12 @@ export const adminSaveRarity = (pw, r) =>
     p_password: pw, p_id: r.id, p_name: r.name, p_max_series: r.max_series === null || r.max_series === '' ? null : Number(r.max_series),
     p_color: r.color, p_color2: r.color2, p_text_color: r.text_color,
   })
+export const adminCreateRarity = (pw, r) =>
+  rpc('admin_create_rarity', {
+    p_password: pw, p_id: r.id, p_name: r.name, p_max_series: Number(r.max_series),
+    p_color: r.color, p_color2: r.color2, p_text_color: r.text_color,
+  })
+export const adminDeleteRarity = (pw, id) => rpc('admin_delete_rarity', { p_password: pw, p_id: id })
 export const adminSetLegal = (pw, key, value) => rpc('admin_set_legal', { p_password: pw, p_key: key, p_value: value })
 export const adminChangePassword = (pw, next) => rpc('admin_change_password', { p_password: pw, p_new: next })
 
@@ -159,6 +165,11 @@ export function explain(e) {
   if (m.includes('listing_unavailable')) return 'Cette annonce n’est plus disponible.'
   if (m.includes('invalid_price')) return 'Prix invalide : entre un nombre entier de pièces, minimum 1.'
   if (m.includes('invalid_rarity_thresholds')) return 'Seuils de rareté invalides : ils doivent être strictement croissants, dans la limite du nombre de séries, et seule la dernière rareté peut rester sans plafond.'
+  if (m.includes('id_taken')) return 'Cet identifiant de rareté existe déjà.'
+  if (m.includes('invalid_id')) return 'Identifiant invalide : minuscules, chiffres et _ uniquement, 2 à 20 caractères, débute par une lettre.'
+  if (m.includes('invalid_max_series')) return 'Taille de série maximale invalide : un nombre entier d’au moins 1 (pas de plafond ouvert pour une nouvelle rareté).'
+  if (m.includes('rarity_protected')) return 'Unique, Alpha et Omega ne peuvent pas être supprimées.'
+  if (m.includes('rarity_in_use')) return 'Cette rareté est utilisée (cartes déjà classées ou contenu de booster doré) : elle ne peut pas être supprimée.'
   if (m.includes('own_card')) return 'Cette carte est déjà à toi.'
   if (m.includes('card_not_taken')) return 'Cette carte n’a pas encore été tirée : impossible de faire une offre.'
   if (m.includes('buyer_insufficient_coins')) return 'L’acheteur n’a plus assez de pièces pour cette offre.'

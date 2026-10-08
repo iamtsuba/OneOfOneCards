@@ -40,5 +40,24 @@ select pg_temp.try('select public.{{P}}admin_save_category(''thomarie'', ' || :c
 select public.{{P}}admin_save_category('thomarie', :cat_a, 'Test Seuils A (renommée)', 90, 100, '#ffffff', '#000000', '#000000', true) ->> 'ok' as renomme;
 select public.{{P}}rarity_id(2, 3, :type_a) as toujours_ultra_apres_renommage;
 
+\echo '=== création d''une nouvelle rareté « range » : identifiant, doublon, nom, seuil, ajout aux catégories qui ont déjà les leurs'
+select pg_temp.try('select public.{{P}}admin_create_rarity(''thomarie'', ''MEGA-1'', ''Méga'', 8, ''#a5b4fc'', ''#4338ca'', ''#ffffff'')');   -- identifiant invalide
+select pg_temp.try('select public.{{P}}admin_create_rarity(''thomarie'', ''ultra'', ''Doublon'', 8, ''#a5b4fc'', ''#4338ca'', ''#ffffff'')');  -- déjà pris
+select pg_temp.try('select public.{{P}}admin_create_rarity(''thomarie'', ''mega'', ''Méga'', null, ''#a5b4fc'', ''#4338ca'', ''#ffffff'')');   -- pas de plafond ouvert autorisé
+select public.{{P}}admin_create_rarity('thomarie', 'mega', 'Méga', 8, '#a5b4fc', '#4338ca', '#ffffff') ->> 'id' as mega_cree;
+select kind, max_series, sort_order from public.{{P}}rarities where id = 'mega';
+-- Ajoutée automatiquement aux seuils de la catégorie A (qui a déjà les siens), pas à la B (qui n'en a aucun)
+select max_series from public.{{P}}category_rarities where category_id = :cat_a and rarity_id = 'mega';
+select count(*) as pas_ajoutee_a_b from public.{{P}}category_rarities where category_id = :cat_b and rarity_id = 'mega';
+
+\echo '=== suppression : protégée (Unique/Alpha/Omega), bloquée si utilisée, sinon acceptée'
+select pg_temp.try('select public.{{P}}admin_delete_rarity(''thomarie'', ''unique'')');
+insert into public.{{P}}cards (type_id, series, number, owner_id) values (:type_a, 8, 2, :A);  -- série 8 chez A -> 'mega' (seuil 8)
+select public.{{P}}rarity_id(2, 8, :type_a) as carte_classee_mega;
+select pg_temp.try('select public.{{P}}admin_delete_rarity(''thomarie'', ''mega'')');  -- refusée : déjà utilisée
+delete from public.{{P}}cards where type_id = :type_a and series = 8 and number = 2;
+select (public.{{P}}admin_delete_rarity('thomarie', 'mega') ->> 'ok')::bool as supprimee_une_fois_libre;
+select count(*) as seuils_categorie_a_retires_en_cascade from public.{{P}}category_rarities where rarity_id = 'mega';
+
 delete from public.{{P}}types where id in (:type_a, :type_b);
 delete from public.{{P}}categories where id in (:cat_a, :cat_b);
