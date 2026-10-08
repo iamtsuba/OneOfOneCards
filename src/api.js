@@ -89,6 +89,8 @@ export async function getCatalog() {
 
 // ---------- Console admin : chaque appel renvoie le mot de passe, vérifié côté serveur ----------
 export const adminData = (pw) => rpc('admin_data', { p_password: pw })
+export const adminForceDeleteCategory = (pw, id, confirmName) =>
+  rpc('admin_force_delete_category', { p_password: pw, p_id: id, p_confirm_name: confirmName })
 export const adminSaveCategory = (pw, c) =>
   rpc('admin_save_category', {
     p_password: pw, p_id: c.id ?? null, p_name: c.name, p_position: Number(c.position), p_series_count: Number(c.series_count),
@@ -170,6 +172,7 @@ export function explain(e) {
   if (m.includes('invalid_max_series')) return 'Taille de série maximale invalide : un nombre entier d’au moins 1 (pas de plafond ouvert pour une nouvelle rareté).'
   if (m.includes('rarity_protected')) return 'Unique, Alpha et Omega ne peuvent pas être supprimées.'
   if (m.includes('rarity_in_use')) return 'Cette rareté est utilisée (cartes déjà classées ou contenu de booster doré) : elle ne peut pas être supprimée.'
+  if (m.includes('name_mismatch')) return 'Le nom tapé ne correspond pas exactement au nom de la catégorie : rien n’a été supprimé.'
   if (m.includes('own_card')) return 'Cette carte est déjà à toi.'
   if (m.includes('card_not_taken')) return 'Cette carte n’a pas encore été tirée : impossible de faire une offre.'
   if (m.includes('buyer_insufficient_coins')) return 'L’acheteur n’a plus assez de pièces pour cette offre.'

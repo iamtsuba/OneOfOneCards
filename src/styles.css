@@ -362,6 +362,8 @@ textarea { width: 100%; padding: 10px 14px; border: 1.5px solid var(--line); bor
 .badge { padding: 2px 8px; border-radius: 99px; background: #e4e7f4; font-size: 12px; font-weight: 700; }
 .badge.done { background: #cfeedd; color: #0d5a35; }
 .btn.danger { color: #a3200f; }
+.danger-zone { margin-top: 8px; padding: 12px; border: 1.5px dashed #a3200f; border-radius: 12px; background: #fef2f1; display: grid; gap: 8px; }
+.danger-zone .fine { color: #7c160a; }
 .file-btn { display: inline-flex; align-items: center; cursor: pointer; }
 .config-key { font-family: var(--font-display); }
 .row.nowrap { flex-wrap: nowrap; }

@@ -1,4 +1,5 @@
 \set A '''11111111-1111-1111-1111-111111111111'''
+\set B '''22222222-2222-2222-2222-222222222222'''
 \set QUIET on
 create or replace function pg_temp.try(sql text) returns void language plpgsql as $$ declare r text; begin execute 'select (' || regexp_replace(rtrim(sql, '; '), '^select ', '') || ')::text' into r; if r like '%"error"%' then raise exception 'renvoyé: %', r; end if; raise notice 'OK'; exception when others then raise notice 'erreur: %', sqlerrm; end $$;
 delete from public.{{P}}admin_log; delete from public.{{P}}secrets where key = 'admin_password_hash';
@@ -26,6 +27,35 @@ select 'suppression type + catégorie sans carte', (public.{{P}}admin_delete_typ
   (public.{{P}}admin_delete_category('thomarie', (select id from public.{{P}}categories where name = 'Années 2000')) ->> 'ok')::bool as cat_ok;
 select 'catégories restantes', count(*) from public.{{P}}categories;
 delete from public.{{P}}cards where type_id = 1 and series = 10 and number = 4;
+
+\echo '--- suppression forcée : catégorie entamée, avec annonces, enchère, offre, favori'
+set request.jwt.claim.sub = :B; select public.{{P}}status() is not null as profil_b;
+delete from public.{{P}}categories where name = 'Test Suppression';
+set request.jwt.claim.sub = :A;
+select (public.{{P}}admin_save_category('thomarie', null, 'Test Suppression', 95, 50, '#ffffff', '#000000', '#000000', true) ->> 'id')::int as cat_del \gset
+select (public.{{P}}admin_save_type('thomarie', null, :cat_del, 'Objet à supprimer', '🗑️', 1) ->> 'id')::int as type_del \gset
+insert into public.{{P}}cards (type_id, series, number, owner_id) values (:type_del, 5, 2, :A), (:type_del, 5, 3, :A);
+select public.{{P}}list_card(:type_del, 5, 2, 'auction') ->> 'listing_id' as listing_id \gset
+set request.jwt.claim.sub = :B;
+select (coins) as coins_b_avant_enchere from public.{{P}}profiles where id = :B \gset
+select public.{{P}}place_bid(:listing_id, 10) ->> 'ends_at' is not null as a_enchere;
+select coins from public.{{P}}profiles where id = :B;  -- doit avoir baissé de 10 (mise bloquée)
+select public.{{P}}make_offer(:type_del, 5, 3, 4) ->> 'offer_id' is not null as offre_envoyee;
+select public.{{P}}toggle_favorite(:type_del, 5, 4) ->> 'favorited' as favori_pose;  -- carte encore libre
+set request.jwt.claim.sub = :A;
+
+select pg_temp.try('select public.{{P}}admin_force_delete_category(''thomarie'', ' || :cat_del || ', ''mauvais nom'')');  -- refusée
+select 'rien supprimé si mauvais nom', count(*) from public.{{P}}categories where id = :cat_del;
+
+select (public.{{P}}admin_force_delete_category('thomarie', :cat_del, 'Test Suppression') ->> 'refunded_bidders')::int = 1 as un_enchérisseur_rembourse;
+select 'B entièrement remboursé', coins = :coins_b_avant_enchere from public.{{P}}profiles where id = :B;
+select 'catégorie supprimée', count(*) from public.{{P}}categories where id = :cat_del;
+select 'types supprimés (cascade)', count(*) from public.{{P}}types where id = :type_del;
+select 'cartes supprimées (cascade)', count(*) from public.{{P}}cards where type_id = :type_del;
+select 'annonce supprimée', count(*) from public.{{P}}listings where id::text = :'listing_id';
+select 'offre supprimée', count(*) from public.{{P}}offers where type_id = :type_del;
+select 'favori supprimé (cascade)', count(*) from public.{{P}}favorites where type_id = :type_del;
+select 'seuils de rareté supprimés (cascade)', count(*) from public.{{P}}category_rarities where category_id = :cat_del;
 
 \echo '--- 1/1 obtenue : journalisée et visible dans admin_data (email, type, date)'
 delete from public.{{P}}unique_wins;

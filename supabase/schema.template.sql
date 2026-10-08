@@ -1999,6 +1999,42 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
+-- Supprime une catégorie ET tout ce qui en dépend : types, cartes déjà tirées (et donc retirées aux joueurs
+-- qui les possédaient), annonces, enchères, offres, notifications liées, favoris, seuils de rareté, 1/1
+-- journalisées. Opération destructive et irréversible : demande de retaper le nom exact de la catégorie en
+-- confirmation. Rembourse d'abord les enchérisseurs en tête sur les enchères actives (leurs pièces sont déjà
+-- débitées/bloquées), pour qu'aucune pièce ne disparaisse du jeu.
+create or replace function public.{{P}}admin_force_delete_category(p_password text, p_id int, p_confirm_name text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare err text := public.{{P}}admin_guard(p_password); v_name text; v_refunded int;
+begin
+  if err is not null then return jsonb_build_object('error', err); end if;
+  select name into v_name from public.{{P}}categories where id = p_id;
+  if not found then raise exception 'not_found'; end if;
+  if trim(coalesce(p_confirm_name, '')) <> v_name then raise exception 'name_mismatch'; end if;
+
+  with refunded as (
+    update public.{{P}}profiles p
+    set coins = coins + l.current_bid
+    from public.{{P}}listings l
+    where l.type_id in (select id from public.{{P}}types where category_id = p_id)
+      and l.status = 'active' and l.kind = 'auction' and l.current_bidder = p.id
+    returning 1
+  )
+  select count(*) into v_refunded from refunded;
+
+  -- Pas de clé étrangère depuis ces trois tables vers types/categories : suppression explicite nécessaire
+  delete from public.{{P}}listings      where type_id in (select id from public.{{P}}types where category_id = p_id);
+  delete from public.{{P}}offers        where type_id in (select id from public.{{P}}types where category_id = p_id);
+  delete from public.{{P}}notifications where type_id in (select id from public.{{P}}types where category_id = p_id);
+
+  -- Le reste suit par clé étrangère ON DELETE CASCADE : types -> cartes, category_rarities, series_rewards,
+  -- unique_wins, favoris
+  delete from public.{{P}}categories where id = p_id;
+
+  return jsonb_build_object('ok', true, 'refunded_bidders', coalesce(v_refunded, 0));
+end $$;
+
 -- Type de carte : image = emoji, adresse https:// ou image intégrée (data:image/...)
 create or replace function public.{{P}}admin_save_type(
   p_password text, p_id int, p_category int, p_name text, p_image text, p_position int
@@ -2166,6 +2202,7 @@ revoke all on function public.{{P}}admin_data(text)                             
 revoke all on function public.{{P}}admin_save_category(text, int, text, int, int, text, text, text, boolean, jsonb) from public, anon;
 revoke all on function public.{{P}}admin_set_category_closed(text, int, boolean)     from public, anon;
 revoke all on function public.{{P}}admin_delete_category(text, int)                  from public, anon;
+revoke all on function public.{{P}}admin_force_delete_category(text, int, text)      from public, anon;
 revoke all on function public.{{P}}admin_save_type(text, int, int, text, text, int)  from public, anon;
 revoke all on function public.{{P}}admin_delete_type(text, int)                      from public, anon;
 revoke all on function public.{{P}}admin_set_config(text, text, numeric)             from public, anon;
@@ -2203,6 +2240,7 @@ grant execute on function public.{{P}}admin_data(text)                          
 grant execute on function public.{{P}}admin_save_category(text, int, text, int, int, text, text, text, boolean, jsonb) to authenticated;
 grant execute on function public.{{P}}admin_set_category_closed(text, int, boolean)     to authenticated;
 grant execute on function public.{{P}}admin_delete_category(text, int)                  to authenticated;
+grant execute on function public.{{P}}admin_force_delete_category(text, int, text)      to authenticated;
 grant execute on function public.{{P}}admin_save_type(text, int, int, text, text, int)  to authenticated;
 grant execute on function public.{{P}}admin_delete_type(text, int)                      to authenticated;
 grant execute on function public.{{P}}admin_set_config(text, text, numeric)             to authenticated;

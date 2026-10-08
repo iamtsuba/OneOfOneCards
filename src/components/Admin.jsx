@@ -221,6 +221,7 @@ function CategoryForm({ cat, nextPos, rangeRarities, categoryRarities, run, busy
     return proportionalThresholds(cat?.series_count ?? 500, rangeRarities)
   })
   const [touched, setTouched] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState('')
   const setThreshold = (id) => (v) => { setTouched(true); setThresholds((cur) => ({ ...cur, [id]: v })) }
   const set = (k) => (v) => {
     setF((cur) => ({ ...cur, [k]: v }))
@@ -279,6 +280,27 @@ function CategoryForm({ cat, nextPos, rangeRarities, categoryRarities, run, busy
           </button>
         )}
       </div>
+
+      {cat && started && (
+        <div className="danger-zone">
+          <p className="fine">
+            Zone dangereuse : <strong>{cat.taken}</strong> carte{cat.taken > 1 ? 's' : ''} déjà tirée{cat.taken > 1 ? 's' : ''} dans cette
+            catégorie. La supprimer retire aussi ces cartes aux joueurs qui les possèdent, ainsi que ses types, annonces, enchères (les
+            enchérisseurs en tête sont remboursés), offres, notifications et favoris liés. Irréversible.
+          </p>
+          <label>
+            Tape « {cat.name} » pour confirmer
+            <input value={confirmDelete} onChange={(e) => setConfirmDelete(e.target.value)} placeholder={cat.name} />
+          </label>
+          <button
+            className="btn ghost danger"
+            disabled={busy || confirmDelete !== cat.name}
+            onClick={() => run((pw) => api.adminForceDeleteCategory(pw, cat.id, confirmDelete), 'Catégorie et tout son contenu supprimés.')}
+          >
+            Supprimer la catégorie et tout son contenu
+          </button>
+        </div>
+      )}
     </div>
   )
 }
