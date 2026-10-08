@@ -1,4 +1,5 @@
-// Reçoit les notifications de Stripe et crédite les boosters après un paiement réussi.
+// 1/1 Cards, environnement prod : reçoit les notifications de Stripe et crédite les boosters après un paiement réussi.
+// GÉNÉRÉ par scripts/build-functions.mjs à partir de supabase/functions/_templates/ : ne pas modifier à la main.
 // Cette fonction doit être déployée SANS vérification JWT (c'est Stripe qui appelle) :
 // l'authenticité est garantie par la signature Stripe, vérifiée ci-dessous.
 //
@@ -6,6 +7,10 @@
 //   STRIPE_WEBHOOK_SECRET : secret de signature du webhook (whsec_...)
 // SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY sont fournis automatiquement par Supabase.
 import { createClient } from 'npm:@supabase/supabase-js@2'
+
+// Réglages de l'environnement (la production et la préproduction partagent la même base Supabase)
+const PREFIX = 'o1ocards_'     // préfixe des tables et fonctions SQL de cet environnement
+const SP = ''              // préfixe des secrets
 
 const enc = new TextEncoder()
 
@@ -42,7 +47,7 @@ async function verifySignature(payload: string, header: string | null, secret: s
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return new Response('method_not_allowed', { status: 405 })
 
-  const secret = Deno.env.get('STRIPE_WEBHOOK_SECRET')
+  const secret = Deno.env.get(SP + 'STRIPE_WEBHOOK_SECRET')
   if (!secret) return new Response('not_configured', { status: 503 })
 
   const payload = await req.text() // texte brut : indispensable pour vérifier la signature
@@ -72,7 +77,7 @@ Deno.serve(async (req) => {
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
     auth: { persistSession: false },
   })
-  const { data, error } = await admin.rpc('opennumber_credit_purchase', {
+  const { data, error } = await admin.rpc(PREFIX + 'credit_purchase', {
     p_session_id: session.id,
     p_user: userId,
     p_boosters: boosters,

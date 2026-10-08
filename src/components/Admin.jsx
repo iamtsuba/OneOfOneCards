@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import * as api from '../api'
 import { explain } from '../api'
-import { useGame, fmt } from '../game'
+import { useGame, fmt, fmtDate } from '../game'
 import TypeArt from './TypeArt'
 
 const TABS = [
@@ -9,6 +9,7 @@ const TABS = [
   ['types', 'Types'],
   ['config', 'Réglages'],
   ['rarities', 'Raretés'],
+  ['uniques', '1/1 gagnées'],
   ['legal', 'Infos légales'],
   ['security', 'Sécurité'],
 ]
@@ -160,6 +161,7 @@ export default function Admin({ onClose }) {
         {tab === 'types' && <TypesTab data={data} run={run} busy={busy} />}
         {tab === 'config' && <ConfigTab data={data} run={run} busy={busy} />}
         {tab === 'rarities' && <RaritiesTab data={data} run={run} busy={busy} />}
+        {tab === 'uniques' && <UniqueWinsTab data={data} />}
         {tab === 'legal' && <LegalTab data={data} run={run} busy={busy} />}
         {tab === 'security' && <SecurityTab busy={busy} onChange={changePassword} />}
       </div>
@@ -177,27 +179,57 @@ const Color = ({ label, value, onChange }) => (
 // ---------- Catégories ----------
 function CategoriesTab({ data, run, busy }) {
   const nextPos = Math.max(0, ...data.categories.map((c) => c.position)) + 1
+  const rangeRarities = data.rarities.filter((r) => r.kind === 'range').sort((a, b) => a.sort_order - b.sort_order)
   return (
     <div className="admin-list">
       <p className="muted">
         Une seule catégorie est ouvrable à la fois : la première (par position) qui est activée et pas terminée. Quand toutes ses cartes sont tirées,
         la suivante s’ouvre. Le nombre de séries ne peut plus changer une fois des cartes tirées.
       </p>
-      {data.categories.map((c) => <CategoryForm key={c.id} cat={c} run={run} busy={busy} />)}
+      {data.categories.map((c) => (
+        <CategoryForm key={c.id} cat={c} rangeRarities={rangeRarities} categoryRarities={data.category_rarities ?? []} run={run} busy={busy} />
+      ))}
       <h3>Nouvelle catégorie</h3>
-      <CategoryForm key={`new-${data.categories.length}`} cat={null} nextPos={nextPos} run={run} busy={busy} />
+      <CategoryForm key={`new-${data.categories.length}`} cat={null} nextPos={nextPos} rangeRarities={rangeRarities} categoryRarities={data.category_rarities ?? []} run={run} busy={busy} />
     </div>
   )
 }
 
-function CategoryForm({ cat, nextPos, run, busy }) {
+// Seuils par défaut au prorata du nombre de séries (référence : les seuils globaux, calibrés pour 500 séries)
+function proportionalThresholds(seriesCount, rangeRarities) {
+  let prev = 0
+  const out = {}
+  for (const r of rangeRarities) {
+    if (r.max_series == null) { out[r.id] = ''; continue }
+    const v = Math.min(Math.max(Math.round((r.max_series / 500) * seriesCount), prev + 1), seriesCount)
+    out[r.id] = String(v)
+    prev = v
+  }
+  return out
+}
+
+function CategoryForm({ cat, nextPos, rangeRarities, categoryRarities, run, busy }) {
   const [f, setF] = useState({
     name: cat?.name ?? '', position: cat?.position ?? nextPos ?? 1, series_count: cat?.series_count ?? 500,
     color: cat?.color ?? '#ffd9b0', color2: cat?.color2 ?? '#f29a45', text_color: cat?.text_color ?? '#3d1f00', enabled: cat?.enabled ?? true,
   })
-  const set = (k) => (v) => setF((cur) => ({ ...cur, [k]: v }))
+  const [thresholds, setThresholds] = useState(() => {
+    if (cat) {
+      const own = Object.fromEntries(categoryRarities.filter((cr) => cr.category_id === cat.id).map((cr) => [cr.rarity_id, cr.max_series]))
+      if (Object.keys(own).length) return Object.fromEntries(rangeRarities.map((r) => [r.id, own[r.id] == null ? '' : String(own[r.id])]))
+    }
+    return proportionalThresholds(cat?.series_count ?? 500, rangeRarities)
+  })
+  const [touched, setTouched] = useState(false)
+  const setThreshold = (id) => (v) => { setTouched(true); setThresholds((cur) => ({ ...cur, [id]: v })) }
+  const set = (k) => (v) => {
+    setF((cur) => ({ ...cur, [k]: v }))
+    // Nouvelle catégorie : tant que l'admin n'a pas touché aux seuils, on les recalcule au prorata
+    if (!cat && k === 'series_count' && !touched) setThresholds(proportionalThresholds(Number(v) || 1, rangeRarities))
+  }
   const started = (cat?.taken ?? 0) > 0
   const pct = cat && cat.total ? (cat.taken / cat.total) * 100 : 0
+  const rarities = rangeRarities.map((r) => ({ rarity_id: r.id, max_series: thresholds[r.id] === '' ? null : Number(thresholds[r.id]) }))
   return (
     <div className="admin-card" style={{ '--cat1': f.color, '--cat2': f.color2 }}>
       <div className="admin-card-head">
@@ -217,8 +249,23 @@ function CategoryForm({ cat, nextPos, run, busy }) {
         <Color label="Texte" value={f.text_color} onChange={set('text_color')} />
         <label className="check inline"><input type="checkbox" checked={f.enabled} onChange={(e) => set('enabled')(e.target.checked)} /><span>Activée</span></label>
       </div>
+
+      <p className="fine rarity-thresholds-hint">
+        Seuils de rareté de cette catégorie : chaque rareté couvre les séries jusqu’à la taille indiquée (la dernière, sans valeur, couvre le
+        reste). Pré-remplis au prorata du nombre de séries ci-dessus, modifiables.
+      </p>
+      <div className="admin-grid rarity-thresholds">
+        {rangeRarities.map((r) => (
+          <label key={r.id} style={{ '--cat1': r.color, '--cat2': r.color2 }}>
+            <span className="rarity-threshold-label"><i className="cat-dot" />{r.name}</span>
+            <input type="number" min="1" max={f.series_count} value={thresholds[r.id]}
+              placeholder="toutes les autres" onChange={(e) => setThreshold(r.id)(e.target.value)} />
+          </label>
+        ))}
+      </div>
+
       <div className="row">
-        <button className="btn" disabled={busy || !f.name.trim()} onClick={() => run((pw) => api.adminSaveCategory(pw, { id: cat?.id, ...f }), cat ? 'Catégorie enregistrée.' : 'Catégorie créée.')}>
+        <button className="btn" disabled={busy || !f.name.trim()} onClick={() => run((pw) => api.adminSaveCategory(pw, { id: cat?.id, ...f, rarities }), cat ? 'Catégorie enregistrée.' : 'Catégorie créée.')}>
           {cat ? 'Enregistrer' : 'Créer'}
         </button>
         {cat && (
@@ -349,8 +396,18 @@ function ConfigRow({ row, run, busy }) {
 function RaritiesTab({ data, run, busy }) {
   return (
     <div className="admin-list">
-      <p className="muted">Nom, couleurs et seuils. « Taille de série maximale » : une rareté à seuil concerne les séries jusqu’à cette taille (vide = toutes les autres).</p>
+      <p className="muted">
+        Nom, couleurs et seuils. « Taille de série maximale » : une rareté à seuil concerne les séries jusqu’à cette taille (vide = toutes les
+        autres). Ce sont les seuils globaux, utilisés comme valeurs de départ pour chaque catégorie ; ajuste ensuite chaque catégorie dans l’onglet
+        « Catégories » si elle a besoin de seuils différents.
+      </p>
       {data.rarities.map((r) => <RarityForm key={r.id} rarity={r} run={run} busy={busy} />)}
+      <h3>Nouvelle rareté</h3>
+      <p className="muted">
+        Unique, Alpha et Omega sont fixes (1/1, 1/m, m/m) : on ne peut ajouter qu’une rareté « à seuil », entre les raretés existantes. Elle
+        s’ajoute aux seuils des catégories qui ont déjà les leurs (modifiable ensuite catégorie par catégorie).
+      </p>
+      <NewRarityForm key={`new-rarity-${data.rarities.length}`} run={run} busy={busy} />
     </div>
   )
 }
@@ -374,7 +431,61 @@ function RarityForm({ rarity, run, busy }) {
       </div>
       <div className="row">
         <button className="btn" disabled={busy || !f.name.trim()} onClick={() => run((pw) => api.adminSaveRarity(pw, { id: rarity.id, ...f }), 'Rareté enregistrée.')}>Enregistrer</button>
+        {rarity.kind === 'range' && (
+          <button className="btn ghost danger" disabled={busy} onClick={() => window.confirm(`Supprimer la rareté « ${rarity.name} » ? Impossible si elle est déjà utilisée.`) && run((pw) => api.adminDeleteRarity(pw, rarity.id), 'Rareté supprimée.')}>
+            Supprimer
+          </button>
+        )}
       </div>
+    </div>
+  )
+}
+
+function NewRarityForm({ run, busy }) {
+  const [f, setF] = useState({ id: '', name: '', max_series: '', color: '#a5b4fc', color2: '#4338ca', text_color: '#ffffff' })
+  const set = (k) => (v) => setF((cur) => ({ ...cur, [k]: v }))
+  const slug = f.id.trim().toLowerCase().replace(/[^a-z0-9_]/g, '')
+  const valid = /^[a-z][a-z0-9_]{1,19}$/.test(slug) && f.name.trim() && Number(f.max_series) >= 1
+  return (
+    <div className="admin-card" style={{ '--cat1': f.color, '--cat2': f.color2 }}>
+      <div className="admin-card-head"><i className="cat-dot" /><strong>Nouvelle rareté</strong></div>
+      <div className="admin-grid">
+        <label>Identifiant (fixe)<input value={f.id} maxLength={20} placeholder="ex. legendaire" onChange={(e) => set('id')(e.target.value)} /></label>
+        <label>Nom<input value={f.name} maxLength={30} onChange={(e) => set('name')(e.target.value)} /></label>
+        <label>Taille de série maximale<input type="number" min="1" value={f.max_series} placeholder="ex. 15" onChange={(e) => set('max_series')(e.target.value)} /></label>
+      </div>
+      <div className="admin-colors">
+        <Color label="Couleur" value={f.color} onChange={set('color')} />
+        <Color label="Couleur 2" value={f.color2} onChange={set('color2')} />
+        <Color label="Texte" value={f.text_color} onChange={set('text_color')} />
+      </div>
+      <div className="row">
+        <button className="btn" disabled={busy || !valid} onClick={() => run((pw) => api.adminCreateRarity(pw, { ...f, id: slug }), 'Rareté créée.')}>
+          Créer
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------- 1/1 gagnées ----------
+function UniqueWinsTab({ data }) {
+  const wins = data.unique_wins ?? []
+  return (
+    <div className="admin-list">
+      <p className="muted">Chaque carte Unique (1/1) obtenue, la plus récente en premier (les 500 dernières).</p>
+      {wins.length === 0 ? (
+        <p className="muted">Aucune 1/1 obtenue pour l’instant.</p>
+      ) : (
+        wins.map((w) => (
+          <div key={w.id} className="admin-card slim">
+            <div>
+              <strong>{w.email}</strong>
+              <p className="fine">{w.username ?? 'pseudo inconnu'} · {w.type_name} · {fmtDate(w.won_at)}</p>
+            </div>
+          </div>
+        ))
+      )}
     </div>
   )
 }

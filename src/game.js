@@ -19,6 +19,18 @@ export const fmtPct = (x) =>
 export const fmtDate = (d) =>
   new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
 
+// Temps écoulé, lisible : à l'instant · il y a 5 min · il y a 3 h · il y a 2 j
+export function fmtAgo(d) {
+  const s = Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 1000))
+  if (s < 60) return 'à l’instant'
+  const m = Math.floor(s / 60)
+  if (m < 60) return `il y a ${m} min`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `il y a ${h} h`
+  const j = Math.floor(h / 24)
+  return `il y a ${j} j`
+}
+
 export function fmtClock(ms) {
   const s = Math.max(0, Math.ceil(ms / 1000))
   const h = Math.floor(s / 3600)

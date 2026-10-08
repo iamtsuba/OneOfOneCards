@@ -1,17 +1,27 @@
-// Crée une session de paiement Stripe Checkout pour acheter un pack de boosters.
+// 1/1 Cards, environnement preprod : crée une session de paiement Stripe Checkout pour acheter un pack de boosters.
+// GÉNÉRÉ par scripts/build-functions.mjs à partir de supabase/functions/_templates/ : ne pas modifier à la main.
 // Appelée par l'application avec le jeton de connexion du joueur.
 //
 // Secrets requis (Supabase > Edge Functions > Secrets) :
-//   STRIPE_SECRET_KEY : clé secrète Stripe (sk_test_... puis sk_live_...)
-//   SITE_URL          : adresse de l'application, ex. https://iamtsuba.github.io/OneOfOnePack/
+//   PP_STRIPE_SECRET_KEY : clé secrète Stripe (TOUJOURS une clé sk_test_ : les clés sk_live_ sont refusées en préproduction)
+//   PP_SITE_URL          : adresse de l'application (ex. https://pp.1o1cards.cc/)
 // Secrets facultatifs :
-//   STRIPE_TAX_CODE         : code fiscal du produit (défaut txcd_10201000, jeu vidéo numérique : exigé par Managed Payments)
-//   STRIPE_MANAGED_PAYMENTS : mettre "false" pour ne pas utiliser Managed Payments (Stripe comme vendeur officiel)
+//   PP_STRIPE_TAX_CODE         : code fiscal du produit (défaut txcd_10201000, jeu vidéo numérique : exigé par Managed Payments)
+//   PP_STRIPE_MANAGED_PAYMENTS : mettre "false" pour ne pas utiliser Managed Payments (Stripe comme vendeur officiel)
+//   (les réglages facultatifs retombent sur ceux de la production s'ils ne sont pas définis ; jamais les clés Stripe)
 //
 // Avant de créer le paiement, la fonction exige l'acceptation des conditions de vente et la renonciation au droit de
-// rétractation (contenu numérique), puis enregistre cette preuve dans opennumber_consents (date, version, textes, IP).
+// rétractation (contenu numérique), puis enregistre cette preuve dans pp_o1ocards_consents (date, version, textes, IP).
 // SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY sont fournis automatiquement par Supabase.
 import { createClient } from 'npm:@supabase/supabase-js@2'
+
+// Réglages de l'environnement (la production et la préproduction partagent la même base Supabase)
+const ENV: string = 'preprod'
+const PREFIX = 'pp_o1ocards_'     // préfixe des tables et fonctions SQL de cet environnement
+const SP = 'PP_'              // préfixe des secrets : jamais de repli sur la production pour les clés Stripe
+const secret = (name: string) => Deno.env.get(SP + name)
+// Réglages non sensibles : la préproduction retombe sur la valeur de la production si elle n'a pas la sienne
+const setting = (name: string) => Deno.env.get(SP + name) ?? (SP ? Deno.env.get(name) : undefined)
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -31,10 +41,15 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
 
   try {
-    const stripeKey = Deno.env.get('STRIPE_SECRET_KEY')
-    const siteUrl = Deno.env.get('SITE_URL')
+    const stripeKey = secret('STRIPE_SECRET_KEY')
+    const siteUrl = secret('SITE_URL')
     if (!stripeKey || !siteUrl) {
-      console.error('Secret manquant :', !stripeKey ? 'STRIPE_SECRET_KEY' : '', !siteUrl ? 'SITE_URL' : '')
+      console.error('Secret manquant :', !stripeKey ? SP + 'STRIPE_SECRET_KEY' : '', !siteUrl ? SP + 'SITE_URL' : '')
+      return json({ error: 'not_configured' }, 503)
+    }
+    // La préproduction ne doit jamais encaisser de vrai argent
+    if (ENV === 'preprod' && stripeKey.startsWith('sk_live_')) {
+      console.error('Clé Stripe de production refusée en préproduction : utilise une clé sk_test_ dans ' + SP + 'STRIPE_SECRET_KEY')
       return json({ error: 'not_configured' }, 503)
     }
     let back: URL
@@ -58,9 +73,9 @@ Deno.serve(async (req) => {
     const user = auth?.user
     if (authError || !user) return json({ error: 'not_authenticated' }, 401)
 
-    // Prix et contenu du pack : réglages de la table opennumber_config
+    // Prix et contenu du pack : réglages de la table pp_o1ocards_config
     const { data: rows, error: cfgError } = await admin
-      .from('opennumber_config')
+      .from(PREFIX + 'config')
       .select('key,value')
       .in('key', ['shop_enabled', 'stripe_pack_boosters', 'stripe_pack_price_cents', 'cgv_version'])
     if (cfgError) throw cfgError
@@ -76,14 +91,14 @@ Deno.serve(async (req) => {
     if (!(consent?.cgv === true && consent?.withdrawal === true)) return json({ error: 'consent_required' }, 400)
     if (Number(consent?.version) !== cfg.cgv_version) return json({ error: 'cgv_outdated' }, 409)
 
-    const { data: legalRows, error: legalError } = await admin.from('opennumber_legal').select('key,value')
+    const { data: legalRows, error: legalError } = await admin.from(PREFIX + 'legal').select('key,value')
     if (legalError) throw legalError
     const legal: Record<string, string> = Object.fromEntries((legalRows ?? []).map((r) => [r.key, String(r.value ?? '')]))
 
     // Garde-fou : pas d'argent réel tant que l'identité du vendeur n'est pas renseignée
     const missing = ['seller_name', 'seller_address', 'seller_email'].filter((k) => !legal[k]?.trim())
     if (stripeKey.startsWith('sk_live_') && missing.length > 0) {
-      console.error('Informations légales manquantes dans opennumber_legal :', missing.join(', '))
+      console.error('Informations légales manquantes dans ' + PREFIX + 'legal :', missing.join(', '))
       return json({ error: 'legal_incomplete' }, 403)
     }
 
@@ -101,15 +116,15 @@ Deno.serve(async (req) => {
       'line_items[0][quantity]': '1',
       'line_items[0][price_data][currency]': 'eur',
       'line_items[0][price_data][unit_amount]': String(cents),
-      'line_items[0][price_data][product_data][name]': `${boosters} boosters OneOfOne Pack`,
-      'line_items[0][price_data][product_data][tax_code]': Deno.env.get('STRIPE_TAX_CODE') || 'txcd_10201000',
+      'line_items[0][price_data][product_data][name]': `${boosters} boosters 1/1 Cards${ENV === 'preprod' ? ' (test)' : ''}`,
+      'line_items[0][price_data][product_data][tax_code]': setting('STRIPE_TAX_CODE') || 'txcd_10201000',
       'metadata[user_id]': user.id,
       'metadata[boosters]': String(boosters),
     })
     if (user.email) form.set('customer_email', user.email)
-    if (Deno.env.get('STRIPE_MANAGED_PAYMENTS') === 'false') form.set('managed_payments[enabled]', 'false')
+    if (setting('STRIPE_MANAGED_PAYMENTS') === 'false') form.set('managed_payments[enabled]', 'false')
 
-    const base = Deno.env.get('STRIPE_API_BASE') ?? 'https://api.stripe.com'
+    const base = secret('STRIPE_API_BASE') ?? 'https://api.stripe.com'
     const res = await fetch(`${base}/v1/checkout/sessions`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${stripeKey}`, 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -123,7 +138,7 @@ Deno.serve(async (req) => {
 
     // Preuve du consentement, liée à la session de paiement
     const forwarded = (req.headers.get('x-forwarded-for') ?? '').split(',')[0].trim()
-    const { error: consentError } = await admin.from('opennumber_consents').insert({
+    const { error: consentError } = await admin.from(PREFIX + 'consents').insert({
       user_id: user.id,
       cgv_version: cfg.cgv_version,
       statement: [legal.consent_cgv_text, legal.consent_withdrawal_text].filter(Boolean).join('\n'),

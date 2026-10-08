@@ -1,36 +1,55 @@
 import { supabase } from './supabase'
+import { PREFIX, CHECKOUT_FUNCTION } from './env'
+
+// Tous les noms de tables et de fonctions de la base portent le préfixe de l'environnement (o1ocards_ ou pp_o1ocards_)
+const table = (name) => PREFIX + name
 
 async function rpc(fn, args) {
-  const { data, error } = await supabase.rpc(fn, args)
+  const { data, error } = await supabase.rpc(PREFIX + fn, args)
   if (error) throw error
   if (data && !Array.isArray(data) && typeof data === 'object' && data.error) throw new Error(data.error)
   return data
 }
 
-export const getStatus = () => rpc('opennumber_status')
-export const openBooster = () => rpc('opennumber_open_booster')
-export const openGoldenPack = () => rpc('opennumber_open_golden_pack')
-export const ackRewards = () => rpc('opennumber_ack_rewards')
-export const getStats = (category = null) => rpc('opennumber_my_stats', { p_category: category })
-export const getOdds = (category = null) => rpc('opennumber_draw_odds', { p_category: category })
-export const typeState = (type, series) => rpc('opennumber_type_state', { p_type: type, p_series: series })
-export const setUsername = (name) => rpc('opennumber_set_username', { p_username: name })
+export const getStatus = () => rpc('status')
+export const openBooster = () => rpc('open_booster')
+export const openGoldenPack = () => rpc('open_golden_pack')
+export const ackRewards = () => rpc('ack_rewards')
+export const getStats = (category = null) => rpc('my_stats', { p_category: category })
+export const getOdds = (category = null) => rpc('draw_odds', { p_category: category })
+export const typeState = (type, series) => rpc('type_state', { p_type: type, p_series: series })
+export const setUsername = (name) => rpc('set_username', { p_username: name })
 export const listCollection = ({ category = null, type = null, rarity = null, sort = 'series', limit = 60, offset = 0 } = {}) =>
-  rpc('opennumber_list_collection', { p_category: category, p_type: type, p_rarity: rarity, p_sort: sort, p_limit: limit, p_offset: offset })
+  rpc('list_collection', { p_category: category, p_type: type, p_rarity: rarity, p_sort: sort, p_limit: limit, p_offset: offset })
 
-export const sellDirect = (type, series, number) => rpc('opennumber_sell_direct', { p_type: type, p_series: series, p_number: number })
+export const sellDirect = (type, series, number) => rpc('sell_direct', { p_type: type, p_series: series, p_number: number })
 export const listCard = ({ type, series, number, kind, price = null }) =>
-  rpc('opennumber_list_card', { p_type: type, p_series: series, p_number: number, p_kind: kind, p_price: price })
-export const cancelListing = (id) => rpc('opennumber_cancel_listing', { p_id: id })
-export const buyNow = (id) => rpc('opennumber_buy_now', { p_id: id })
-export const placeBid = (id, amount) => rpc('opennumber_place_bid', { p_id: id, p_amount: amount })
+  rpc('list_card', { p_type: type, p_series: series, p_number: number, p_kind: kind, p_price: price })
+export const cancelListing = (id) => rpc('cancel_listing', { p_id: id })
+export const buyNow = (id) => rpc('buy_now', { p_id: id })
+export const placeBid = (id, amount) => rpc('place_bid', { p_id: id, p_amount: amount })
 export const marketList = ({ kind = null, sort = 'ending', limit = 60, offset = 0 } = {}) =>
-  rpc('opennumber_market_list', { p_kind: kind, p_sort: sort, p_limit: limit, p_offset: offset })
-export const marketMine = () => rpc('opennumber_market_mine')
+  rpc('market_list', { p_kind: kind, p_sort: sort, p_limit: limit, p_offset: offset })
+export const marketMine = () => rpc('market_mine')
+
+// Favoris
+export const toggleFavorite = (type, series, number) => rpc('toggle_favorite', { p_type: type, p_series: series, p_number: number })
+export const listFavorites = () => rpc('list_favorites')
+
+// Offres directes
+export const makeOffer = (type, series, number, amount) =>
+  rpc('make_offer', { p_type: type, p_series: series, p_number: number, p_amount: amount })
+export const cancelOffer = (id) => rpc('cancel_offer', { p_id: id })
+export const respondOffer = (id, accept) => rpc('respond_offer', { p_id: id, p_accept: accept })
+export const myOffers = () => rpc('my_offers')
+
+// Notifications
+export const notificationsList = (limit = 30) => rpc('notifications_list', { p_limit: limit })
+export const notificationsMarkRead = (ids = null) => rpc('notifications_mark_read', { p_ids: ids })
 
 // Boutique : demande une page de paiement Stripe et renvoie son adresse
 export async function startCheckout(consent) {
-  const { data, error } = await supabase.functions.invoke('opennumber-checkout', { body: { consent } })
+  const { data, error } = await supabase.functions.invoke(CHECKOUT_FUNCTION, { body: { consent } })
   if (error) {
     // Code renvoyé par la fonction (not_configured, shop_disabled...), sinon statut HTTP ou type d'erreur réseau
     let code = ''
@@ -46,8 +65,8 @@ export async function startCheckout(consent) {
 // Infos légales du vendeur, textes de consentement et réglages de la boutique (lisibles sans être connecté)
 export async function getLegal() {
   const [legal, config] = await Promise.all([
-    supabase.from('opennumber_legal').select('key,value'),
-    supabase.from('opennumber_config').select('key,value').in('key', ['stripe_pack_boosters', 'stripe_pack_price_cents', 'cgv_version']),
+    supabase.from(table('legal')).select('key,value'),
+    supabase.from(table('config')).select('key,value').in('key', ['stripe_pack_boosters', 'stripe_pack_price_cents', 'cgv_version']),
   ])
   if (legal.error) throw legal.error
   if (config.error) throw config.error
@@ -60,8 +79,8 @@ export async function getLegal() {
 // Catalogue : catégories de boosters et types de cartes (lisible par tous)
 export async function getCatalog() {
   const [cats, types] = await Promise.all([
-    supabase.from('opennumber_categories').select('*').order('position').order('id'),
-    supabase.from('opennumber_types').select('*').order('position').order('id'),
+    supabase.from(table('categories')).select('*').order('position').order('id'),
+    supabase.from(table('types')).select('*').order('position').order('id'),
   ])
   if (cats.error) throw cats.error
   if (types.error) throw types.error
@@ -69,30 +88,37 @@ export async function getCatalog() {
 }
 
 // ---------- Console admin : chaque appel renvoie le mot de passe, vérifié côté serveur ----------
-export const adminData = (pw) => rpc('opennumber_admin_data', { p_password: pw })
+export const adminData = (pw) => rpc('admin_data', { p_password: pw })
 export const adminSaveCategory = (pw, c) =>
-  rpc('opennumber_admin_save_category', {
+  rpc('admin_save_category', {
     p_password: pw, p_id: c.id ?? null, p_name: c.name, p_position: Number(c.position), p_series_count: Number(c.series_count),
     p_color: c.color, p_color2: c.color2, p_text_color: c.text_color, p_enabled: !!c.enabled,
+    p_rarities: c.rarities ?? null,
   })
-export const adminSetCategoryClosed = (pw, id, closed) => rpc('opennumber_admin_set_category_closed', { p_password: pw, p_id: id, p_closed: closed })
-export const adminDeleteCategory = (pw, id) => rpc('opennumber_admin_delete_category', { p_password: pw, p_id: id })
+export const adminSetCategoryClosed = (pw, id, closed) => rpc('admin_set_category_closed', { p_password: pw, p_id: id, p_closed: closed })
+export const adminDeleteCategory = (pw, id) => rpc('admin_delete_category', { p_password: pw, p_id: id })
 export const adminSaveType = (pw, t) =>
-  rpc('opennumber_admin_save_type', {
+  rpc('admin_save_type', {
     p_password: pw, p_id: t.id ?? null, p_category: t.category_id, p_name: t.name, p_image: t.image ?? '', p_position: Number(t.position),
   })
-export const adminDeleteType = (pw, id) => rpc('opennumber_admin_delete_type', { p_password: pw, p_id: id })
-export const adminSetConfig = (pw, key, value) => rpc('opennumber_admin_set_config', { p_password: pw, p_key: key, p_value: Number(value) })
+export const adminDeleteType = (pw, id) => rpc('admin_delete_type', { p_password: pw, p_id: id })
+export const adminSetConfig = (pw, key, value) => rpc('admin_set_config', { p_password: pw, p_key: key, p_value: Number(value) })
 export const adminSaveRarity = (pw, r) =>
-  rpc('opennumber_admin_save_rarity', {
+  rpc('admin_save_rarity', {
     p_password: pw, p_id: r.id, p_name: r.name, p_max_series: r.max_series === null || r.max_series === '' ? null : Number(r.max_series),
     p_color: r.color, p_color2: r.color2, p_text_color: r.text_color,
   })
-export const adminSetLegal = (pw, key, value) => rpc('opennumber_admin_set_legal', { p_password: pw, p_key: key, p_value: value })
-export const adminChangePassword = (pw, next) => rpc('opennumber_admin_change_password', { p_password: pw, p_new: next })
+export const adminCreateRarity = (pw, r) =>
+  rpc('admin_create_rarity', {
+    p_password: pw, p_id: r.id, p_name: r.name, p_max_series: Number(r.max_series),
+    p_color: r.color, p_color2: r.color2, p_text_color: r.text_color,
+  })
+export const adminDeleteRarity = (pw, id) => rpc('admin_delete_rarity', { p_password: pw, p_id: id })
+export const adminSetLegal = (pw, key, value) => rpc('admin_set_legal', { p_password: pw, p_key: key, p_value: value })
+export const adminChangePassword = (pw, next) => rpc('admin_change_password', { p_password: pw, p_new: next })
 
 export async function getRarities() {
-  const { data, error } = await supabase.from('opennumber_rarities').select('*').order('sort_order')
+  const { data, error } = await supabase.from(table('rarities')).select('*').order('sort_order')
   if (error) throw error
   return data
 }
@@ -110,7 +136,7 @@ export function explain(e) {
   const adminMessages = {
     admin_denied: 'Mot de passe incorrect.',
     admin_locked: 'Trop d’essais : l’accès admin est verrouillé pendant 15 minutes.',
-    admin_not_set: 'Aucun mot de passe admin n’est défini : voir le README (opennumber_admin_set_password).',
+    admin_not_set: 'Aucun mot de passe admin n’est défini : voir le README (' + PREFIX + 'admin_set_password).',
     invalid_series: 'Le nombre de séries doit être compris entre 1 et 5000.',
     invalid_color: 'Les couleurs doivent être au format #rrggbb.',
     invalid_image: 'Image invalide : utilise un emoji, une adresse https:// ou une image téléversée.',
@@ -138,6 +164,17 @@ export function explain(e) {
   if (m.includes('has_bids')) return 'Des offres ont été faites : l’annonce ne peut plus être retirée.'
   if (m.includes('listing_unavailable')) return 'Cette annonce n’est plus disponible.'
   if (m.includes('invalid_price')) return 'Prix invalide : entre un nombre entier de pièces, minimum 1.'
+  if (m.includes('invalid_rarity_thresholds')) return 'Seuils de rareté invalides : ils doivent être strictement croissants, dans la limite du nombre de séries, et seule la dernière rareté peut rester sans plafond.'
+  if (m.includes('id_taken')) return 'Cet identifiant de rareté existe déjà.'
+  if (m.includes('invalid_id')) return 'Identifiant invalide : minuscules, chiffres et _ uniquement, 2 à 20 caractères, débute par une lettre.'
+  if (m.includes('invalid_max_series')) return 'Taille de série maximale invalide : un nombre entier d’au moins 1 (pas de plafond ouvert pour une nouvelle rareté).'
+  if (m.includes('rarity_protected')) return 'Unique, Alpha et Omega ne peuvent pas être supprimées.'
+  if (m.includes('rarity_in_use')) return 'Cette rareté est utilisée (cartes déjà classées ou contenu de booster doré) : elle ne peut pas être supprimée.'
+  if (m.includes('own_card')) return 'Cette carte est déjà à toi.'
+  if (m.includes('card_not_taken')) return 'Cette carte n’a pas encore été tirée : impossible de faire une offre.'
+  if (m.includes('buyer_insufficient_coins')) return 'L’acheteur n’a plus assez de pièces pour cette offre.'
+  if (m.includes('card_in_auction')) return 'Cette carte est aux enchères avec des offres en cours : accepte d’abord l’issue de l’enchère.'
+  if (m.includes('offer_unavailable')) return 'Cette offre n’est plus disponible.'
   if (/Could not find the function|schema cache|does not exist|relation .* not/i.test(m))
     return 'La base de données n’est pas à jour : exécute supabase/schema.sql dans le SQL Editor de Supabase.'
   if (/Invalid login credentials/i.test(m)) return 'Email ou mot de passe incorrect.'

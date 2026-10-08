@@ -48,7 +48,7 @@ export default function Pack({ phase = 'idle', dim = false, golden = false, cate
           </g>
           <text x="120" y="130" textAnchor="middle" fontSize="76" fontWeight="800" style={{ fill: 'var(--pk-text)', fontFamily: 'var(--font-display)', letterSpacing: '-0.04em' }}>1/1</text>
           <text x="120" y="212" textAnchor="middle" fontSize="15" fontWeight="600" transform="rotate(-13 120 207)" style={{ fill: 'var(--pk-bandtext)', fontFamily: 'var(--font-body)' }}>{golden ? 'Booster doré' : category?.name ?? '5 cartes numérotées'}</text>
-          <text x="120" y="302" textAnchor="middle" fontSize="23" fontWeight="700" style={{ fill: 'var(--pk-text)', fontFamily: 'var(--font-display)' }}>OneOfOne Pack</text>
+          <text x="120" y="302" textAnchor="middle" fontSize="23" fontWeight="700" style={{ fill: 'var(--pk-text)', fontFamily: 'var(--font-display)' }}>1/1 Cards</text>
           <path d={bottom} style={{ fill: 'var(--pk-crimp)' }} />
         </g>
         <path className="pack-top" d={top} style={{ fill: 'var(--pk-crimp)' }} />

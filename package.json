@@ -1,13 +1,21 @@
 {
-  "name": "oneofone-pack",
+  "name": "o1ocards",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "deploy": "npm run build && gh-pages -d dist"
+    "build": "npm run build:prod",
+    "build:prod": "vite build --mode prod --outDir dist/prod --emptyOutDir && node scripts/post-build.mjs prod",
+    "build:preprod": "vite build --mode preprod --outDir dist/preprod --emptyOutDir && node scripts/post-build.mjs preprod",
+    "build:schema": "node scripts/build-schema.mjs",
+    "build:functions": "node scripts/build-functions.mjs",
+    "build:all": "npm run build:schema && npm run build:functions && npm run build:prod && npm run build:preprod",
+    "test:sql": "bash tests/run-sql.sh",
+    "test:functions": "node tests/functions.test.mjs",
+    "test:front": "node tests/front.test.mjs",
+    "test": "npm run build:all && npm run test:build && npm run test:front && npm run test:functions && npm run test:sql",
+    "test:build": "node tests/build.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
@@ -16,7 +24,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",
-    "gh-pages": "^6.1.1",
+    "jsdom": "^30.0.0",
     "vite": "^5.4.0"
   }
 }
