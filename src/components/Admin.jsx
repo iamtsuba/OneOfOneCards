@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import * as api from '../api'
 import { explain } from '../api'
-import { useGame, fmt } from '../game'
+import { useGame, fmt, fmtDate } from '../game'
 import TypeArt from './TypeArt'
 
 const TABS = [
@@ -9,6 +9,7 @@ const TABS = [
   ['types', 'Types'],
   ['config', 'Réglages'],
   ['rarities', 'Raretés'],
+  ['uniques', '1/1 gagnées'],
   ['legal', 'Infos légales'],
   ['security', 'Sécurité'],
 ]
@@ -160,6 +161,7 @@ export default function Admin({ onClose }) {
         {tab === 'types' && <TypesTab data={data} run={run} busy={busy} />}
         {tab === 'config' && <ConfigTab data={data} run={run} busy={busy} />}
         {tab === 'rarities' && <RaritiesTab data={data} run={run} busy={busy} />}
+        {tab === 'uniques' && <UniqueWinsTab data={data} />}
         {tab === 'legal' && <LegalTab data={data} run={run} busy={busy} />}
         {tab === 'security' && <SecurityTab busy={busy} onChange={changePassword} />}
       </div>
@@ -462,6 +464,28 @@ function NewRarityForm({ run, busy }) {
           Créer
         </button>
       </div>
+    </div>
+  )
+}
+
+// ---------- 1/1 gagnées ----------
+function UniqueWinsTab({ data }) {
+  const wins = data.unique_wins ?? []
+  return (
+    <div className="admin-list">
+      <p className="muted">Chaque carte Unique (1/1) obtenue, la plus récente en premier (les 500 dernières).</p>
+      {wins.length === 0 ? (
+        <p className="muted">Aucune 1/1 obtenue pour l’instant.</p>
+      ) : (
+        wins.map((w) => (
+          <div key={w.id} className="admin-card slim">
+            <div>
+              <strong>{w.email}</strong>
+              <p className="fine">{w.username ?? 'pseudo inconnu'} · {w.type_name} · {fmtDate(w.won_at)}</p>
+            </div>
+          </div>
+        ))
+      )}
     </div>
   )
 }

@@ -27,6 +27,14 @@ select 'suppression type + catégorie sans carte', (public.{{P}}admin_delete_typ
 select 'catégories restantes', count(*) from public.{{P}}categories;
 delete from public.{{P}}cards where type_id = 1 and series = 10 and number = 4;
 
+\echo '--- 1/1 obtenue : journalisée et visible dans admin_data (email, type, date)'
+delete from public.{{P}}unique_wins;
+delete from public.{{P}}cards where type_id = 1 and series = 1 and number = 1;
+insert into public.{{P}}cards (type_id, series, number, owner_id) values (1, 1, 1, :A);
+select w.*
+from jsonb_to_recordset(public.{{P}}admin_data('thomarie')->'unique_wins') as w(email text, username text, type_name text, won_at timestamptz);
+delete from public.{{P}}cards where type_id = 1 and series = 1 and number = 1;
+
 \echo '--- clôture manuelle, réglages, raretés, infos légales'
 select (public.{{P}}admin_set_category_closed('thomarie', 1, true) ->> 'ok') as ferme, public.{{P}}status()->>'active_category_id' as active_apres;
 select (public.{{P}}admin_set_category_closed('thomarie', 1, false) ->> 'ok') as rouvre, public.{{P}}status()->>'active_category_id' as active_apres;

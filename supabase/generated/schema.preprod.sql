@@ -192,6 +192,29 @@ create table if not exists public.pp_o1ocards_cards (
 );
 create index if not exists pp_o1ocards_cards_owner_idx on public.pp_o1ocards_cards (owner_id, type_id, series, number);
 
+-- Journal des 1/1 (série de taille 1 : une seule carte possible, rareté Unique) obtenues, consultable en admin
+create table if not exists public.pp_o1ocards_unique_wins (
+  id      bigint generated always as identity primary key,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  type_id int  not null references public.pp_o1ocards_types (id) on delete cascade,
+  won_at  timestamptz not null default now()
+);
+create index if not exists pp_o1ocards_unique_wins_user_idx on public.pp_o1ocards_unique_wins (user_id);
+
+create or replace function public.pp_o1ocards_log_unique_win()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.series = 1 then   -- une série de 1 carte : c'est forcément la 1/1 (rareté Unique)
+    insert into public.pp_o1ocards_unique_wins (user_id, type_id) values (new.owner_id, new.type_id);
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists pp_o1ocards_cards_unique_win_trg on public.pp_o1ocards_cards;
+create trigger pp_o1ocards_cards_unique_win_trg
+  after insert on public.pp_o1ocards_cards
+  for each row execute function public.pp_o1ocards_log_unique_win();
+
 -- Compteur de cartes déjà tirées par type et par série (pour un tirage rapide)
 create table if not exists public.pp_o1ocards_series_taken (
   type_id int not null references public.pp_o1ocards_types (id) on delete cascade,
@@ -444,6 +467,7 @@ create index if not exists pp_o1ocards_admin_log_idx on public.pp_o1ocards_admin
 alter table public.pp_o1ocards_config       enable row level security;
 alter table public.pp_o1ocards_rarities     enable row level security;
 alter table public.pp_o1ocards_category_rarities enable row level security;
+alter table public.pp_o1ocards_unique_wins enable row level security;
 alter table public.pp_o1ocards_profiles     enable row level security;
 alter table public.pp_o1ocards_categories   enable row level security;
 alter table public.pp_o1ocards_types        enable row level security;
@@ -503,6 +527,7 @@ revoke insert, update, delete on public.pp_o1ocards_config, public.pp_o1ocards_r
 revoke all on public.pp_o1ocards_series_taken, public.pp_o1ocards_listings, public.pp_o1ocards_bids, public.pp_o1ocards_golden_contents,
   public.pp_o1ocards_secrets, public.pp_o1ocards_admin_log, public.pp_o1ocards_series_rewards from anon, authenticated;
 revoke all on public.pp_o1ocards_favorites, public.pp_o1ocards_offers, public.pp_o1ocards_notifications from anon, authenticated;
+revoke all on public.pp_o1ocards_unique_wins from anon, authenticated;
 revoke insert, update, delete on public.pp_o1ocards_purchases, public.pp_o1ocards_legal, public.pp_o1ocards_consents from anon, authenticated;
 
 -- ---------- Fonctions utilitaires ----------
@@ -1872,7 +1897,20 @@ begin
       from public.pp_o1ocards_category_rarities cr),
     'legal', (select coalesce(jsonb_agg(jsonb_build_object('key', key, 'value', value) order by key), '[]'::jsonb)
               from public.pp_o1ocards_legal),
-    'players', (select count(*) from public.pp_o1ocards_profiles)
+    'players', (select count(*) from public.pp_o1ocards_profiles),
+    'unique_wins', (select coalesce(jsonb_agg(jsonb_build_object(
+        'id', x.id, 'email', x.email, 'username', x.username,
+        'type_id', x.type_id, 'type_name', x.type_name, 'category_id', x.category_id, 'won_at', x.won_at
+      ) order by x.won_at desc), '[]'::jsonb)
+      from (
+        select w.id, u.email, p.username, w.type_id, t.name as type_name, t.category_id, w.won_at
+        from public.pp_o1ocards_unique_wins w
+        join auth.users u on u.id = w.user_id
+        left join public.pp_o1ocards_profiles p on p.id = w.user_id
+        join public.pp_o1ocards_types t on t.id = w.type_id
+        order by w.won_at desc
+        limit 500
+      ) x)
   );
 end $$;
 

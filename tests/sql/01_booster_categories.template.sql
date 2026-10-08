@@ -62,12 +62,21 @@ from gold;
 select 'cartes dorées distinctes', count(*) = count(distinct (c->>'type_id', c->>'series', c->>'number')) from gold, jsonb_array_elements(r->'cards') c;
 
 \echo '=== 5bis. booster doré : chance bonus d''une Unique (1/1), forcée à 100 % pour le test'
+delete from public.{{P}}unique_wins;
 update public.{{P}}config set value = 1 where key = 'golden_unique_chance';
 create temp table gold2 as select public.{{P}}open_booster() r from generate_series(1,3);
 select jsonb_array_length(r->'cards') as nb_cartes_dont_bonus,
   (select bool_or(c->>'rarity_id' = 'unique') from jsonb_array_elements(r->'cards') c) as contient_une_unique
 from gold2;
 update public.{{P}}config set value = 0 where key = 'golden_unique_chance';
+
+\echo '=== chaque 1/1 obtenue est journalisée (email, type, date), visible en admin'
+select count(*) as uniques_journalisees from public.{{P}}unique_wins;
+select u.email, t.name is not null as type_renseigne, w.won_at is not null as date_renseignee
+from public.{{P}}unique_wins w
+join auth.users u on u.id = w.user_id
+join public.{{P}}types t on t.id = w.type_id
+limit 1;
 
 update public.{{P}}config set value = 0 where key = 'golden_booster_chance';
 
