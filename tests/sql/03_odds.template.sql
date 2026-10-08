@@ -28,7 +28,7 @@ create temp table shares as select r->>'id' id, (r->>'share')::float p from json
 \timing on
 select count(*) from (select public.{{P}}open_booster() from generate_series(1, 600)) x;
 \timing off
-create temp table obs as select public.{{P}}rarity_id(number, series) id, count(*) n from public.{{P}}cards group by 1;
+create temp table obs as select public.{{P}}rarity_id(number, series, type_id) id, count(*) n from public.{{P}}cards group by 1;
 select s.id, coalesce(o.n,0) as observees, round((s.p * 3000)::numeric, 1) as attendues,
        round(((coalesce(o.n,0) - s.p * 3000) / nullif(sqrt(3000 * s.p * (1 - s.p)), 0))::numeric, 2) as ecart_en_sigmas
 from shares s left join obs o using (id) order by s.p;

@@ -159,6 +159,26 @@ begin
   end if;
 end $$;
 
+-- Seuils des raretés « range » (Ultra Rare, Super Rare, Rare, Commune...), propres à chaque catégorie :
+-- une série de 100 n'a pas la même répartition qu'une série de 500. Unique/Alpha/Omega restent universels.
+-- max_series = taille de série maximale incluse pour cette rareté dans cette catégorie ; null = le reste (ex. Commune).
+create table if not exists public.o1ocards_category_rarities (
+  category_id int  not null references public.o1ocards_categories (id) on delete cascade,
+  rarity_id   text not null references public.o1ocards_rarities (id) on delete cascade,
+  max_series  int,
+  primary key (category_id, rarity_id)
+);
+
+-- Catégories sans seuils propres (nouvelle catégorie créée avant cette migration, ou catégorie du jeu de
+-- données initial) : on reprend les seuils globaux actuels comme point de départ, sans toucher aux catégories
+-- déjà personnalisées.
+insert into public.o1ocards_category_rarities (category_id, rarity_id, max_series)
+select c.id, r.id, r.max_series
+from public.o1ocards_categories c
+cross join public.o1ocards_rarities r
+where r.kind = 'range'
+  and not exists (select 1 from public.o1ocards_category_rarities cr where cr.category_id = c.id);
+
 -- ---------- Cartes : chaque carte n'existe qu'en UN exemplaire ----------
 -- Une ligne = une carte déjà tirée et son propriétaire. Une carte absente de la table est encore dans les boosters.
 create table if not exists public.o1ocards_cards (
@@ -422,6 +442,7 @@ create index if not exists o1ocards_admin_log_idx on public.o1ocards_admin_log (
 -- ---------- Sécurité : tout passe par les fonctions ci-dessous ----------
 alter table public.o1ocards_config       enable row level security;
 alter table public.o1ocards_rarities     enable row level security;
+alter table public.o1ocards_category_rarities enable row level security;
 alter table public.o1ocards_profiles     enable row level security;
 alter table public.o1ocards_categories   enable row level security;
 alter table public.o1ocards_types        enable row level security;
@@ -489,18 +510,29 @@ returns numeric language sql stable set search_path = public as $$
   select value from public.o1ocards_config where key = p_key
 $$;
 
-create or replace function public.o1ocards_range_rarity(m int)
+-- Rareté « range » pour une taille de série m, selon les seuils propres à une catégorie
+-- (repli sur les seuils globaux de o1ocards_rarities si la catégorie n'a pas encore ses propres seuils).
+create or replace function public.o1ocards_range_rarity(m int, p_category int)
 returns text language sql stable set search_path = public as $$
-  select id from public.o1ocards_rarities
-  where kind = 'range' and (max_series is null or m <= max_series)
-  order by max_series nulls last
-  limit 1
+  select coalesce(
+    (select cr.rarity_id
+     from public.o1ocards_category_rarities cr
+     join public.o1ocards_rarities r on r.id = cr.rarity_id
+     where cr.category_id = p_category and r.kind = 'range' and (cr.max_series is null or m <= cr.max_series)
+     order by cr.max_series nulls last
+     limit 1),
+    (select r.id from public.o1ocards_rarities r
+     where r.kind = 'range' and (r.max_series is null or m <= r.max_series)
+     order by r.max_series nulls last
+     limit 1)
+  )
 $$;
 
--- Rareté de la carte n/m. Priorité : Unique (1/1) > Alpha (1/m) > Omega (m/m) > rareté par taille de série
-create or replace function public.o1ocards_rarity_id(n int, m int)
+-- Rareté de la carte n/m (type p_type, dont on déduit la catégorie). Priorité :
+-- Unique (1/1) > Alpha (1/m) > Omega (m/m) > rareté « range » selon les seuils de la catégorie.
+create or replace function public.o1ocards_rarity_id(n int, m int, p_type int)
 returns text language plpgsql stable set search_path = public as $$
-declare v text;
+declare v text; v_category int;
 begin
   if m = 1 then
     select id into v from public.o1ocards_rarities where kind = 'unique' limit 1;
@@ -509,7 +541,9 @@ begin
   elsif n = m then
     select id into v from public.o1ocards_rarities where kind = 'omega' limit 1;
   end if;
-  return coalesce(v, public.o1ocards_range_rarity(m));
+  if v is not null then return v; end if;
+  select category_id into v_category from public.o1ocards_types where id = p_type;
+  return public.o1ocards_range_rarity(m, v_category);
 end $$;
 
 -- Catégorie actuellement ouvrable : la première activée et non terminée
@@ -557,6 +591,7 @@ declare
   i        int;
   pick     int := 1;
   k        int;
+  v_max    int;
 begin
   select * into rar from public.o1ocards_rarities where id = p_rarity;
   if not found then return; end if;
@@ -564,10 +599,14 @@ begin
   if n_series is null then return; end if;
 
   if rar.kind = 'range' then
-    select coalesce(max(max_series), 0) + 1 into lo
-    from public.o1ocards_rarities
-    where kind = 'range' and max_series is not null and max_series < coalesce(rar.max_series, 2147483647);
-    hi := least(coalesce(rar.max_series, n_series), n_series);
+    select cr.max_series into v_max from public.o1ocards_category_rarities cr
+    where cr.category_id = p_category and cr.rarity_id = p_rarity;
+    select coalesce(max(cr2.max_series), 0) + 1 into lo
+    from public.o1ocards_category_rarities cr2
+    join public.o1ocards_rarities r2 on r2.id = cr2.rarity_id
+    where cr2.category_id = p_category and r2.kind = 'range' and cr2.max_series is not null
+      and cr2.max_series < coalesce(v_max, 2147483647);
+    hi := least(coalesce(v_max, n_series), n_series);
   end if;
 
   -- Cartes encore disponibles de cette rareté : (type, série) avec le nombre de cartes restantes
@@ -790,7 +829,7 @@ begin
         get diagnostics rows = row_count;
         if rows = 1 then
           res := res || jsonb_build_array(jsonb_build_object(
-            'type_id', tid, 'series', m, 'number', num, 'rarity_id', public.o1ocards_rarity_id(num, m)
+            'type_id', tid, 'series', m, 'number', num, 'rarity_id', public.o1ocards_rarity_id(num, m, tid)
           ));
           exit;
         end if;
@@ -903,7 +942,7 @@ begin
 
       got := got + 1;
       res := res || jsonb_build_array(jsonb_build_object(
-        'type_id', tid, 'series', m, 'number', num, 'rarity_id', public.o1ocards_rarity_id(num, m)
+        'type_id', tid, 'series', m, 'number', num, 'rarity_id', public.o1ocards_rarity_id(num, m, tid)
       ));
     end loop;
 
@@ -988,7 +1027,7 @@ begin
   select x.type_id, x.series, x.number, x.rid, x.obtained_at, l.id, l.kind, count(*) over ()
   from (
     select c.type_id, c.series, c.number, c.obtained_at, ty.position as tpos,
-           public.o1ocards_rarity_id(c.number, c.series) as rid
+           public.o1ocards_rarity_id(c.number, c.series, c.type_id) as rid
     from public.o1ocards_cards c
     join public.o1ocards_types ty on ty.id = c.type_id
     where c.owner_id = uid
@@ -1013,9 +1052,13 @@ returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   uid uuid := auth.uid(); v_mine jsonb; v_taken jsonb; v_owners jsonb; v_favs jsonb; v_reward text;
   v_min int := coalesce(public.o1ocards_cfg('series_reward_min_size'), 0)::int;
+  v_category int; v_range_rarity text;
 begin
   if uid is null then raise exception 'not_authenticated'; end if;
   perform public.o1ocards_settle_due();
+  select category_id into v_category from public.o1ocards_types where id = p_type;
+  -- Rareté commune aux cartes 2..m-1 de cette série (seules 1 et m sortent du lot) : propre à la catégorie
+  v_range_rarity := public.o1ocards_range_rarity(p_series, v_category);
   select coalesce(jsonb_object_agg(c.number::text, coalesce(l.id, 0)), '{}'::jsonb) into v_mine
   from public.o1ocards_cards c
   left join public.o1ocards_listings l
@@ -1036,6 +1079,7 @@ begin
   select case when r.user_id is null then 'none' when r.user_id = uid then 'mine' else 'other' end into v_reward
   from (select 1) x left join public.o1ocards_series_rewards r on r.type_id = p_type and r.series = p_series;
   return jsonb_build_object('mine', v_mine, 'taken', v_taken, 'owners', v_owners, 'favorites', v_favs,
+                            'range_rarity', v_range_rarity,
                             'reward', v_reward, 'reward_eligible', v_min >= 1 and p_series >= v_min);
 end $$;
 
@@ -1070,7 +1114,7 @@ begin
 
   -- Totaux par rareté pour UN type, multipliés par le nombre de types de la catégorie
   with s as (
-    select g as m, public.o1ocards_range_rarity(g) as rid from generate_series(1, n_series) g
+    select g as m, public.o1ocards_range_rarity(g, v_cat) as rid from generate_series(1, n_series) g
   ),
   totals as (
     select rid as id, sum(m - case when m = 1 then 1 else 2 end)::bigint as n from s group by rid
@@ -1080,7 +1124,7 @@ begin
   ),
   tot as (select id, sum(n)::bigint * n_types as n from totals group by id),
   own as (
-    select public.o1ocards_rarity_id(c.number, c.series) as id, count(*)::bigint as n
+    select public.o1ocards_rarity_id(c.number, c.series, c.type_id) as id, count(*)::bigint as n
     from public.o1ocards_cards c
     join public.o1ocards_types ty on ty.id = c.type_id
     where c.owner_id = uid and ty.category_id = v_cat
@@ -1120,7 +1164,7 @@ begin
   select jsonb_build_object('type_id', q.type_id, 'series', q.series, 'number', q.number, 'rarity_id', q.rid)
   into v_rarest
   from (
-    select c.type_id, c.series, c.number, public.o1ocards_rarity_id(c.number, c.series) as rid
+    select c.type_id, c.series, c.number, public.o1ocards_rarity_id(c.number, c.series, c.type_id) as rid
     from public.o1ocards_cards c where c.owner_id = uid
   ) q
   left join public.o1ocards_rarities r on r.id = q.rid
@@ -1181,7 +1225,7 @@ begin
     select v_omega, (1 - o_taken)::bigint, 1::bigint, (1 - o_taken) * power(m::double precision, e)
       from s where m > 1 and v_omega is not null
     union all
-    select public.o1ocards_range_rarity(m),
+    select public.o1ocards_range_rarity(m, v_cat),
            greatest(avail - 2 + a_taken + o_taken, 0)::bigint, (m - 2)::bigint,
            greatest(avail - 2 + a_taken + o_taken, 0) * power(m::double precision, e)
       from s where m > 1
@@ -1419,7 +1463,7 @@ begin
   if uid is null then raise exception 'not_authenticated'; end if;
   perform public.o1ocards_settle_due();
   return query
-  select l.id, l.type_id, l.series, l.number, public.o1ocards_rarity_id(l.number, l.series), p.username, l.kind,
+  select l.id, l.type_id, l.series, l.number, public.o1ocards_rarity_id(l.number, l.series, l.type_id), p.username, l.kind,
          case when l.kind = 'auction' then coalesce(l.current_bid, l.price) else l.price end,
          l.current_bid, l.bid_count, l.ends_at,
          case when l.kind = 'auction'
@@ -1427,7 +1471,7 @@ begin
          l.seller_id = uid, l.current_bidder = uid, count(*) over (), now()
   from public.o1ocards_listings l
   join public.o1ocards_profiles p on p.id = l.seller_id
-  left join public.o1ocards_rarities r on r.id = public.o1ocards_rarity_id(l.number, l.series)
+  left join public.o1ocards_rarities r on r.id = public.o1ocards_rarity_id(l.number, l.series, l.type_id)
   where l.status = 'active' and (p_kind is null or l.kind = p_kind)
   order by
     case when p_sort = 'price' then (case when l.kind = 'auction' then coalesce(l.current_bid, l.price) else l.price end) end asc nulls last,
@@ -1468,7 +1512,7 @@ begin
   if uid is null then raise exception 'not_authenticated'; end if;
   perform public.o1ocards_settle_due();
   return query
-  select l.id, l.type_id, l.series, l.number, public.o1ocards_rarity_id(l.number, l.series), l.kind,
+  select l.id, l.type_id, l.series, l.number, public.o1ocards_rarity_id(l.number, l.series, l.type_id), l.kind,
          case when l.kind = 'auction' then coalesce(l.current_bid, l.price) else l.price end,
          l.current_bid, l.bid_count, l.ends_at, l.status, l.final_price, l.closed_at,
          case when l.seller_id = uid then 'seller' when l.buyer_id = uid then 'buyer' else 'bidder' end,
@@ -1525,7 +1569,7 @@ declare uid uuid := auth.uid();
 begin
   if uid is null then raise exception 'not_authenticated'; end if;
   return query
-  select f.type_id, f.series, f.number, public.o1ocards_rarity_id(f.number, f.series),
+  select f.type_id, f.series, f.number, public.o1ocards_rarity_id(f.number, f.series, f.type_id),
          c.owner_id, p.username, l.id, l.kind,
          case when l.kind = 'auction' then coalesce(l.current_bid, l.price) else l.price end,
          f.created_at
@@ -1652,7 +1696,7 @@ declare uid uuid := auth.uid();
 begin
   if uid is null then raise exception 'not_authenticated'; end if;
   return query
-  select o.id, o.type_id, o.series, o.number, public.o1ocards_rarity_id(o.number, o.series),
+  select o.id, o.type_id, o.series, o.number, public.o1ocards_rarity_id(o.number, o.series, o.type_id),
          case when o.buyer_id = uid then 'buyer' else 'seller' end,
          p.username, o.amount, o.status, o.created_at, o.responded_at
   from public.o1ocards_offers o
@@ -1685,7 +1729,7 @@ declare uid uuid := auth.uid();
 begin
   if uid is null then raise exception 'not_authenticated'; end if;
   return query
-  select n.id, n.kind, n.type_id, n.series, n.number, public.o1ocards_rarity_id(n.number, n.series),
+  select n.id, n.kind, n.type_id, n.series, n.number, public.o1ocards_rarity_id(n.number, n.series, n.type_id),
          n.listing_id, n.offer_id, n.amount, n.actor_name, n.read, n.created_at,
          (select count(*) from public.o1ocards_notifications nn where nn.user_id = uid and not nn.read)
   from public.o1ocards_notifications n
@@ -1799,18 +1843,28 @@ begin
     'config', (select coalesce(jsonb_agg(jsonb_build_object('key', key, 'value', value, 'description', description) order by key), '[]'::jsonb)
                from public.o1ocards_config),
     'rarities', (select coalesce(jsonb_agg(to_jsonb(r) order by r.sort_order), '[]'::jsonb) from public.o1ocards_rarities r),
+    'category_rarities', (select coalesce(jsonb_agg(jsonb_build_object(
+        'category_id', cr.category_id, 'rarity_id', cr.rarity_id, 'max_series', cr.max_series
+      ) order by cr.category_id, (select sort_order from public.o1ocards_rarities where id = cr.rarity_id)), '[]'::jsonb)
+      from public.o1ocards_category_rarities cr),
     'legal', (select coalesce(jsonb_agg(jsonb_build_object('key', key, 'value', value) order by key), '[]'::jsonb)
               from public.o1ocards_legal),
     'players', (select count(*) from public.o1ocards_profiles)
   );
 end $$;
 
+-- p_rarities (optionnel) : [{"rarity_id":"ultra","max_series":10}, {"rarity_id":"super","max_series":25}, ...],
+-- une entrée par rareté "range" (public.o1ocards_rarities), dans l'ordre sort_order, seuils strictement croissants,
+-- max_series omis ou null seulement sur la dernière (rareté la plus commune : le reste de la série).
+-- Si null, les seuils de rareté de la catégorie ne sont pas modifiés (ex. simple renommage).
 create or replace function public.o1ocards_admin_save_category(
   p_password text, p_id int, p_name text, p_position int, p_series_count int,
-  p_color text, p_color2 text, p_text_color text, p_enabled boolean
+  p_color text, p_color2 text, p_text_color text, p_enabled boolean, p_rarities jsonb default null
 )
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare err text := public.o1ocards_admin_guard(p_password); v_id int;
+declare
+  err text := public.o1ocards_admin_guard(p_password);
+  v_id int; rr record; prev int := 0; seen_null boolean := false;
 begin
   if err is not null then return jsonb_build_object('error', err); end if;
   if char_length(trim(coalesce(p_name, ''))) < 1 or char_length(p_name) > 40 then raise exception 'invalid_name'; end if;
@@ -1818,6 +1872,23 @@ begin
   if p_color !~ '^#[0-9a-fA-F]{6}$' or p_color2 !~ '^#[0-9a-fA-F]{6}$' or p_text_color !~ '^#[0-9a-fA-F]{6}$' then
     raise exception 'invalid_color';
   end if;
+
+  if p_rarities is not null then
+    for rr in
+      select r.id,
+             (select (x->>'max_series')::int from jsonb_array_elements(p_rarities) x where x->>'rarity_id' = r.id) as v
+      from public.o1ocards_rarities r where r.kind = 'range' order by r.sort_order
+    loop
+      if seen_null then raise exception 'invalid_rarity_thresholds'; end if;
+      if rr.v is not null then
+        if rr.v < 1 or rr.v > p_series_count or rr.v <= prev then raise exception 'invalid_rarity_thresholds'; end if;
+        prev := rr.v;
+      else
+        seen_null := true;
+      end if;
+    end loop;
+  end if;
+
   if p_id is null then
     insert into public.o1ocards_categories (name, position, series_count, color, color2, text_color, enabled)
     values (trim(p_name), coalesce(p_position, 1), p_series_count, p_color, p_color2, p_text_color, coalesce(p_enabled, true))
@@ -1834,6 +1905,15 @@ begin
     if not found then raise exception 'not_found'; end if;
     v_id := p_id;
   end if;
+
+  if p_rarities is not null then
+    delete from public.o1ocards_category_rarities where category_id = v_id;
+    insert into public.o1ocards_category_rarities (category_id, rarity_id, max_series)
+    select v_id, x->>'rarity_id', (x->>'max_series')::int
+    from jsonb_array_elements(p_rarities) x
+    where exists (select 1 from public.o1ocards_rarities r where r.id = x->>'rarity_id' and r.kind = 'range');
+  end if;
+
   return jsonb_build_object('ok', true, 'id', v_id);
 end $$;
 
@@ -1977,7 +2057,7 @@ revoke all on function public.o1ocards_market_list(text, text, int, int)        
 revoke all on function public.o1ocards_market_mine()                                     from public, anon;
 revoke all on function public.o1ocards_admin_change_password(text, text)                 from public, anon;
 revoke all on function public.o1ocards_admin_data(text)                                  from public, anon;
-revoke all on function public.o1ocards_admin_save_category(text, int, text, int, int, text, text, text, boolean) from public, anon;
+revoke all on function public.o1ocards_admin_save_category(text, int, text, int, int, text, text, text, boolean, jsonb) from public, anon;
 revoke all on function public.o1ocards_admin_set_category_closed(text, int, boolean)     from public, anon;
 revoke all on function public.o1ocards_admin_delete_category(text, int)                  from public, anon;
 revoke all on function public.o1ocards_admin_save_type(text, int, int, text, text, int)  from public, anon;
@@ -2012,7 +2092,7 @@ grant execute on function public.o1ocards_market_list(text, text, int, int)     
 grant execute on function public.o1ocards_market_mine()                                     to authenticated;
 grant execute on function public.o1ocards_admin_change_password(text, text)                 to authenticated;
 grant execute on function public.o1ocards_admin_data(text)                                  to authenticated;
-grant execute on function public.o1ocards_admin_save_category(text, int, text, int, int, text, text, text, boolean) to authenticated;
+grant execute on function public.o1ocards_admin_save_category(text, int, text, int, int, text, text, text, boolean, jsonb) to authenticated;
 grant execute on function public.o1ocards_admin_set_category_closed(text, int, boolean)     to authenticated;
 grant execute on function public.o1ocards_admin_delete_category(text, int)                  to authenticated;
 grant execute on function public.o1ocards_admin_save_type(text, int, int, text, text, int)  to authenticated;

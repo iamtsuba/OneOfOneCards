@@ -348,6 +348,10 @@ textarea { width: 100%; padding: 10px 14px; border: 1.5px solid var(--line); bor
 .admin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
 .admin-colors { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
 .color-field { display: grid; gap: 4px; font-size: 13px; }
+.rarity-thresholds-hint { margin: 2px 0 0; }
+.rarity-thresholds label { font-size: 13px; }
+.rarity-threshold-label { display: flex; align-items: center; gap: 6px; }
+.rarity-threshold-label .cat-dot { grid-row: auto; width: 12px; height: 12px; }
 .color-field input { width: 56px; min-height: 40px; padding: 2px; }
 .badge { padding: 2px 8px; border-radius: 99px; background: #e4e7f4; font-size: 12px; font-weight: 700; }
 .badge.done { background: #cfeedd; color: #0d5a35; }

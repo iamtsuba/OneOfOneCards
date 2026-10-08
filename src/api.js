@@ -93,6 +93,7 @@ export const adminSaveCategory = (pw, c) =>
   rpc('admin_save_category', {
     p_password: pw, p_id: c.id ?? null, p_name: c.name, p_position: Number(c.position), p_series_count: Number(c.series_count),
     p_color: c.color, p_color2: c.color2, p_text_color: c.text_color, p_enabled: !!c.enabled,
+    p_rarities: c.rarities ?? null,
   })
 export const adminSetCategoryClosed = (pw, id, closed) => rpc('admin_set_category_closed', { p_password: pw, p_id: id, p_closed: closed })
 export const adminDeleteCategory = (pw, id) => rpc('admin_delete_category', { p_password: pw, p_id: id })
@@ -157,6 +158,7 @@ export function explain(e) {
   if (m.includes('has_bids')) return 'Des offres ont été faites : l’annonce ne peut plus être retirée.'
   if (m.includes('listing_unavailable')) return 'Cette annonce n’est plus disponible.'
   if (m.includes('invalid_price')) return 'Prix invalide : entre un nombre entier de pièces, minimum 1.'
+  if (m.includes('invalid_rarity_thresholds')) return 'Seuils de rareté invalides : ils doivent être strictement croissants, dans la limite du nombre de séries, et seule la dernière rareté peut rester sans plafond.'
   if (m.includes('own_card')) return 'Cette carte est déjà à toi.'
   if (m.includes('card_not_taken')) return 'Cette carte n’a pas encore été tirée : impossible de faire une offre.'
   if (m.includes('buyer_insufficient_coins')) return 'L’acheteur n’a plus assez de pièces pour cette offre.'

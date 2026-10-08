@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import * as api from '../api'
 import { explain } from '../api'
 import { useGame, fmt, fmtPct } from '../game'
-import { rarityId } from '../rarity'
+import { slotRarityId } from '../rarity'
 import Card from './Card'
 import CardModal from './CardModal'
 import TypeArt from './TypeArt'
@@ -325,7 +325,7 @@ function Album({ type, seriesCount, rarities, rarityMap, version, onBack, onSele
 
       <ul className="grid album-grid">
         {Array.from({ length: series }, (_, i) => i + 1).map((n) => {
-          const rid = rarityId(n, series, rarities)
+          const rid = slotRarityId(n, series, state.range_rarity, rarities)
           const rarity = rarityMap[rid]
           if (n in state.mine) {
             const listingId = state.mine[n] || null
