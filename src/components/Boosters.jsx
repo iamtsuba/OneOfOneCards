@@ -245,7 +245,7 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
         <h2 className={`overlay-title ${golden ? 'gold' : ''}`}>{golden ? 'Booster doré' : 'Ton booster'}</h2>
         <ul className="summary-grid">
           {cards.map((c) => (
-            <li key={`${c.series}-${c.number}`}>
+            <li key={`${c.type_id}-${c.series}-${c.number}`}>
               <Card typeId={c.type_id} series={c.series} number={c.number} rarity={rarityMap[c.rarity_id]} size="sm" glow shine={revealAll} />
             </li>
           ))}
@@ -278,26 +278,29 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
 
   return (
     <div className="overlay" role="dialog" aria-modal="true" aria-label="Cartes du booster">
-      <p className="overlay-hint">{golden ? 'Booster doré : ' : ''}carte {idx + 1} sur {cards.length}</p>
+      {/* Tout le contenu d'une carte (légende, carte, feux d'artifice, texte) sous une seule clé : remplacé
+          d'un seul bloc d'une carte à l'autre, jamais de morceau de la carte précédente qui traîne à l'écran. */}
+      <div className="reveal-step" key={idx}>
+        <p className="overlay-hint">{golden ? 'Booster doré : ' : ''}carte {idx + 1} sur {cards.length}</p>
 
-      <div
-        key={idx}
-        className="reveal-card"
-        onClick={advance}
-        role="button"
-        tabIndex={0}
-        aria-label={last ? 'Voir le résumé' : 'Carte suivante'}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); advance() } }}
-      >
-        <Card typeId={c.type_id} series={c.series} number={c.number} rarity={rarity} size="lg" glow shine />
+        <div
+          className="reveal-card"
+          onClick={advance}
+          role="button"
+          tabIndex={0}
+          aria-label={last ? 'Voir le résumé' : 'Carte suivante'}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); advance() } }}
+        >
+          <Card typeId={c.type_id} series={c.series} number={c.number} rarity={rarity} size="lg" glow shine />
+        </div>
+
+        {isSpecial(rarity) && <Fireworks rarity={rarity} />}
+
+        <p className="reveal-line" aria-live="polite">
+          <strong>{rarity?.name}</strong> : « {catalog?.typeMap?.[c.type_id]?.name} » {c.number}/{c.series} n’existe qu’en un exemplaire, et c’est le tien.
+        </p>
+        <p className="overlay-hint">{last ? 'Touche la carte pour voir le résumé.' : 'Touche la carte pour passer à la suivante.'}</p>
       </div>
-
-      {isSpecial(rarity) && <Fireworks key={idx} rarity={rarity} />}
-
-      <p className="reveal-line" aria-live="polite">
-        <strong>{rarity?.name}</strong> : « {catalog?.typeMap?.[c.type_id]?.name} » {c.number}/{c.series} n’existe qu’en un exemplaire, et c’est le tien.
-      </p>
-      <p className="overlay-hint">{last ? 'Touche la carte pour voir le résumé.' : 'Touche la carte pour passer à la suivante.'}</p>
     </div>
   )
 }
