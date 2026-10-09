@@ -3,6 +3,7 @@ import * as api from '../api'
 import { explain } from '../api'
 import { useGame, fmt, fmtDate } from '../game'
 import TypeArt from './TypeArt'
+import { parseTypesFile, TEMPLATE_CSV, MAX_ROWS } from '../importTypes'
 
 const TABS = [
   ['categories', 'Catégories'],
@@ -89,10 +90,10 @@ export default function Admin({ onClose }) {
       setError('')
       setNotice('')
       try {
-        await action(pw)
+        const res = await action(pw)
         setData(await api.adminData(pw))
         await Promise.all([refreshCatalog(), refreshStatus()])
-        setNotice(message)
+        setNotice(typeof message === 'function' ? message(res) : message)
       } catch (e) {
         setError(explain(e))
       } finally {
@@ -326,6 +327,8 @@ function TypesTab({ data, run, busy }) {
       {types.map((t) => <TypeForm key={t.id} type={t} categoryId={catId} run={run} busy={busy} />)}
       <h3>Nouveau type</h3>
       <TypeForm key={`new-${catId}-${types.length}`} type={null} categoryId={catId} nextPos={nextPos} run={run} busy={busy} />
+      <h3>Importer des types</h3>
+      <ImportTypes key={`import-${catId}-${types.length}`} categoryId={catId} existing={types.map((t) => t.name)} run={run} busy={busy} />
     </div>
   )
 }
@@ -383,6 +386,93 @@ function TypeForm({ type, categoryId, nextPos, run, busy }) {
           </button>
         )}
       </div>
+    </div>
+  )
+}
+
+// Import d'un fichier CSV/TSV (nom ; position ; image) dans la catégorie choisie : aperçu ligne par ligne, tout ou rien
+function ImportTypes({ categoryId, existing, run, busy }) {
+  const [parsed, setParsed] = useState(null)
+  const [fileName, setFileName] = useState('')
+  const [readError, setReadError] = useState('')
+
+  const onFile = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setReadError('')
+    try {
+      setParsed(parseTypesFile(await file.text(), existing))
+      setFileName(file.name)
+    } catch {
+      setParsed(null)
+      setReadError('Impossible de lire ce fichier.')
+    }
+  }
+  const downloadTemplate = () => {
+    const url = URL.createObjectURL(new Blob([TEMPLATE_CSV], { type: 'text/csv;charset=utf-8' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'modele-types.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const rows = parsed?.rows ?? []
+  const errors = rows.filter((r) => r.error)
+  const dupes = rows.filter((r) => r.duplicate)
+  const toCreate = rows.filter((r) => !r.error && !r.duplicate)
+  const doImport = () =>
+    run(
+      (pw) => api.adminImportTypes(pw, categoryId, toCreate.map((r) => ({ name: r.name, position: r.position, image: r.image }))),
+      (res) => `${res.created} type${res.created > 1 ? 's' : ''} importé${res.created > 1 ? 's' : ''}${res.skipped ? `, ${res.skipped} ignoré${res.skipped > 1 ? 's' : ''} (déjà présent${res.skipped > 1 ? 's' : ''})` : ''}.`,
+    )
+
+  return (
+    <div className="admin-card">
+      <p className="muted">
+        Fichier CSV ou texte, une ligne par type : <strong>nom ; position ; image</strong> (position et image facultatives). L’image est un emoji ou une
+        adresse https://. Séparateur ; , ou tabulation, en-tête facultatif. {MAX_ROWS} types maximum, tout ou rien : une ligne invalide annule
+        l’import. Un nom déjà présent dans la catégorie est ignoré.
+      </p>
+      <div className="row">
+        <label className="btn ghost file-btn">
+          Choisir un fichier
+          <input type="file" accept=".csv,.tsv,.txt,text/csv,text/plain" onChange={onFile} hidden />
+        </label>
+        <button type="button" className="btn ghost" onClick={downloadTemplate}>Télécharger un modèle</button>
+      </div>
+      {readError && <p className="msg error">{readError}</p>}
+      {parsed?.fileError && <p className="msg error">{parsed.fileError}</p>}
+
+      {rows.length > 0 && (
+        <>
+          <p>
+            <strong>{fileName}</strong> : {rows.length} ligne{rows.length > 1 ? 's' : ''} — {toCreate.length} à créer
+            {dupes.length ? `, ${dupes.length} déjà présente${dupes.length > 1 ? 's' : ''} (ignorée${dupes.length > 1 ? 's' : ''})` : ''}
+            {errors.length ? `, ${errors.length} en erreur` : ''}.
+          </p>
+          {errors.length > 0 && <p className="msg error">Corrige les lignes en erreur dans ton fichier puis recharge-le : l’import est bloqué tant qu’il en reste.</p>}
+          <ul className="import-preview">
+            {rows.map((r) => (
+              <li key={r.line} className={r.error ? 'bad' : r.duplicate ? 'skip' : ''}>
+                <span className="admin-type-art">{r.kind === 'invalid' ? '⚠️' : <TypeArt type={{ image: r.image }} />}</span>
+                <span className="import-name">{r.name || '(sans nom)'}</span>
+                <span className="muted">{r.position ?? 'auto'}</span>
+                <span className="fine">
+                  ligne {r.line}{r.error ? ` : ${r.error}` : r.duplicate ? ' : déjà présent, ignoré' : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <div className="row">
+            <button className="btn" disabled={busy || errors.length > 0 || toCreate.length === 0} onClick={doImport}>
+              {toCreate.length === 0 && !errors.length ? 'Rien de nouveau à importer' : `Importer ${toCreate.length} type${toCreate.length > 1 ? 's' : ''}`}
+            </button>
+            <button type="button" className="btn ghost" onClick={() => setParsed(null)}>Annuler</button>
+          </div>
+        </>
+      )}
     </div>
   )
 }

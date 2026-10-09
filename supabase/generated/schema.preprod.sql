@@ -2151,6 +2151,52 @@ begin
   return jsonb_build_object('ok', true, 'id', v_id);
 end $$;
 
+-- Import en masse de types dans une catégorie : [{"name":"Football","position":1,"image":"⚽"}, ...] (500 max).
+-- image : vide, un emoji (16 caractères max) ou une adresse https://. position vide = à la suite des types existants.
+-- Tout ou rien : une ligne invalide annule l'import entier ('invalid_import_row:N', N = rang dans le fichier). Un type dont
+-- le nom existe déjà dans la catégorie (casse ignorée) est ignoré, pour pouvoir réimporter un fichier sans doublons.
+create or replace function public.pp_o1ocards_admin_import_types(p_password text, p_category int, p_types jsonb)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  err text := public.pp_o1ocards_admin_guard(p_password);
+  x jsonb; i int := 0; v_name text; v_image text; v_pos int; v_created int := 0; v_skipped int := 0;
+begin
+  if err is not null then return jsonb_build_object('error', err); end if;
+  if not exists (select 1 from public.pp_o1ocards_categories where id = p_category) then raise exception 'not_found'; end if;
+  if p_types is null or jsonb_typeof(p_types) <> 'array' or jsonb_array_length(p_types) = 0 then raise exception 'invalid_import'; end if;
+  if jsonb_array_length(p_types) > 500 then raise exception 'import_too_large'; end if;
+
+  for x in select * from jsonb_array_elements(p_types) loop
+    i := i + 1;
+    v_name := trim(coalesce(x->>'name', ''));
+    v_image := coalesce(x->>'image', '');
+    if char_length(v_name) < 1 or char_length(v_name) > 60 then raise exception 'invalid_import_row:%', i; end if;
+    if coalesce(x->>'position', '') = '' then v_pos := null;
+    elsif (x->>'position') ~ '^[0-9]{1,6}$' then v_pos := (x->>'position')::int;
+    else raise exception 'invalid_import_row:%', i;
+    end if;
+    -- image : vide, https:// (sans espace, 2000 caractères max) ou emoji court ; http:, javascript:, data:... refusés
+    if v_image <> '' then
+      if v_image ~ '^https://' then
+        if v_image ~ '\s' or char_length(v_image) > 2000 then raise exception 'invalid_import_row:%', i; end if;
+      elsif v_image ~ '^[A-Za-z][A-Za-z0-9+.-]*:' or char_length(v_image) > 16 then
+        raise exception 'invalid_import_row:%', i;
+      end if;
+    end if;
+
+    if exists (select 1 from public.pp_o1ocards_types where category_id = p_category and lower(name) = lower(v_name)) then
+      v_skipped := v_skipped + 1;
+      continue;
+    end if;
+    insert into public.pp_o1ocards_types (category_id, name, image, position)
+    values (p_category, v_name, v_image,
+            coalesce(v_pos, (select coalesce(max(position), 0) + 1 from public.pp_o1ocards_types where category_id = p_category)));
+    v_created := v_created + 1;
+  end loop;
+
+  return jsonb_build_object('ok', true, 'created', v_created, 'skipped', v_skipped);
+end $$;
+
 create or replace function public.pp_o1ocards_admin_delete_type(p_password text, p_id int)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare err text := public.pp_o1ocards_admin_guard(p_password);
@@ -2292,6 +2338,7 @@ revoke all on function public.pp_o1ocards_admin_set_category_closed(text, int, b
 revoke all on function public.pp_o1ocards_admin_delete_category(text, int)                  from public, anon;
 revoke all on function public.pp_o1ocards_admin_force_delete_category(text, int, text)      from public, anon;
 revoke all on function public.pp_o1ocards_admin_save_type(text, int, int, text, text, int)  from public, anon;
+revoke all on function public.pp_o1ocards_admin_import_types(text, int, jsonb)          from public, anon;
 revoke all on function public.pp_o1ocards_admin_delete_type(text, int)                      from public, anon;
 revoke all on function public.pp_o1ocards_admin_set_config(text, text, numeric)             from public, anon;
 revoke all on function public.pp_o1ocards_admin_save_rarity(text, text, text, int, text, text, text) from public, anon;
@@ -2334,6 +2381,7 @@ grant execute on function public.pp_o1ocards_admin_set_category_closed(text, int
 grant execute on function public.pp_o1ocards_admin_delete_category(text, int)                  to authenticated;
 grant execute on function public.pp_o1ocards_admin_force_delete_category(text, int, text)      to authenticated;
 grant execute on function public.pp_o1ocards_admin_save_type(text, int, int, text, text, int)  to authenticated;
+grant execute on function public.pp_o1ocards_admin_import_types(text, int, jsonb)          to authenticated;
 grant execute on function public.pp_o1ocards_admin_delete_type(text, int)                      to authenticated;
 grant execute on function public.pp_o1ocards_admin_set_config(text, text, numeric)             to authenticated;
 grant execute on function public.pp_o1ocards_admin_save_rarity(text, text, text, int, text, text, text) to authenticated;

@@ -110,6 +110,8 @@ export const adminSaveType = (pw, t) =>
     p_password: pw, p_id: t.id ?? null, p_category: t.category_id, p_name: t.name, p_image: t.image ?? '', p_position: Number(t.position),
   })
 export const adminDeleteType = (pw, id) => rpc('admin_delete_type', { p_password: pw, p_id: id })
+export const adminImportTypes = (pw, categoryId, types) =>
+  rpc('admin_import_types', { p_password: pw, p_category: categoryId, p_types: types })
 export const adminSetConfig = (pw, key, value) => rpc('admin_set_config', { p_password: pw, p_key: key, p_value: Number(value) })
 export const adminSaveRarity = (pw, r) =>
   rpc('admin_save_rarity', {
@@ -141,10 +143,14 @@ export function explain(e) {
   if (m.includes('checkout:legal_incomplete')) return 'Les informations légales du vendeur ne sont pas encore renseignées : le paiement est indisponible.'
   if (m.startsWith('checkout:'))
     return `Le paiement n’est pas disponible pour le moment. Réessaie plus tard. (code : ${m.slice(9)})`
+  const badRow = m.match(/invalid_import_row:(\d+)/)
+  if (badRow) return `Import refusé : la ligne ${badRow[1]} du fichier est invalide (rien n’a été importé).`
   const adminMessages = {
     admin_denied: 'Mot de passe incorrect.',
     admin_locked: 'Trop d’essais : l’accès admin est verrouillé pendant 15 minutes.',
     admin_not_set: 'Aucun mot de passe admin n’est défini : voir le README (' + PREFIX + 'admin_set_password).',
+    invalid_import: 'Import vide ou illisible.',
+    import_too_large: 'Trop de types : 500 maximum par import.',
     invalid_series: 'Le nombre de séries doit être compris entre 1 et 5000.',
     invalid_color: 'Les couleurs doivent être au format #rrggbb.',
     invalid_image: 'Image invalide : utilise un emoji, une adresse https:// ou une image téléversée.',

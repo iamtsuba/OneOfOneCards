@@ -28,6 +28,26 @@ select 'suppression type + catégorie sans carte', (public.{{P}}admin_delete_typ
 select 'catégories restantes', count(*) from public.{{P}}categories;
 delete from public.{{P}}cards where type_id = 1 and series = 10 and number = 4;
 
+\echo '--- import de types en masse : emoji, https, position auto, doublons ignorés, tout ou rien'
+delete from public.{{P}}categories where name = 'Test Import';
+select (public.{{P}}admin_save_category('thomarie', null, 'Test Import', 96, 50, '#ffffff', '#000000', '#000000', true) ->> 'id')::int as cat_imp \gset
+select public.{{P}}admin_import_types('thomarie', :cat_imp,
+  '[{"name":"Football","position":1,"image":"⚽"},{"name":"Tennis","position":"","image":"https://exemple.com/t.png"},{"name":"Golf"},{"name":"football","position":9,"image":"🏈"}]'::jsonb) as import_ok;
+select name, position, image from public.{{P}}types where category_id = :cat_imp order by position;  -- 3 types, Golf en position 3 (auto), « football » ignoré
+-- Ré-import du même fichier : plus rien de créé, tout ignoré
+select public.{{P}}admin_import_types('thomarie', :cat_imp, '[{"name":"Football"},{"name":"Golf"}]'::jsonb) ->> 'skipped' as deuxieme_import_ignores;
+-- Une ligne invalide annule TOUT l'import (rang renvoyé), même les lignes valides avant elle
+select pg_temp.try('select public.{{P}}admin_import_types(''thomarie'', ' || :cat_imp || ', ''[{"name":"Rugby"},{"name":"Piège","image":"http://x.fr/a.png"}]''::jsonb)');
+select pg_temp.try('select public.{{P}}admin_import_types(''thomarie'', ' || :cat_imp || ', ''[{"name":"Rugby"},{"name":"Piège","image":"javascript:alert(1)"}]''::jsonb)');
+select pg_temp.try('select public.{{P}}admin_import_types(''thomarie'', ' || :cat_imp || ', ''[{"name":"Rugby"},{"name":""}]''::jsonb)');
+select pg_temp.try('select public.{{P}}admin_import_types(''thomarie'', ' || :cat_imp || ', ''[{"name":"Rugby"},{"name":"X","position":"abc"}]''::jsonb)');
+select pg_temp.try('select public.{{P}}admin_import_types(''thomarie'', ' || :cat_imp || ', ''[]''::jsonb)');
+select 'rien d''importé après les refus (toujours 3 types, pas de Rugby)', count(*), count(*) filter (where name = 'Rugby') from public.{{P}}types where category_id = :cat_imp;
+-- Mauvais mot de passe : refusé, rien créé
+select public.{{P}}admin_import_types('mauvais', :cat_imp, '[{"name":"Judo"}]'::jsonb) ->> 'error' as erreur_mdp;
+select count(*) as judo_non_cree from public.{{P}}types where category_id = :cat_imp and name = 'Judo';
+delete from public.{{P}}categories where id = :cat_imp;
+
 \echo '--- suppression forcée : catégorie entamée, avec annonces, enchère, offre, favori'
 set request.jwt.claim.sub = :B; select public.{{P}}status() is not null as profil_b;
 delete from public.{{P}}categories where name = 'Test Suppression';

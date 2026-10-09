@@ -14,8 +14,9 @@
     "test:sql": "bash tests/run-sql.sh",
     "test:functions": "node tests/functions.test.mjs",
     "test:front": "node tests/front.test.mjs",
-    "test": "npm run build:all && npm run test:build && npm run test:front && npm run test:functions && npm run test:sql",
-    "test:build": "node tests/build.test.mjs"
+    "test": "npm run build:all && npm run test:build && npm run test:front && npm run test:import && npm run test:functions && npm run test:sql",
+    "test:build": "node tests/build.test.mjs",
+    "test:import": "node tests/import-types.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
