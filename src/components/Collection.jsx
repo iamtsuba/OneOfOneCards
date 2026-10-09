@@ -180,11 +180,13 @@ function Showcase({ catId, catalog, rarityMap, version, onRefresh, onError }) {
         {rows.map((r) => (
           <li key={r.type_id}>
             <button className="showcase-slot" onClick={() => setPicker({ typeId: r.type_id, typeName: r.type_name })}>
-              {r.pick_series != null ? (
-                <Card typeId={r.type_id} series={r.pick_series} number={r.pick_number} rarity={rarityMap[r.rarity_id]} size="sm" />
-              ) : (
-                <span className="showcase-empty"><TypeArt type={catalog.typeMap[r.type_id]} /></span>
-              )}
+              <span className="showcase-card-slot">
+                {r.pick_series != null ? (
+                  <Card typeId={r.type_id} series={r.pick_series} number={r.pick_number} rarity={rarityMap[r.rarity_id]} size="sm" />
+                ) : (
+                  <span className="showcase-empty"><TypeArt type={catalog.typeMap[r.type_id]} /></span>
+                )}
+              </span>
               <span className="showcase-name">{r.type_name}</span>
               {Number(r.owned_count) === 0 && <span className="showcase-hint">Aucune carte</span>}
             </button>
