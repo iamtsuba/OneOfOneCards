@@ -262,7 +262,7 @@ function AlbumPicker({ typeId, typeName, rarityMap, hasPick, onClose, onChanged 
           </ul>
         )}
         <div className="row">
-          {hasPick && <button className="btn ghost" disabled={busy} onClick={clear}>Vider cette case</button>}
+          {hasPick && <button className="btn ghost-light" disabled={busy} onClick={clear}>Vider cette case</button>}
           <button className="btn ghost-light" onClick={onClose}>Fermer</button>
         </div>
       </div>
