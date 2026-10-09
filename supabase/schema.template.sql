@@ -331,6 +331,17 @@ create table if not exists public.{{P}}bids (
 );
 create index if not exists {{P}}bids_bidder_idx on public.{{P}}bids (bidder_id, listing_id);
 
+-- ---------- Album : une carte numérotée choisie par type, pour la vitrine d'une catégorie ----------
+create table if not exists public.{{P}}album_picks (
+  user_id    uuid not null references auth.users (id) on delete cascade,
+  type_id    int  not null references public.{{P}}types (id) on delete cascade,
+  series     int  not null,
+  number     int  not null,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, type_id)
+);
+create index if not exists {{P}}album_picks_card_idx on public.{{P}}album_picks (type_id, series, number);
+
 -- ---------- Favoris : suivre une carte qu'on ne possède pas ----------
 create table if not exists public.{{P}}favorites (
   user_id    uuid not null references auth.users (id) on delete cascade,
@@ -465,6 +476,7 @@ alter table public.{{P}}config       enable row level security;
 alter table public.{{P}}rarities     enable row level security;
 alter table public.{{P}}category_rarities enable row level security;
 alter table public.{{P}}unique_wins enable row level security;
+alter table public.{{P}}album_picks enable row level security;
 alter table public.{{P}}profiles     enable row level security;
 alter table public.{{P}}categories   enable row level security;
 alter table public.{{P}}types        enable row level security;
@@ -525,6 +537,7 @@ revoke all on public.{{P}}series_taken, public.{{P}}listings, public.{{P}}bids, 
   public.{{P}}secrets, public.{{P}}admin_log, public.{{P}}series_rewards from anon, authenticated;
 revoke all on public.{{P}}favorites, public.{{P}}offers, public.{{P}}notifications from anon, authenticated;
 revoke all on public.{{P}}unique_wins from anon, authenticated;
+revoke all on public.{{P}}album_picks from anon, authenticated;
 revoke insert, update, delete on public.{{P}}purchases, public.{{P}}legal, public.{{P}}consents from anon, authenticated;
 
 -- ---------- Fonctions utilitaires ----------
@@ -751,6 +764,7 @@ begin
       update public.{{P}}cards set owner_id = r.current_bidder, obtained_at = now()
       where type_id = r.type_id and series = r.series and number = r.number;
       delete from public.{{P}}favorites where user_id = r.current_bidder and type_id = r.type_id and series = r.series and number = r.number;
+      delete from public.{{P}}album_picks where user_id = r.seller_id and type_id = r.type_id and series = r.series and number = r.number;
       update public.{{P}}listings
       set status = 'sold', buyer_id = r.current_bidder, final_price = r.current_bid, closed_at = now()
       where id = r.id;
@@ -1344,6 +1358,7 @@ begin
     raise exception 'category_closed';
   end if;
   delete from public.{{P}}cards where type_id = p_type and series = p_series and number = p_number;
+  delete from public.{{P}}album_picks where user_id = uid and type_id = p_type and series = p_series and number = p_number;
   update public.{{P}}profiles set coins = coins + v_price where id = uid returning * into p;
   return jsonb_build_object('status', public.{{P}}status_json(p));
 end $$;
@@ -1405,6 +1420,7 @@ begin
   where type_id = l.type_id and series = l.series and number = l.number and owner_id = l.seller_id;
   if not found then raise exception 'listing_unavailable'; end if;
   delete from public.{{P}}favorites where user_id = uid and type_id = l.type_id and series = l.series and number = l.number;
+  delete from public.{{P}}album_picks where user_id = l.seller_id and type_id = l.type_id and series = l.series and number = l.number;
   update public.{{P}}listings
   set status = 'sold', buyer_id = uid, final_price = l.price, closed_at = now() where id = l.id;
   return jsonb_build_object('status', public.{{P}}status_json(p));
@@ -1707,6 +1723,7 @@ begin
   update public.{{P}}cards set owner_id = o.buyer_id, obtained_at = now()
   where type_id = o.type_id and series = o.series and number = o.number;
   delete from public.{{P}}favorites where user_id = o.buyer_id and type_id = o.type_id and series = o.series and number = o.number;
+  delete from public.{{P}}album_picks where user_id = o.seller_id and type_id = o.type_id and series = o.series and number = o.number;
 
   update public.{{P}}listings set status = 'cancelled', closed_at = now()
   where type_id = o.type_id and series = o.series and number = o.number and status = 'active';
@@ -1750,6 +1767,74 @@ begin
     and (o.status = 'pending' or o.responded_at > now() - interval '7 days')
   order by case when o.status = 'pending' then 0 else 1 end, o.created_at desc
   limit 100;
+end $$;
+
+-- ---------- Album ----------
+-- État de l'album d'une catégorie : un emplacement par type, avec la carte choisie (si choisie) et le nombre
+-- d'exemplaires possédés de ce type (pour savoir s'il y a quelque chose à choisir).
+create or replace function public.{{P}}album_view(p_category int)
+returns table (
+  type_id     int,
+  type_name   text,
+  type_image  text,
+  pick_series int,
+  pick_number int,
+  rarity_id   text,
+  owned_count bigint
+)
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid();
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  return query
+  select t.id, t.name, t.image, p.series, p.number,
+         case when p.series is not null then public.{{P}}rarity_id(p.number, p.series, t.id) else null end,
+         (select count(*) from public.{{P}}cards c where c.type_id = t.id and c.owner_id = uid)
+  from public.{{P}}types t
+  left join public.{{P}}album_picks p on p.user_id = uid and p.type_id = t.id
+  where t.category_id = p_category
+  order by t.position, t.id;
+end $$;
+
+-- Mes exemplaires d'un type (pour choisir lequel mettre dans l'album)
+create or replace function public.{{P}}my_type_cards(p_type int)
+returns table (series int, number int, rarity_id text)
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid();
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  return query
+  select c.series, c.number, public.{{P}}rarity_id(c.number, c.series, c.type_id)
+  from public.{{P}}cards c
+  where c.type_id = p_type and c.owner_id = uid
+  order by c.series, c.number;
+end $$;
+
+-- Choisit (ou change librement) la carte numérotée affichée pour ce type dans l'album ; doit m'appartenir
+create or replace function public.{{P}}set_album_pick(p_type int, p_series int, p_number int)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid();
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  if not exists (
+    select 1 from public.{{P}}cards where type_id = p_type and series = p_series and number = p_number and owner_id = uid
+  ) then
+    raise exception 'not_owner';
+  end if;
+  insert into public.{{P}}album_picks (user_id, type_id, series, number, updated_at)
+  values (uid, p_type, p_series, p_number, now())
+  on conflict (user_id, type_id) do update set series = excluded.series, number = excluded.number, updated_at = now();
+  return jsonb_build_object('ok', true);
+end $$;
+
+-- Vide l'emplacement (aucune carte affichée pour ce type)
+create or replace function public.{{P}}clear_album_pick(p_type int)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid();
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  delete from public.{{P}}album_picks where user_id = uid and type_id = p_type;
+  return jsonb_build_object('ok', true);
 end $$;
 
 -- ---------- Notifications ----------
@@ -2210,6 +2295,10 @@ revoke all on function public.{{P}}admin_save_rarity(text, text, text, int, text
 revoke all on function public.{{P}}admin_create_rarity(text, text, text, int, text, text, text)   from public, anon;
 revoke all on function public.{{P}}admin_delete_rarity(text, text)                                from public, anon;
 revoke all on function public.{{P}}admin_set_legal(text, text, text)                 from public, anon;
+revoke all on function public.{{P}}album_view(int)                                   from public, anon;
+revoke all on function public.{{P}}my_type_cards(int)                                from public, anon;
+revoke all on function public.{{P}}set_album_pick(int, int, int)                     from public, anon;
+revoke all on function public.{{P}}clear_album_pick(int)                             from public, anon;
 revoke all on function public.{{P}}toggle_favorite(int, int, int)                    from public, anon;
 revoke all on function public.{{P}}list_favorites()                                  from public, anon;
 revoke all on function public.{{P}}make_offer(int, int, int, int)                    from public, anon;
@@ -2248,6 +2337,10 @@ grant execute on function public.{{P}}admin_save_rarity(text, text, text, int, t
 grant execute on function public.{{P}}admin_create_rarity(text, text, text, int, text, text, text)   to authenticated;
 grant execute on function public.{{P}}admin_delete_rarity(text, text)                                to authenticated;
 grant execute on function public.{{P}}admin_set_legal(text, text, text)                 to authenticated;
+grant execute on function public.{{P}}album_view(int)                                   to authenticated;
+grant execute on function public.{{P}}my_type_cards(int)                                to authenticated;
+grant execute on function public.{{P}}set_album_pick(int, int, int)                     to authenticated;
+grant execute on function public.{{P}}clear_album_pick(int)                             to authenticated;
 grant execute on function public.{{P}}toggle_favorite(int, int, int)                    to authenticated;
 grant execute on function public.{{P}}list_favorites()                                  to authenticated;
 grant execute on function public.{{P}}make_offer(int, int, int, int)                    to authenticated;

@@ -88,11 +88,12 @@ export default function Collection({ goMarket }) {
       <div className="segmented" role="tablist" aria-label="Affichage">
         <button role="tab" aria-selected={view === 'albums'} className={view === 'albums' ? 'on' : ''} onClick={() => setView('albums')}>Albums</button>
         <button role="tab" aria-selected={view === 'cards'} className={view === 'cards' ? 'on' : ''} onClick={() => setView('cards')}>Mes cartes</button>
+        <button role="tab" aria-selected={view === 'showcase'} className={view === 'showcase' ? 'on' : ''} onClick={() => setView('showcase')}>Vitrine</button>
       </div>
 
       {error && <p className="msg error" role="alert">{error}</p>}
 
-      {view === 'albums' ? (
+      {view === 'albums' && (
         typeId == null ? (
           <TypeTiles types={catTypes} stats={stats} onPick={setTypeId} />
         ) : (
@@ -107,7 +108,8 @@ export default function Collection({ goMarket }) {
             onSelect={setSelected}
           />
         )
-      ) : (
+      )}
+      {view === 'cards' && (
         <MyCards
           catId={catId}
           catTypes={catTypes}
@@ -117,6 +119,9 @@ export default function Collection({ goMarket }) {
           version={version}
           onSelect={setSelected}
         />
+      )}
+      {view === 'showcase' && (
+        <Showcase key={catId} catId={catId} catalog={catalog} rarityMap={rarityMap} version={version} onRefresh={refresh} onError={setError} />
       )}
 
       {selected && (
@@ -145,6 +150,121 @@ function TypeTiles({ types, stats, onPick }) {
         )
       })}
     </ul>
+  )
+}
+
+// Vitrine : une case par type de la catégorie, avec la carte numérotée choisie par le joueur pour la représenter
+function Showcase({ catId, catalog, rarityMap, version, onRefresh, onError }) {
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [picker, setPicker] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    api.albumView(catId)
+      .then((r) => { if (!cancelled) setRows(r) })
+      .catch((e) => !cancelled && onError(explain(e)))
+      .finally(() => !cancelled && setLoading(false))
+    return () => { cancelled = true }
+  }, [catId, version, onError])
+
+  if (!loading && rows.length === 0) {
+    return <div className="empty"><p><strong>Aucun type dans cette catégorie pour l’instant.</strong></p></div>
+  }
+
+  return (
+    <>
+      <p className="fine">Choisis la carte numérotée qui représente chaque type dans ta vitrine : clique une case pour la remplir ou en changer.</p>
+      <ul className="showcase-grid">
+        {rows.map((r) => (
+          <li key={r.type_id}>
+            <button className="showcase-slot" onClick={() => setPicker({ typeId: r.type_id, typeName: r.type_name })}>
+              {r.pick_series != null ? (
+                <Card typeId={r.type_id} series={r.pick_series} number={r.pick_number} rarity={rarityMap[r.rarity_id]} size="sm" />
+              ) : (
+                <span className="showcase-empty"><TypeArt type={catalog.typeMap[r.type_id]} /></span>
+              )}
+              <span className="showcase-name">{r.type_name}</span>
+              {Number(r.owned_count) === 0 && <span className="showcase-hint">Aucune carte</span>}
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      {picker && (
+        <AlbumPicker
+          typeId={picker.typeId}
+          typeName={picker.typeName}
+          rarityMap={rarityMap}
+          hasPick={!!rows.find((r) => r.type_id === picker.typeId)?.pick_series}
+          onClose={() => setPicker(null)}
+          onChanged={() => { setPicker(null); onRefresh() }}
+        />
+      )}
+    </>
+  )
+}
+
+function AlbumPicker({ typeId, typeName, rarityMap, hasPick, onClose, onChanged }) {
+  const [cards, setCards] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    api.myTypeCards(typeId).then((r) => !cancelled && setCards(r)).catch((e) => !cancelled && setError(explain(e))).finally(() => !cancelled && setLoading(false))
+    return () => { cancelled = true }
+  }, [typeId])
+
+  async function pick(series, number) {
+    setBusy(true)
+    setError('')
+    try {
+      await api.setAlbumPick(typeId, series, number)
+      onChanged()
+    } catch (e) {
+      setError(explain(e))
+      setBusy(false)
+    }
+  }
+
+  async function clear() {
+    setBusy(true)
+    setError('')
+    try {
+      await api.clearAlbumPick(typeId)
+      onChanged()
+    } catch (e) {
+      setError(explain(e))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="overlay" role="dialog" aria-modal="true" aria-label={`Choisir la carte ${typeName} de la vitrine`} onClick={onClose}>
+      <div className="detail" onClick={(e) => e.stopPropagation()}>
+        <h2>{typeName}</h2>
+        {error && <p className="msg error" role="alert">{error}</p>}
+        {!loading && cards.length === 0 ? (
+          <p className="muted">Tu n’as encore aucun exemplaire de ce type.</p>
+        ) : (
+          <ul className="grid">
+            {cards.map((c) => (
+              <li key={`${c.series}-${c.number}`}>
+                <Card typeId={typeId} series={c.series} number={c.number} rarity={rarityMap[c.rarity_id]} size="sm"
+                  onClick={() => !busy && pick(c.series, c.number)} />
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="row">
+          {hasPick && <button className="btn ghost" disabled={busy} onClick={clear}>Vider cette case</button>}
+          <button className="btn ghost-light" onClick={onClose}>Fermer</button>
+        </div>
+      </div>
+    </div>
   )
 }
 
