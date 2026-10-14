@@ -246,7 +246,7 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
         <ul className="summary-grid">
           {cards.map((c) => (
             <li key={`${c.type_id}-${c.series}-${c.number}`}>
-              <Card typeId={c.type_id} series={c.series} number={c.number} rarity={rarityMap[c.rarity_id]} size="sm" glow shine={revealAll} />
+              <Card typeId={c.type_id} series={c.series} number={c.number} rarity={rarityMap[c.rarity_id]} size="sm" isNew={!!c.is_new} glow shine={revealAll} />
             </li>
           ))}
         </ul>
@@ -291,7 +291,7 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
           aria-label={last ? 'Voir le résumé' : 'Carte suivante'}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); advance() } }}
         >
-          <Card typeId={c.type_id} series={c.series} number={c.number} rarity={rarity} size="lg" glow shine />
+          <Card typeId={c.type_id} series={c.series} number={c.number} rarity={rarity} size="lg" isNew={!!c.is_new} glow shine />
         </div>
 
         {isSpecial(rarity) && <Fireworks rarity={rarity} />}

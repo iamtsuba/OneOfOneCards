@@ -673,6 +673,17 @@ begin
   return public.pp_o1ocards_type_range_rarity(m, p_type);
 end $$;
 
+-- Le joueur possède-t-il déjà au moins une carte de ce type dans cette rareté (= un emplacement d'album déjà rempli
+-- ou remplissable) ? Sert à repérer les NOUVELLES cartes d'un booster ; appelée avant l'insertion de la carte tirée.
+create or replace function public.pp_o1ocards_owns_card_rarity(p_uid uuid, p_type int, p_rarity text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.pp_o1ocards_cards c
+    where c.owner_id = p_uid and c.type_id = p_type
+      and public.pp_o1ocards_rarity_id(c.number, c.series, c.type_id) = p_rarity
+  )
+$$;
+
 -- Catégorie actuellement ouvrable : la première activée et non terminée
 create or replace function public.pp_o1ocards_active_category()
 returns int language sql stable set search_path = public as $$
@@ -929,6 +940,7 @@ declare
   m    int;
   num  int;
   rows int;
+  v_new boolean;
   res  jsonb := '[]'::jsonb;
 begin
   for gc in select rarity_id, quantity from public.pp_o1ocards_golden_contents order by rarity_id loop
@@ -939,12 +951,13 @@ begin
         select d2.o_type, d2.o_series, d2.o_number into tid, m, num
         from public.pp_o1ocards_draw_rarity(gc.rarity_id, p_cat) d2;
         exit when tid is null;
+        v_new := not public.pp_o1ocards_owns_card_rarity(p_uid, tid, public.pp_o1ocards_rarity_id(num, m, tid));
         insert into public.pp_o1ocards_cards (type_id, series, number, owner_id) values (tid, m, num, p_uid)
         on conflict (type_id, series, number) do nothing;
         get diagnostics rows = row_count;
         if rows = 1 then
           res := res || jsonb_build_array(jsonb_build_object(
-            'type_id', tid, 'series', m, 'number', num, 'rarity_id', public.pp_o1ocards_rarity_id(num, m, tid)
+            'type_id', tid, 'series', m, 'number', num, 'rarity_id', public.pp_o1ocards_rarity_id(num, m, tid), 'is_new', v_new
           ));
           exit;
         end if;
@@ -960,12 +973,13 @@ begin
       select d2.o_type, d2.o_series, d2.o_number into tid, m, num
       from public.pp_o1ocards_draw_rarity('unique', p_cat) d2;
       exit when tid is null;
+      v_new := not public.pp_o1ocards_owns_card_rarity(p_uid, tid, public.pp_o1ocards_rarity_id(num, m, tid));
       insert into public.pp_o1ocards_cards (type_id, series, number, owner_id) values (tid, m, num, p_uid)
       on conflict (type_id, series, number) do nothing;
       get diagnostics rows = row_count;
       if rows = 1 then
         res := res || jsonb_build_array(jsonb_build_object(
-          'type_id', tid, 'series', m, 'number', num, 'rarity_id', public.pp_o1ocards_rarity_id(num, m, tid)
+          'type_id', tid, 'series', m, 'number', num, 'rarity_id', public.pp_o1ocards_rarity_id(num, m, tid), 'is_new', v_new
         ));
         exit;
       end if;
@@ -1005,6 +1019,7 @@ declare
   q         int;
   t2        int;
   d         record;
+  v_new     boolean;
 begin
   if uid is null then raise exception 'not_authenticated'; end if;
 
@@ -1069,6 +1084,7 @@ begin
       offset k limit 1;
       continue when num is null;
 
+      v_new := not public.pp_o1ocards_owns_card_rarity(uid, tid, public.pp_o1ocards_rarity_id(num, m, tid));
       insert into public.pp_o1ocards_cards (type_id, series, number, owner_id) values (tid, m, num, uid)
       on conflict (type_id, series, number) do nothing;
       get diagnostics rows = row_count;
@@ -1076,7 +1092,7 @@ begin
 
       got := got + 1;
       res := res || jsonb_build_array(jsonb_build_object(
-        'type_id', tid, 'series', m, 'number', num, 'rarity_id', public.pp_o1ocards_rarity_id(num, m, tid)
+        'type_id', tid, 'series', m, 'number', num, 'rarity_id', public.pp_o1ocards_rarity_id(num, m, tid), 'is_new', v_new
       ));
     end loop;
 
@@ -2459,6 +2475,7 @@ revoke all on function public.pp_o1ocards_status_json(public.pp_o1ocards_profile
 revoke all on function public.pp_o1ocards_cards_counter() from public, anon, authenticated;
 revoke all on function public.pp_o1ocards_draw_rarity(text, int) from public, anon, authenticated;
 revoke all on function public.pp_o1ocards_draw_golden(uuid, int) from public, anon, authenticated;
+revoke all on function public.pp_o1ocards_owns_card_rarity(uuid, int, text) from public, anon, authenticated;
 revoke all on function public.pp_o1ocards_cards_reward() from public, anon, authenticated;
 revoke all on function public.pp_o1ocards_admin_guard(text) from public, anon, authenticated;
 -- Réservée au SQL Editor (mot de passe admin initial)

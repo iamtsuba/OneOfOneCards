@@ -6,7 +6,7 @@ import TypeArt from './TypeArt'
 // De haut en bas : rareté, numéro n/m en jaune cerné avec zéro devant (07/10 ; masqué selon la rareté), grande
 // illustration du type, nom du type, numéro de checklist du type en bas à gauche (ex. 1/2).
 // tone : 'mine' (fond vert, à moi — le cadre et le bandeau restent à la couleur de la rareté) | 'taken' (tirée par un autre joueur)
-export default function Card({ typeId, series, number, rarity, size = 'md', tone, listed = false, favorite = false, glow = false, shine = false, onClick }) {
+export default function Card({ typeId, series, number, rarity, size = 'md', tone, listed = false, favorite = false, isNew = false, glow = false, shine = false, onClick }) {
   const game = useGame()
   const type = game?.catalog?.typeMap?.[typeId]
   const hidden = !!game?.catalog?.numberHidden?.(typeId, series)   // numéro n/m masqué pour cette rareté
@@ -19,7 +19,7 @@ export default function Card({ typeId, series, number, rarity, size = 'md', tone
     .filter(Boolean)
     .join(' ')
   const state = tone === 'mine' ? ', à toi' : tone === 'taken' ? ', déjà tirée par un autre joueur' : ''
-  const label = `${type?.name ?? 'Carte'}, ${rarity?.name ?? ''}${hidden ? '' : ` ${number} sur ${series}`}${setNo ? `, n° ${setNo.no} sur ${setNo.total}` : ''}${state}${listed ? ', en vente' : ''}${favorite ? ', favorite' : ''}`
+  const label = `${type?.name ?? 'Carte'}, ${rarity?.name ?? ''}${hidden ? '' : ` ${number} sur ${series}`}${setNo ? `, n° ${setNo.no} sur ${setNo.total}` : ''}${state}${listed ? ', en vente' : ''}${favorite ? ', favorite' : ''}${isNew ? ', nouvelle carte' : ''}`
   const Tag = onClick ? 'button' : 'div'
   return (
     <Tag className={cls} style={style} onClick={onClick} aria-label={label} type={onClick ? 'button' : undefined}>
@@ -34,6 +34,12 @@ export default function Card({ typeId, series, number, rarity, size = 'md', tone
         {listed && <span className="card-listed">En vente</span>}
         {favorite && <span className="card-favorite" aria-hidden="true">♥</span>}
       </div>
+      {isNew && (
+        // Nouvelle carte pour l'album (ce type dans cette rareté, qu'on n'avait pas) : petite étoile qui scintille au-dessus
+        <span className="card-new-star" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 2.2l2.9 6.5 7.1.7-5.3 4.8 1.5 7-6.2-3.7-6.2 3.7 1.5-7L2 9.4l7.1-.7z" /></svg>
+        </span>
+      )}
     </Tag>
   )
 }
