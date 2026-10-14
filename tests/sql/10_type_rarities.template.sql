@@ -9,6 +9,11 @@ delete from public.{{P}}rarities where id in ('legende', 'peu_commune');
 update public.{{P}}config set value = 0 where key = 'golden_booster_chance';
 set request.jwt.claim.sub = :A; select public.{{P}}status() is not null as profil_a;
 
+\echo '=== création d''une rareté : identifiant invalide, déjà pris, seuil obligatoire'
+select pg_temp.try('select public.{{P}}admin_create_rarity(''thomarie'', ''LEGENDE-1'', ''Légende'', 20, ''#f5c542'', ''#b8860b'', ''#3d2a00'')');
+select pg_temp.try('select public.{{P}}admin_create_rarity(''thomarie'', ''ultra'', ''Doublon'', 20, ''#f5c542'', ''#b8860b'', ''#3d2a00'')');
+select pg_temp.try('select public.{{P}}admin_create_rarity(''thomarie'', ''legende'', ''Légende'', null, ''#f5c542'', ''#b8860b'', ''#3d2a00'')');
+
 \echo '=== nouvelles raretés, placées dans l''ordre d''affichage (Légende avant Ultra Rare, Peu commune avant Commune)'
 select (public.{{P}}admin_create_rarity('thomarie', 'legende', 'Légende', 20, '#f5c542', '#b8860b', '#3d2a00', 'ultra') ->> 'ok')::bool as legende_creee;
 select (public.{{P}}admin_create_rarity('thomarie', 'peu_commune', 'Peu commune', 400, '#cbd5e1', '#64748b', '#0f172a', 'common') ->> 'ok')::bool as peu_commune_creee;
@@ -97,9 +102,9 @@ update public.{{P}}categories set enabled = true where id <> :cat;
 delete from public.{{P}}cards where type_id in (:ta, :tb, :tc);
 update public.{{P}}types set series_count = null where id = :tc;
 
-\echo '=== chances de tirage : les parts se somment à 100 % ; retour aux seuils de la catégorie (tableau vide)'
+\echo '=== chances de tirage : les parts se somment à 100 % ; retour aux seuils par défaut (tableau vide)'
 select round(sum((r->>'share')::numeric), 6) as somme_des_parts from jsonb_array_elements(public.{{P}}draw_odds(:cat)->'by_rarity') r;
-select (public.{{P}}admin_save_type_rarities('thomarie', :ta, '[]'::jsonb) ->> 'ok')::bool as type_a_revenu_a_la_categorie;
+select (public.{{P}}admin_save_type_rarities('thomarie', :ta, '[]'::jsonb) ->> 'ok')::bool as type_a_revenu_aux_seuils_par_defaut;
 select public.{{P}}type_series_count(:ta) as series_a_apres, (select series_count from public.{{P}}types where id = :ta) is null as colonne_remise_a_null,
        public.{{P}}number_visible(15, :ta) as visible_apres;
 
@@ -113,7 +118,15 @@ delete from public.{{P}}cards where type_id = :ta;
 select (public.{{P}}admin_data('thomarie')->'types') @> jsonb_build_array(jsonb_build_object('id', :tb, 'secret', true, 'series_count', 100)) as types_exposent_secret_et_series;
 select jsonb_array_length(public.{{P}}admin_data('thomarie')->'type_rarities') >= 2 as raretes_par_type_exposees;
 select pg_temp.try('select public.{{P}}admin_delete_rarity(''thomarie'', ''legende'')');   -- utilisée par les types A et B : refusée
--- Nettoyage direct (les cartes d'autres tests sont classées « Légende » par les seuils de leur catégorie : la fonction admin refuserait)
+-- Suppression : protégée pour Unique/Alpha/Omega, refusée si une carte est classée dans la rareté, sinon acceptée
+select pg_temp.try('select public.{{P}}admin_delete_rarity(''thomarie'', ''unique'')');
+select (public.{{P}}admin_create_rarity('thomarie', 'mega', 'Méga', 8, '#a5b4fc', '#4338ca', '#ffffff', 'legende') ->> 'ok')::bool as mega_creee;
+insert into public.{{P}}cards (type_id, series, number, owner_id) values (:tc, 8, 2, :A);
+select public.{{P}}rarity_id(2, 8, :tc) as carte_du_type_c_classee_mega;
+select pg_temp.try('select public.{{P}}admin_delete_rarity(''thomarie'', ''mega'')');   -- une carte y est classée : refusée
+delete from public.{{P}}cards where type_id = :tc;
+select (public.{{P}}admin_delete_rarity('thomarie', 'mega') ->> 'ok')::bool as mega_supprimee_une_fois_libre;
+-- Nettoyage direct (les cartes d'autres tests sont classées « Légende » par les seuils par défaut : la fonction admin refuserait)
 delete from public.{{P}}rarities where id in ('legende', 'peu_commune');
 select count(*) as tranches_restantes_apres_nettoyage from public.{{P}}type_rarities where rarity_id in ('legende', 'peu_commune');
 

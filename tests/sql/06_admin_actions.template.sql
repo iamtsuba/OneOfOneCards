@@ -54,6 +54,7 @@ delete from public.{{P}}categories where name = 'Test Suppression';
 set request.jwt.claim.sub = :A;
 select (public.{{P}}admin_save_category('thomarie', null, 'Test Suppression', 95, 50, '#ffffff', '#000000', '#000000', true) ->> 'id')::int as cat_del \gset
 select (public.{{P}}admin_save_type('thomarie', null, :cat_del, 'Objet à supprimer', '🗑️', 1) ->> 'id')::int as type_del \gset
+select (public.{{P}}admin_save_type_rarities('thomarie', :type_del, '[{"rarity_id":"ultra","max_series":50,"numbered_series":3}]'::jsonb) ->> 'ok')::bool as raretes_du_type_a_supprimer;
 insert into public.{{P}}cards (type_id, series, number, owner_id) values (:type_del, 5, 2, :A), (:type_del, 5, 3, :A);
 select public.{{P}}list_card(:type_del, 5, 2, 'auction') ->> 'listing_id' as listing_id \gset
 set request.jwt.claim.sub = :B;
@@ -75,7 +76,7 @@ select 'cartes supprimées (cascade)', count(*) from public.{{P}}cards where typ
 select 'annonce supprimée', count(*) from public.{{P}}listings where id::text = :'listing_id';
 select 'offre supprimée', count(*) from public.{{P}}offers where type_id = :type_del;
 select 'favori supprimé (cascade)', count(*) from public.{{P}}favorites where type_id = :type_del;
-select 'seuils de rareté supprimés (cascade)', count(*) from public.{{P}}category_rarities where category_id = :cat_del;
+select 'raretés du type supprimées (cascade)', count(*) from public.{{P}}type_rarities where type_id = :type_del;
 
 \echo '--- 1/1 obtenue : journalisée et visible dans admin_data (email, type, date)'
 delete from public.{{P}}unique_wins;

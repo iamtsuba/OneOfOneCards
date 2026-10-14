@@ -103,7 +103,6 @@ export const adminSaveCategory = (pw, c) =>
   rpc('admin_save_category', {
     p_password: pw, p_id: c.id ?? null, p_name: c.name, p_position: Number(c.position), p_series_count: Number(c.series_count),
     p_color: c.color, p_color2: c.color2, p_text_color: c.text_color, p_enabled: !!c.enabled,
-    p_rarities: c.rarities ?? null,
   })
 export const adminSetCategoryClosed = (pw, id, closed) => rpc('admin_set_category_closed', { p_password: pw, p_id: id, p_closed: closed })
 export const adminDeleteCategory = (pw, id) => rpc('admin_delete_category', { p_password: pw, p_id: id })
@@ -125,7 +124,7 @@ export const adminCreateRarity = (pw, r) =>
     p_password: pw, p_id: r.id, p_name: r.name, p_max_series: Number(r.max_series),
     p_color: r.color, p_color2: r.color2, p_text_color: r.text_color, p_before: r.before || null,
   })
-// Raretés d'un type : rows = [{rarity_id, max_series, numbered_series}], [] = retour aux seuils de la catégorie, null = inchangé
+// Raretés d'un type : rows = [{rarity_id, max_series, numbered_series}], [] = retour aux seuils par défaut, null = inchangé
 export const adminSaveTypeRarities = (pw, typeId, rows, secret = null) =>
   rpc('admin_save_type_rarities', { p_password: pw, p_type: typeId, p_rarities: rows, p_secret: secret })
 export const adminDeleteRarity = (pw, id) => rpc('admin_delete_rarity', { p_password: pw, p_id: id })
@@ -183,7 +182,6 @@ export function explain(e) {
   if (m.includes('has_bids')) return 'Des offres ont été faites : l’annonce ne peut plus être retirée.'
   if (m.includes('listing_unavailable')) return 'Cette annonce n’est plus disponible.'
   if (m.includes('invalid_price')) return 'Prix invalide : entre un nombre entier de pièces, minimum 1.'
-  if (m.includes('invalid_rarity_thresholds')) return 'Seuils de rareté invalides : ils doivent être strictement croissants, dans la limite du nombre de séries, et seule la dernière rareté peut rester sans plafond.'
   if (m.includes('invalid_type_rarities')) return 'Raretés du type invalides : tranches strictement croissantes, une même rareté une seule fois, « numérotées » entre 0 et la taille de la tranche.'
   if (m.includes('id_taken')) return 'Cet identifiant de rareté existe déjà.'
   if (m.includes('invalid_id')) return 'Identifiant invalide : minuscules, chiffres et _ uniquement, 2 à 20 caractères, débute par une lettre.'

@@ -1,6 +1,6 @@
 // Teste src/bands.js avec les MÊMES cas que tests/sql/10_type_rarities.template.sql (cohérence client / base).
 //   node tests/bands.test.mjs
-import { bandsOf, numberVisible, typeSeries, checklistNumbers, inheritedBands, validateTypeRarities } from '../src/bands.js'
+import { bandsOf, numberVisible, typeSeries, checklistNumbers, defaultBands, validateTypeRarities } from '../src/bands.js'
 
 let bad = 0
 const ok = (name, cond) => { console.log(cond ? 'OK  ' : 'FAIL', name); if (!cond) bad++ }
@@ -39,12 +39,11 @@ ok('checklist : le secret passe au-delà du total (ex. 51/50)', eq(cl[2], { no: 
 ok('checklist : une autre catégorie est indépendante', eq(cl[4], { no: 1, total: 1, secret: false }))
 
 
-// Seuils hérités : avec des lignes de catégorie, sinon seuils globaux ; plafonnés au nombre de séries de la catégorie
+// Seuils par défaut : seuils globaux, la dernière (null) couvre le reste ; plafonnés à la taille de la catégorie
 const cat = { id: 7, series_count: 500 }
 const glob = [{ id: 'ultra', max_series: 35 }, { id: 'super', max_series: 100 }, { id: 'rare', max_series: 250 }, { id: 'common', max_series: null }]
-ok('seuils globaux hérités (la dernière couvre le reste)', eq(inheritedBands([], glob, cat).map((b) => [b.rarity_id, b.lo, b.hi]), [['ultra', 1, 35], ['super', 36, 100], ['rare', 101, 250], ['common', 251, 500]]))
-ok('seuils de la catégorie prioritaires', eq(inheritedBands([{ category_id: 7, rarity_id: 'ultra', max_series: 10 }, { category_id: 7, rarity_id: 'common', max_series: null }, { category_id: 8, rarity_id: 'rare', max_series: 5 }], glob, cat).map((b) => [b.rarity_id, b.lo, b.hi]), [['ultra', 1, 10], ['common', 11, 500]]))
-ok('seuils plafonnés à la taille de la catégorie', eq(inheritedBands([], glob, { id: 7, series_count: 60 }).map((b) => [b.rarity_id, b.lo, b.hi]), [['ultra', 1, 35], ['super', 36, 60]]))
+ok('seuils par défaut (la dernière couvre le reste)', eq(defaultBands(glob, cat).map((b) => [b.rarity_id, b.lo, b.hi]), [['ultra', 1, 35], ['super', 36, 100], ['rare', 101, 250], ['common', 251, 500]]))
+ok('seuils plafonnés à la taille de la catégorie, « le reste » reste la dernière tranche (cf. test SQL)', eq(defaultBands(glob, { id: 7, series_count: 60 }).map((b) => [b.rarity_id, b.lo, b.hi]), [['ultra', 1, 35], ['super', 36, 60]]))
 
 // Validation : mêmes refus que admin_save_type_rarities (cf. test SQL)
 ok('validation : modèle du type A accepté', validateTypeRarities(A.map((r) => ({ ...r, max_series: String(r.max_series), numbered_series: String(r.numbered_series) }))) === '')

@@ -4,7 +4,7 @@ import { explain } from '../api'
 import { useGame, fmt, fmtDate } from '../game'
 import TypeArt from './TypeArt'
 import { parseTypesFile, TEMPLATE_CSV, MAX_ROWS } from '../importTypes'
-import { bandsOf, inheritedBands, validateTypeRarities } from '../bands'
+import { bandsOf, defaultBands, validateTypeRarities } from '../bands'
 
 const TABS = [
   ['categories', 'Catégories'],
@@ -181,58 +181,30 @@ const Color = ({ label, value, onChange }) => (
 // ---------- Catégories ----------
 function CategoriesTab({ data, run, busy }) {
   const nextPos = Math.max(0, ...data.categories.map((c) => c.position)) + 1
-  const rangeRarities = data.rarities.filter((r) => r.kind === 'range').sort((a, b) => a.sort_order - b.sort_order)
   return (
     <div className="admin-list">
       <p className="muted">
         Une seule catégorie est ouvrable à la fois : la première (par position) qui est activée et pas terminée. Quand toutes ses cartes sont tirées,
-        la suivante s’ouvre. Le nombre de séries ne peut plus changer une fois des cartes tirées.
+        la suivante s’ouvre. Le nombre de séries (par défaut pour chaque type) ne peut plus changer une fois des cartes tirées. Les raretés ne se
+        règlent plus par catégorie : elles se règlent par type (onglet « Types »).
       </p>
       {data.categories.map((c) => (
-        <CategoryForm key={c.id} cat={c} rangeRarities={rangeRarities} categoryRarities={data.category_rarities ?? []} run={run} busy={busy} />
+        <CategoryForm key={c.id} cat={c} run={run} busy={busy} />
       ))}
       <h3>Nouvelle catégorie</h3>
-      <CategoryForm key={`new-${data.categories.length}`} cat={null} nextPos={nextPos} rangeRarities={rangeRarities} categoryRarities={data.category_rarities ?? []} run={run} busy={busy} />
+      <CategoryForm key={`new-${data.categories.length}`} cat={null} nextPos={nextPos} run={run} busy={busy} />
     </div>
   )
 }
 
-// Seuils par défaut au prorata du nombre de séries (référence : les seuils globaux, calibrés pour 500 séries)
-function proportionalThresholds(seriesCount, rangeRarities) {
-  let prev = 0
-  const out = {}
-  for (const r of rangeRarities) {
-    if (r.max_series == null) { out[r.id] = ''; continue }
-    const v = Math.min(Math.max(Math.round((r.max_series / 500) * seriesCount), prev + 1), seriesCount)
-    out[r.id] = String(v)
-    prev = v
-  }
-  return out
-}
-
-function CategoryForm({ cat, nextPos, rangeRarities, categoryRarities, run, busy }) {
+function CategoryForm({ cat, nextPos, run, busy }) {
   const [f, setF] = useState({
     name: cat?.name ?? '', position: cat?.position ?? nextPos ?? 1, series_count: cat?.series_count ?? 500,
     color: cat?.color ?? '#ffd9b0', color2: cat?.color2 ?? '#f29a45', text_color: cat?.text_color ?? '#3d1f00', enabled: cat?.enabled ?? true,
   })
-  const [thresholds, setThresholds] = useState(() => {
-    if (cat) {
-      const own = Object.fromEntries(categoryRarities.filter((cr) => cr.category_id === cat.id).map((cr) => [cr.rarity_id, cr.max_series]))
-      if (Object.keys(own).length) return Object.fromEntries(rangeRarities.map((r) => [r.id, own[r.id] == null ? '' : String(own[r.id])]))
-    }
-    return proportionalThresholds(cat?.series_count ?? 500, rangeRarities)
-  })
-  const [touched, setTouched] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState('')
-  const setThreshold = (id) => (v) => { setTouched(true); setThresholds((cur) => ({ ...cur, [id]: v })) }
-  const set = (k) => (v) => {
-    setF((cur) => ({ ...cur, [k]: v }))
-    // Nouvelle catégorie : tant que l'admin n'a pas touché aux seuils, on les recalcule au prorata
-    if (!cat && k === 'series_count' && !touched) setThresholds(proportionalThresholds(Number(v) || 1, rangeRarities))
-  }
+  const set = (k) => (v) => setF((cur) => ({ ...cur, [k]: v }))
   const started = (cat?.taken ?? 0) > 0
   const pct = cat && cat.total ? (cat.taken / cat.total) * 100 : 0
-  const rarities = rangeRarities.map((r) => ({ rarity_id: r.id, max_series: thresholds[r.id] === '' ? null : Number(thresholds[r.id]) }))
   return (
     <div className="admin-card" style={{ '--cat1': f.color, '--cat2': f.color2 }}>
       <div className="admin-card-head">
@@ -253,22 +225,8 @@ function CategoryForm({ cat, nextPos, rangeRarities, categoryRarities, run, busy
         <label className="check inline"><input type="checkbox" checked={f.enabled} onChange={(e) => set('enabled')(e.target.checked)} /><span>Activée</span></label>
       </div>
 
-      <p className="fine rarity-thresholds-hint">
-        Seuils de rareté de cette catégorie : chaque rareté couvre les séries jusqu’à la taille indiquée (la dernière, sans valeur, couvre le
-        reste). Pré-remplis au prorata du nombre de séries ci-dessus, modifiables.
-      </p>
-      <div className="admin-grid rarity-thresholds">
-        {rangeRarities.map((r) => (
-          <label key={r.id} style={{ '--cat1': r.color, '--cat2': r.color2 }}>
-            <span className="rarity-threshold-label"><i className="cat-dot" />{r.name}</span>
-            <input type="number" min="1" max={f.series_count} value={thresholds[r.id]}
-              placeholder="toutes les autres" onChange={(e) => setThreshold(r.id)(e.target.value)} />
-          </label>
-        ))}
-      </div>
-
       <div className="row">
-        <button className="btn" disabled={busy || !f.name.trim()} onClick={() => run((pw) => api.adminSaveCategory(pw, { id: cat?.id, ...f, rarities }), cat ? 'Catégorie enregistrée.' : 'Catégorie créée.')}>
+        <button className="btn" disabled={busy || !f.name.trim()} onClick={() => run((pw) => api.adminSaveCategory(pw, { id: cat?.id, ...f }), cat ? 'Catégorie enregistrée.' : 'Catégorie créée.')}>
           {cat ? 'Enregistrer' : 'Créer'}
         </button>
         {cat && (
@@ -404,7 +362,7 @@ function TypeRaritiesEditor({ type, data, run, busy }) {
   const [custom, setCustom] = useState(own.length > 0)
   const [rows, setRows] = useState(() => own.map(toRow))
   const [secret, setSecret] = useState(!!type.secret)
-  const inherited = inheritedBands(data.category_rarities, rarityList, category)
+  const inherited = defaultBands(rarityList, category)
 
   const customize = () => {
     setRows(inherited.map((b) => ({ rarity_id: b.rarity_id, max_series: String(b.hi), numbered_series: String(b.hi - b.lo + 1) })))
@@ -437,7 +395,7 @@ function TypeRaritiesEditor({ type, data, run, busy }) {
     <details className="type-rarities">
       <summary>
         Raretés de ce type
-        <span className="muted"> — {custom ? 'propres à ce type' : `seuils de la catégorie « ${category?.name} »`}</span>
+        <span className="muted"> — {custom ? 'propres à ce type' : 'seuils par défaut (onglet Raretés)'}</span>
       </summary>
       <label className="check inline">
         <input type="checkbox" checked={secret} onChange={(e) => setSecret(e.target.checked)} />
@@ -465,13 +423,13 @@ function TypeRaritiesEditor({ type, data, run, busy }) {
           </div>
           <div className="row">
             <button type="button" className="btn ghost" onClick={addRow} disabled={rows.length >= rarityList.length}>Ajouter une rareté</button>
-            <button type="button" className="btn ghost" onClick={() => { setCustom(false); setRows([]) }}>Revenir aux seuils de la catégorie</button>
+            <button type="button" className="btn ghost" onClick={() => { setCustom(false); setRows([]) }}>Revenir aux seuils par défaut</button>
           </div>
           {problem && <p className="msg error">{problem}</p>}
         </>
       )}
 
-      {!custom && <p className="fine">Ce type utilise les seuils de sa catégorie (numéros toujours visibles). Seuils actuels :</p>}
+      {!custom && <p className="fine">Ce type utilise les seuils par défaut de l’onglet « Raretés » (numéros toujours visibles). Seuils actuels :</p>}
       {bands.length > 0 && (
         <ul className="type-rarity-bands">
           {bands.map((b) => (
@@ -612,14 +570,14 @@ function RaritiesTab({ data, run, busy }) {
     <div className="admin-list">
       <p className="muted">
         Nom, couleurs et seuils. « Taille de série maximale » : une rareté à seuil concerne les séries jusqu’à cette taille (vide = toutes les
-        autres). Ce sont les seuils globaux, utilisés comme valeurs de départ pour chaque catégorie ; ajuste ensuite chaque catégorie dans l’onglet
-        « Catégories » si elle a besoin de seuils différents.
+        autres). Ce sont les seuils par défaut des types qui n’ont pas de raretés propres ; chaque type peut les personnaliser (tranches, numéros
+        visibles) dans l’onglet « Types ».
       </p>
       {data.rarities.map((r) => <RarityForm key={r.id} rarity={r} run={run} busy={busy} />)}
       <h3>Nouvelle rareté</h3>
       <p className="muted">
         Unique, Alpha et Omega sont fixes (1/1, 1/m, m/m) : on ne peut ajouter qu’une rareté « à seuil », entre les raretés existantes. Elle
-        s’ajoute aux seuils des catégories qui ont déjà les leurs (modifiable ensuite catégorie par catégorie).
+        devient un seuil par défaut ; pour l’utiliser sur un type qui a déjà ses propres raretés, ajoute-la dans sa fiche (onglet « Types »).
       </p>
       <NewRarityForm key={`new-rarity-${data.rarities.length}`} rarities={data.rarities} run={run} busy={busy} />
     </div>

@@ -165,32 +165,12 @@ begin
   end if;
 end $$;
 
--- Seuils des raretés « range » (Ultra Rare, Super Rare, Rare, Commune...), propres à chaque catégorie :
--- une série de 100 n'a pas la même répartition qu'une série de 500. Unique/Alpha/Omega restent universels.
--- max_series = taille de série maximale incluse pour cette rareté dans cette catégorie ; null = le reste (ex. Commune).
-create table if not exists public.pp_o1ocards_category_rarities (
-  category_id int  not null references public.pp_o1ocards_categories (id) on delete cascade,
-  rarity_id   text not null references public.pp_o1ocards_rarities (id) on delete cascade,
-  max_series  int,
-  primary key (category_id, rarity_id)
-);
-
--- Catégories sans seuils propres (nouvelle catégorie créée avant cette migration, ou catégorie du jeu de
--- données initial) : on reprend les seuils globaux actuels comme point de départ, sans toucher aux catégories
--- déjà personnalisées.
-insert into public.pp_o1ocards_category_rarities (category_id, rarity_id, max_series)
-select c.id, r.id, r.max_series
-from public.pp_o1ocards_categories c
-cross join public.pp_o1ocards_rarities r
-where r.kind = 'range'
-  and not exists (select 1 from public.pp_o1ocards_category_rarities cr where cr.category_id = c.id);
-
 -- Raretés propres à un type (logique « Topps »). Chaque ligne est une tranche de tailles de série : de la taille qui
 -- suit la tranche précédente (dans l'ordre des max_series) jusqu'à max_series. Un type peut n'avoir que certaines
 -- raretés (un type secret peut n'avoir que la Légende). numbered_series = nombre de séries de la tranche, en partant de
 -- la plus petite, dont le numéro n/m est visible sur la carte (les autres sont numérotées en interne mais le numéro est
--- masqué ; 0 = rareté non numérotée). Un type sans ligne ici garde les seuils de sa catégorie (numéros toujours
--- visibles). Son nombre de séries (types.series_count) est son plus grand max_series.
+-- masqué ; 0 = rareté non numérotée). Un type sans ligne ici utilise les seuils par défaut de la table rarities
+-- (numéros toujours visibles). Son nombre de séries (types.series_count) est son plus grand max_series.
 create table if not exists public.pp_o1ocards_type_rarities (
   type_id         int  not null references public.pp_o1ocards_types (id) on delete cascade,
   rarity_id       text not null references public.pp_o1ocards_rarities (id) on delete cascade,
@@ -198,6 +178,41 @@ create table if not exists public.pp_o1ocards_type_rarities (
   numbered_series int  not null default 0 check (numbered_series >= 0),
   primary key (type_id, rarity_id)
 );
+
+-- Migration : la rareté ne dépend plus de la catégorie. Sur une base qui avait encore des seuils par catégorie, on convertit
+-- UNE fois chaque type sans raretés propres (il garde exactement ses tranches actuelles, tous les numéros visibles),
+-- puis on supprime les seuils par catégorie. Sans effet sur une base neuve.
+do $$
+begin
+  if to_regclass('public.pp_o1ocards_category_rarities') is not null then
+    insert into public.pp_o1ocards_type_rarities (type_id, rarity_id, max_series, numbered_series)
+    select t.id, b.rarity_id, b.hi, b.hi - b.lo + 1
+    from public.pp_o1ocards_types t
+    join public.pp_o1ocards_categories c on c.id = t.category_id
+    cross join lateral (
+      select o.rarity_id, o.lo, o.hi
+      from (
+        select src.rarity_id,
+               least(coalesce(src.max_series, coalesce(t.series_count, c.series_count)), coalesce(t.series_count, c.series_count)) as hi,
+               coalesce(lag(least(coalesce(src.max_series, coalesce(t.series_count, c.series_count)), coalesce(t.series_count, c.series_count)))
+                          over (order by coalesce(src.max_series, 2147483647), src.rarity_id), 0) + 1 as lo
+        from (
+          select cr.rarity_id, cr.max_series
+          from public.pp_o1ocards_category_rarities cr
+          join public.pp_o1ocards_rarities r on r.id = cr.rarity_id and r.kind = 'range'
+          where cr.category_id = c.id
+          union all
+          select r.id, r.max_series from public.pp_o1ocards_rarities r
+          where r.kind = 'range'
+            and not exists (select 1 from public.pp_o1ocards_category_rarities y where y.category_id = c.id)
+        ) src
+      ) o
+      where o.lo <= o.hi
+    ) b
+    where not exists (select 1 from public.pp_o1ocards_type_rarities x where x.type_id = t.id);
+    drop table public.pp_o1ocards_category_rarities;
+  end if;
+end $$;
 
 -- ---------- Cartes : chaque carte n'existe qu'en UN exemplaire ----------
 -- Une ligne = une carte déjà tirée et son propriétaire. Une carte absente de la table est encore dans les boosters.
@@ -496,7 +511,6 @@ create index if not exists pp_o1ocards_admin_log_idx on public.pp_o1ocards_admin
 -- ---------- Sécurité : tout passe par les fonctions ci-dessous ----------
 alter table public.pp_o1ocards_config       enable row level security;
 alter table public.pp_o1ocards_rarities     enable row level security;
-alter table public.pp_o1ocards_category_rarities enable row level security;
 alter table public.pp_o1ocards_type_rarities enable row level security;
 alter table public.pp_o1ocards_unique_wins enable row level security;
 alter table public.pp_o1ocards_album_picks enable row level security;
@@ -564,7 +578,6 @@ revoke all on public.pp_o1ocards_series_taken, public.pp_o1ocards_listings, publ
   public.pp_o1ocards_secrets, public.pp_o1ocards_admin_log, public.pp_o1ocards_series_rewards from anon, authenticated;
 revoke all on public.pp_o1ocards_favorites, public.pp_o1ocards_offers, public.pp_o1ocards_notifications from anon, authenticated;
 revoke all on public.pp_o1ocards_unique_wins from anon, authenticated;
-revoke all on public.pp_o1ocards_category_rarities from anon, authenticated;
 revoke insert, update, delete on public.pp_o1ocards_type_rarities from anon, authenticated;
 revoke all on public.pp_o1ocards_album_picks from anon, authenticated;
 revoke insert, update, delete on public.pp_o1ocards_purchases, public.pp_o1ocards_legal, public.pp_o1ocards_consents from anon, authenticated;
@@ -575,23 +588,15 @@ returns numeric language sql stable set search_path = public as $$
   select value from public.pp_o1ocards_config where key = p_key
 $$;
 
--- Rareté « range » pour une taille de série m, selon les seuils propres à une catégorie
--- (repli sur les seuils globaux de pp_o1ocards_rarities si la catégorie n'a pas encore ses propres seuils).
-create or replace function public.pp_o1ocards_range_rarity(m int, p_category int)
+-- Rareté « range » d'une série de taille m selon les seuils par défaut (table rarities ; max_series null = le reste)
+create or replace function public.pp_o1ocards_range_rarity(m int)
 returns text language sql stable set search_path = public as $$
-  select coalesce(
-    (select cr.rarity_id
-     from public.pp_o1ocards_category_rarities cr
-     join public.pp_o1ocards_rarities r on r.id = cr.rarity_id
-     where cr.category_id = p_category and r.kind = 'range' and (cr.max_series is null or m <= cr.max_series)
-     order by cr.max_series nulls last
-     limit 1),
-    (select r.id from public.pp_o1ocards_rarities r
-     where r.kind = 'range' and (r.max_series is null or m <= r.max_series)
-     order by r.max_series nulls last
-     limit 1)
-  )
+  select r.id from public.pp_o1ocards_rarities r
+  where r.kind = 'range' and (r.max_series is null or m <= r.max_series)
+  order by r.max_series nulls last
+  limit 1
 $$;
+drop function if exists public.pp_o1ocards_range_rarity(int, int);
 
 -- Nombre de séries d'un type (le sien, sinon celui de sa catégorie)
 create or replace function public.pp_o1ocards_type_series_count(p_type int)
@@ -602,13 +607,13 @@ returns int language sql stable set search_path = public as $$
 $$;
 
 -- Tranches de raretés d'un type : lo..hi = tailles de série couvertes, numbered = nombre de séries de la tranche (en
--- partant de la plus petite) dont le numéro est visible. Ses propres raretés si elle en a, sinon celles de sa catégorie
--- (numéros toujours visibles), sinon les seuils globaux.
+-- partant de la plus petite) dont le numéro est visible. Ses propres raretés si elle en a, sinon les seuils par défaut de
+-- la table rarities (numéros toujours visibles).
 create or replace function public.pp_o1ocards_type_bands(p_type int)
 returns table (rarity_id text, lo int, hi int, numbered int)
 language sql stable set search_path = public as $$
   with t as (
-    select ty.id, ty.category_id, coalesce(ty.series_count, c.series_count) as nser
+    select ty.id, coalesce(ty.series_count, c.series_count) as nser
     from public.pp_o1ocards_types ty join public.pp_o1ocards_categories c on c.id = ty.category_id
     where ty.id = p_type
   ),
@@ -616,20 +621,13 @@ language sql stable set search_path = public as $$
     select tr.rarity_id, tr.max_series, tr.numbered_series as numbered
     from public.pp_o1ocards_type_rarities tr where tr.type_id = p_type
     union all
-    select cr.rarity_id, cr.max_series, 2147483647
-    from t
-    join public.pp_o1ocards_category_rarities cr on cr.category_id = t.category_id
-    join public.pp_o1ocards_rarities r on r.id = cr.rarity_id and r.kind = 'range'
-    where not exists (select 1 from public.pp_o1ocards_type_rarities x where x.type_id = p_type)
-    union all
     select r.id, r.max_series, 2147483647
-    from t cross join public.pp_o1ocards_rarities r
+    from public.pp_o1ocards_rarities r
     where r.kind = 'range'
       and not exists (select 1 from public.pp_o1ocards_type_rarities x where x.type_id = p_type)
-      and not exists (select 1 from public.pp_o1ocards_category_rarities y where y.category_id = t.category_id)
   ),
   ordered as (
-    -- max_series null = « le reste » : toujours la dernière tranche, même si la catégorie est plus petite que les autres seuils
+    -- max_series null = « le reste » : toujours la dernière tranche, même si le type a moins de séries que les autres seuils
     select b.rarity_id, b.numbered,
            least(coalesce(b.max_series, (select nser from t)), (select nser from t)) as hi,
            coalesce(lag(least(coalesce(b.max_series, (select nser from t)), (select nser from t)))
@@ -639,7 +637,7 @@ language sql stable set search_path = public as $$
   select o.rarity_id, o.lo, o.hi, o.numbered from ordered o where o.lo <= o.hi order by o.lo
 $$;
 
--- Rareté « range » d'une série de taille m pour un type : ses propres tranches, sinon celles de sa catégorie
+-- Rareté « range » d'une série de taille m pour un type : ses propres tranches, sinon les seuils par défaut
 create or replace function public.pp_o1ocards_type_range_rarity(m int, p_type int)
 returns text language sql stable set search_path = public as $$
   select coalesce(
@@ -647,7 +645,7 @@ returns text language sql stable set search_path = public as $$
      where tr.type_id = p_type and m <= tr.max_series order by tr.max_series, tr.rarity_id limit 1),
     (select tr.rarity_id from public.pp_o1ocards_type_rarities tr
      where tr.type_id = p_type order by tr.max_series desc, tr.rarity_id limit 1),
-    public.pp_o1ocards_range_rarity(m, (select category_id from public.pp_o1ocards_types where id = p_type))
+    public.pp_o1ocards_range_rarity(m)
   )
 $$;
 
@@ -657,8 +655,8 @@ returns boolean language sql stable set search_path = public as $$
   select coalesce((select (m - b.lo + 1) <= b.numbered from public.pp_o1ocards_type_bands(p_type) b where m between b.lo and b.hi limit 1), true)
 $$;
 
--- Rareté de la carte n/m (type p_type, dont on déduit la catégorie). Priorité :
--- Unique (1/1) > Alpha (1/m) > Omega (m/m) > rareté « range » selon les seuils de la catégorie.
+-- Rareté de la carte n/m du type p_type. Priorité :
+-- Unique (1/1) > Alpha (1/m) > Omega (m/m) > rareté « range » selon les tranches du type.
 create or replace function public.pp_o1ocards_rarity_id(n int, m int, p_type int)
 returns text language plpgsql stable set search_path = public as $$
 declare v text;
@@ -2049,10 +2047,6 @@ begin
     'config', (select coalesce(jsonb_agg(jsonb_build_object('key', key, 'value', value, 'description', description) order by key), '[]'::jsonb)
                from public.pp_o1ocards_config),
     'rarities', (select coalesce(jsonb_agg(to_jsonb(r) order by r.sort_order), '[]'::jsonb) from public.pp_o1ocards_rarities r),
-    'category_rarities', (select coalesce(jsonb_agg(jsonb_build_object(
-        'category_id', cr.category_id, 'rarity_id', cr.rarity_id, 'max_series', cr.max_series
-      ) order by cr.category_id, (select sort_order from public.pp_o1ocards_rarities where id = cr.rarity_id)), '[]'::jsonb)
-      from public.pp_o1ocards_category_rarities cr),
     'legal', (select coalesce(jsonb_agg(jsonb_build_object('key', key, 'value', value) order by key), '[]'::jsonb)
               from public.pp_o1ocards_legal),
     'players', (select count(*) from public.pp_o1ocards_profiles),
@@ -2072,18 +2066,15 @@ begin
   );
 end $$;
 
--- p_rarities (optionnel) : [{"rarity_id":"ultra","max_series":10}, {"rarity_id":"super","max_series":25}, ...],
--- une entrée par rareté "range" (public.pp_o1ocards_rarities), dans l'ordre sort_order, seuils strictement croissants,
--- max_series omis ou null seulement sur la dernière (rareté la plus commune : le reste de la série).
--- Si null, les seuils de rareté de la catégorie ne sont pas modifiés (ex. simple renommage).
+-- Une catégorie : nom, position, nombre de séries par défaut de ses types, couleurs. Les raretés se règlent par type
+-- (admin_save_type_rarities), plus par catégorie.
+drop function if exists public.pp_o1ocards_admin_save_category(text, int, text, int, int, text, text, text, boolean, jsonb);
 create or replace function public.pp_o1ocards_admin_save_category(
   p_password text, p_id int, p_name text, p_position int, p_series_count int,
-  p_color text, p_color2 text, p_text_color text, p_enabled boolean, p_rarities jsonb default null
+  p_color text, p_color2 text, p_text_color text, p_enabled boolean
 )
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare
-  err text := public.pp_o1ocards_admin_guard(p_password);
-  v_id int; rr record; prev int := 0; seen_null boolean := false;
+declare err text := public.pp_o1ocards_admin_guard(p_password); v_id int;
 begin
   if err is not null then return jsonb_build_object('error', err); end if;
   if char_length(trim(coalesce(p_name, ''))) < 1 or char_length(p_name) > 40 then raise exception 'invalid_name'; end if;
@@ -2091,23 +2082,6 @@ begin
   if p_color !~ '^#[0-9a-fA-F]{6}$' or p_color2 !~ '^#[0-9a-fA-F]{6}$' or p_text_color !~ '^#[0-9a-fA-F]{6}$' then
     raise exception 'invalid_color';
   end if;
-
-  if p_rarities is not null then
-    for rr in
-      select r.id,
-             (select (x->>'max_series')::int from jsonb_array_elements(p_rarities) x where x->>'rarity_id' = r.id) as v
-      from public.pp_o1ocards_rarities r where r.kind = 'range' order by r.sort_order
-    loop
-      if seen_null then raise exception 'invalid_rarity_thresholds'; end if;
-      if rr.v is not null then
-        if rr.v < 1 or rr.v > p_series_count or rr.v <= prev then raise exception 'invalid_rarity_thresholds'; end if;
-        prev := rr.v;
-      else
-        seen_null := true;
-      end if;
-    end loop;
-  end if;
-
   if p_id is null then
     insert into public.pp_o1ocards_categories (name, position, series_count, color, color2, text_color, enabled)
     values (trim(p_name), coalesce(p_position, 1), p_series_count, p_color, p_color2, p_text_color, coalesce(p_enabled, true))
@@ -2124,15 +2098,6 @@ begin
     if not found then raise exception 'not_found'; end if;
     v_id := p_id;
   end if;
-
-  if p_rarities is not null then
-    delete from public.pp_o1ocards_category_rarities where category_id = v_id;
-    insert into public.pp_o1ocards_category_rarities (category_id, rarity_id, max_series)
-    select v_id, x->>'rarity_id', (x->>'max_series')::int
-    from jsonb_array_elements(p_rarities) x
-    where exists (select 1 from public.pp_o1ocards_rarities r where r.id = x->>'rarity_id' and r.kind = 'range');
-  end if;
-
   return jsonb_build_object('ok', true, 'id', v_id);
 end $$;
 
@@ -2189,7 +2154,7 @@ begin
   delete from public.pp_o1ocards_offers        where type_id in (select id from public.pp_o1ocards_types where category_id = p_id);
   delete from public.pp_o1ocards_notifications where type_id in (select id from public.pp_o1ocards_types where category_id = p_id);
 
-  -- Le reste suit par clé étrangère ON DELETE CASCADE : types -> cartes, category_rarities, series_rewards,
+  -- Le reste suit par clé étrangère ON DELETE CASCADE : types -> cartes, raretés des types, series_rewards,
   -- unique_wins, favoris
   delete from public.pp_o1ocards_categories where id = p_id;
 
@@ -2344,11 +2309,6 @@ begin
   insert into public.pp_o1ocards_rarities (id, name, kind, max_series, sort_order, color, color2, text_color)
   values (v_id, trim(p_name), 'range', p_max_series, v_sort, p_color, p_color2, p_text_color);
 
-  insert into public.pp_o1ocards_category_rarities (category_id, rarity_id, max_series)
-  select c.id, v_id, p_max_series
-  from public.pp_o1ocards_categories c
-  where exists (select 1 from public.pp_o1ocards_category_rarities cr where cr.category_id = c.id);
-
   return jsonb_build_object('ok', true, 'id', v_id);
 end $$;
 
@@ -2356,8 +2316,8 @@ end $$;
 -- Tranches successives dans l'ordre des max_series (strictement croissants) : la première couvre les séries 1..max, la
 -- suivante de max+1 à son max, etc. numbered_series : de 0 (rareté non numérotée : numéro jamais visible) à la taille de
 -- la tranche (tous les numéros visibles) ; les séries de la tranche au-delà sont numérotées en interne, numéro masqué.
--- Le nombre de séries du type devient le plus grand max_series. Tableau vide : le type retrouve les seuils de sa
--- catégorie. null : inchangé. p_secret : type secret (caché aux joueurs tant qu'ils n'en ont aucune carte) ; null : inchangé.
+-- Le nombre de séries du type devient le plus grand max_series. Tableau vide : le type retrouve les seuils par
+-- défaut (table rarities) et le nombre de séries de sa catégorie. null : inchangé. p_secret : type secret (caché aux joueurs tant qu'ils n'en ont aucune carte) ; null : inchangé.
 -- Refusé si des cartes déjà tirées dépasseraient le nouveau nombre de séries.
 create or replace function public.pp_o1ocards_admin_save_type_rarities(
   p_password text, p_type int, p_rarities jsonb default null, p_secret boolean default null
@@ -2481,7 +2441,7 @@ revoke all on function public.pp_o1ocards_market_list(text, text, int, int)     
 revoke all on function public.pp_o1ocards_market_mine()                                     from public, anon;
 revoke all on function public.pp_o1ocards_admin_change_password(text, text)                 from public, anon;
 revoke all on function public.pp_o1ocards_admin_data(text)                                  from public, anon;
-revoke all on function public.pp_o1ocards_admin_save_category(text, int, text, int, int, text, text, text, boolean, jsonb) from public, anon;
+revoke all on function public.pp_o1ocards_admin_save_category(text, int, text, int, int, text, text, text, boolean)  from public, anon;
 revoke all on function public.pp_o1ocards_admin_set_category_closed(text, int, boolean)     from public, anon;
 revoke all on function public.pp_o1ocards_admin_delete_category(text, int)                  from public, anon;
 revoke all on function public.pp_o1ocards_admin_force_delete_category(text, int, text)      from public, anon;
@@ -2525,7 +2485,7 @@ grant execute on function public.pp_o1ocards_market_list(text, text, int, int)  
 grant execute on function public.pp_o1ocards_market_mine()                                     to authenticated;
 grant execute on function public.pp_o1ocards_admin_change_password(text, text)                 to authenticated;
 grant execute on function public.pp_o1ocards_admin_data(text)                                  to authenticated;
-grant execute on function public.pp_o1ocards_admin_save_category(text, int, text, int, int, text, text, text, boolean, jsonb) to authenticated;
+grant execute on function public.pp_o1ocards_admin_save_category(text, int, text, int, int, text, text, text, boolean)  to authenticated;
 grant execute on function public.pp_o1ocards_admin_set_category_closed(text, int, boolean)     to authenticated;
 grant execute on function public.pp_o1ocards_admin_delete_category(text, int)                  to authenticated;
 grant execute on function public.pp_o1ocards_admin_force_delete_category(text, int, text)      to authenticated;

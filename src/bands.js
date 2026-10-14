@@ -42,15 +42,12 @@ export function checklistNumbers(types) {
   return out
 }
 
-// Seuils qu'un type sans raretés propres hérite de sa catégorie (ou des seuils globaux) : tranches lo..hi.
-// categoryRows : lignes category_rarities ; globalRarities : raretés « à seuil » (max_series null = le reste).
-export function inheritedBands(categoryRows, globalRarities, category) {
+// Seuils par défaut d'un type sans raretés propres : tranches lo..hi, plafonnées au nombre de séries de sa catégorie.
+// globalRarities : raretés « à seuil » (max_series null = le reste, toujours la dernière tranche).
+export function defaultBands(globalRarities, category) {
   const cap = category?.series_count ?? 1
-  const rows = (categoryRows ?? []).filter((r) => r.category_id === category?.id)
-  const src = rows.length
-    ? rows.map((r) => ({ rarity_id: r.rarity_id, max_series: r.max_series ?? Infinity }))   // null = « le reste » : toujours la dernière tranche
-    : (globalRarities ?? []).map((r) => ({ rarity_id: r.id, max_series: r.max_series ?? Infinity }))
-  return bandsOf(src.map((r) => ({ ...r, numbered_series: 2147483647 })), cap).filter((b) => b.lo <= b.hi)
+  const src = (globalRarities ?? []).map((r) => ({ rarity_id: r.id, max_series: r.max_series ?? Infinity, numbered_series: 2147483647 }))
+  return bandsOf(src, cap).filter((b) => b.lo <= b.hi)
 }
 
 // Validation d'un tableau de raretés en cours d'édition ({rarity_id, max_series, numbered_series} en texte ou nombres),
