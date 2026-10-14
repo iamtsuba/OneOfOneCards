@@ -3,3 +3,4 @@ dist
 .env
 tests/.out
 tests/.out-album-*
+tests/.out-admin-*

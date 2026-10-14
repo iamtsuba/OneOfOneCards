@@ -179,7 +179,7 @@ const Color = ({ label, value, onChange }) => (
 )
 
 // ---------- Catégories ----------
-function CategoriesTab({ data, run, busy }) {
+export function CategoriesTab({ data, run, busy }) {
   const nextPos = Math.max(0, ...data.categories.map((c) => c.position)) + 1
   return (
     <div className="admin-list">
@@ -203,6 +203,7 @@ function CategoryForm({ cat, nextPos, run, busy }) {
     color: cat?.color ?? '#ffd9b0', color2: cat?.color2 ?? '#f29a45', text_color: cat?.text_color ?? '#3d1f00', enabled: cat?.enabled ?? true,
   })
   const set = (k) => (v) => setF((cur) => ({ ...cur, [k]: v }))
+  const [confirmDelete, setConfirmDelete] = useState('')   // nom retapé pour confirmer la suppression forcée
   const started = (cat?.taken ?? 0) > 0
   const pct = cat && cat.total ? (cat.taken / cat.total) * 100 : 0
   return (
@@ -266,7 +267,7 @@ function CategoryForm({ cat, nextPos, run, busy }) {
 }
 
 // ---------- Types ----------
-function TypesTab({ data, run, busy }) {
+export function TypesTab({ data, run, busy }) {
   const [catId, setCatId] = useState(data.categories[0]?.id ?? null)
   const types = data.types.filter((t) => t.category_id === catId)
   const nextPos = Math.max(0, ...types.map((t) => t.position)) + 1
@@ -538,7 +539,7 @@ function ImportTypes({ categoryId, existing, run, busy }) {
 }
 
 // ---------- Réglages ----------
-function ConfigTab({ data, run, busy }) {
+export function ConfigTab({ data, run, busy }) {
   return (
     <div className="admin-list">
       <p className="muted">Réglages du jeu et de la boutique. Les modifications s’appliquent tout de suite.</p>
@@ -565,7 +566,7 @@ function ConfigRow({ row, run, busy }) {
 }
 
 // ---------- Raretés ----------
-function RaritiesTab({ data, run, busy }) {
+export function RaritiesTab({ data, run, busy }) {
   return (
     <div className="admin-list">
       <p className="muted">
@@ -648,7 +649,7 @@ function NewRarityForm({ rarities, run, busy }) {
 }
 
 // ---------- 1/1 gagnées ----------
-function UniqueWinsTab({ data }) {
+export function UniqueWinsTab({ data }) {
   const wins = data.unique_wins ?? []
   return (
     <div className="admin-list">
@@ -670,7 +671,7 @@ function UniqueWinsTab({ data }) {
 }
 
 // ---------- Infos légales ----------
-function LegalTab({ data, run, busy }) {
+export function LegalTab({ data, run, busy }) {
   return (
     <div className="admin-list">
       <p className="muted">Ces informations apparaissent dans les conditions de vente et les mentions légales. À renseigner avant de vendre pour de vrai.</p>
@@ -696,7 +697,7 @@ function LegalRow({ row, run, busy }) {
 }
 
 // ---------- Sécurité ----------
-function SecurityTab({ busy, onChange }) {
+export function SecurityTab({ busy, onChange }) {
   const [next, setNext] = useState('')
   const [again, setAgain] = useState('')
   const ok = next.length >= 8 && next === again
