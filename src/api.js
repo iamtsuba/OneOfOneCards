@@ -22,6 +22,8 @@ export const setUsername = (name) => rpc('set_username', { p_username: name })
 export const listCollection = ({ category = null, type = null, rarity = null, sort = 'series', limit = 60, offset = 0 } = {}) =>
   rpc('list_collection', { p_category: category, p_type: type, p_rarity: rarity, p_sort: sort, p_limit: limit, p_offset: offset })
 
+// Vente rapide de plusieurs cartes d'une pile (cartes à numéro masqué d'un type et d'une rareté), tout ou rien
+export const sellDirectMany = (type, rarity, count) => rpc('sell_direct_many', { p_type: type, p_rarity: rarity, p_count: count })
 export const sellDirect = (type, series, number) => rpc('sell_direct', { p_type: type, p_series: series, p_number: number })
 export const listCard = ({ type, series, number, kind, price = null }) =>
   rpc('list_card', { p_type: type, p_series: series, p_number: number, p_kind: kind, p_price: price })
@@ -189,6 +191,9 @@ export function explain(e) {
   if (m.includes('rarity_protected')) return 'Unique, Alpha et Omega ne peuvent pas être supprimées.'
   if (m.includes('rarity_in_use')) return 'Cette rareté est utilisée (cartes déjà classées ou contenu de booster doré) : elle ne peut pas être supprimée.'
   if (m.includes('name_mismatch')) return 'Le nom tapé ne correspond pas exactement au nom de la catégorie : rien n’a été supprimé.'
+  if (m.includes('card_in_album')) return 'Cette carte est dans ton album : elle ne peut pas être vendue. Retire-la de l’album pour la vendre.'
+  if (m.includes('not_enough_cards')) return 'Il n’y a pas assez de cartes vendables dans cette pile (celles de l’album ou en vente sont exclues).'
+  if (m.includes('invalid_count')) return 'Quantité invalide : entre un nombre entier de cartes, minimum 1.'
   if (m.includes('own_card')) return 'Cette carte est déjà à toi.'
   if (m.includes('card_not_taken')) return 'Cette carte n’a pas encore été tirée : impossible de faire une offre.'
   if (m.includes('buyer_insufficient_coins')) return 'L’acheteur n’a plus assez de pièces pour cette offre.'

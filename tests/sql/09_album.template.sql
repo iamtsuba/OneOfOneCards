@@ -40,21 +40,29 @@ select rarity_id, pick_number from public.{{P}}album_view(:cat) where type_id = 
 select (select count(*) from public.{{P}}my_type_cards(1)) as tous, (select count(*) from public.{{P}}my_type_cards(1, 'ultra')) as ultra,
        (select count(*) from public.{{P}}my_type_cards(1, 'alpha')) as alpha, (select count(*) from public.{{P}}my_type_cards(1, 'rare')) as rare_aucune;
 
-\echo '=== revente directe de la carte choisie -> son emplacement se vide, les autres restent'
-select public.{{P}}sell_direct(1, 10, 7) ->> 'status' is not null as revendue;
+\echo '=== une carte placée dans l''album ne peut pas être vendue (banque, marché) ; elle reste dans l''album'
+select pg_temp.try('select public.{{P}}sell_direct(1, 10, 7)');                       -- carte_in_album
+select pg_temp.try('select public.{{P}}list_card(1, 10, 7, ''buy_now'', 5)');         -- card_in_album
+select rarity_id, pick_number from public.{{P}}album_view(:cat) where type_id = 1 and pick_series is not null order by rarity_id;
+select count(*) as cartes_toujours_possedees from public.{{P}}cards where type_id = 1 and owner_id = :A;
+
+\echo '=== vider l''emplacement libère la carte : elle peut alors être revendue'
+select public.{{P}}clear_album_pick(1, 'ultra') ->> 'ok' as ultra_videe;
+select public.{{P}}sell_direct(1, 10, 7) ->> 'status' is not null as revendue_une_fois_libre;
 select rarity_id, pick_number from public.{{P}}album_view(:cat) where type_id = 1 and pick_series is not null order by rarity_id;
 
-\echo '=== vider un emplacement précis'
-select public.{{P}}clear_album_pick(1, 'alpha') ->> 'ok' as alpha_videe;
-select rarity_id from public.{{P}}album_view(:cat) where type_id = 1 and pick_series is not null order by rarity_id;
-
-\echo '=== vente sur le marché : c''est le VENDEUR qui perd l''emplacement'
-select public.{{P}}set_album_pick(1, 10, 3) ->> 'ok' as a_repick;
+\echo '=== une carte en vente ne peut pas entrer dans l''album'
 select (public.{{P}}list_card(1, 10, 3, 'buy_now', 1)->>'listing_id')::bigint as lid \gset
+select pg_temp.try('select public.{{P}}set_album_pick(1, 10, 3)');                    -- card_listed
+select (select listed from public.{{P}}my_type_cards(1, 'ultra') where number = 3) as carte_signalee_en_vente;
+
+\echo '=== filet de sécurité : si un choix existait malgré tout sur une carte vendue, il est retiré (insertion directe)'
+insert into public.{{P}}album_picks (user_id, type_id, rarity_id, series, number) values (:A, 1, 'ultra', 10, 3);
+select count(*) as choix_present_avant_la_vente from public.{{P}}album_picks where user_id = :A and rarity_id = 'ultra';
 set request.jwt.claim.sub = :B;
 select public.{{P}}buy_now(:lid) is not null as achetee_par_b;
 set request.jwt.claim.sub = :A;
-select rarity_id, pick_number from public.{{P}}album_view(:cat) where type_id = 1 and pick_series is not null order by rarity_id;  -- ne reste que l'Omega et l'Unique
+select count(*) as choix_retire_apres_la_vente from public.{{P}}album_picks where user_id = :A and rarity_id = 'ultra';
 
 \echo '=== choix périmé : si les raretés du type changent, un choix dont la rareté n''existe plus n''est pas affiché'
 insert into public.{{P}}type_rarities (type_id, rarity_id, max_series, numbered_series) values (1, 'super', 10, 10), (1, 'common', 500, 0);

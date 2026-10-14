@@ -154,7 +154,6 @@ export default function Boosters({ goCollection }) {
         {status && (
           <p className="fine">
             +{status.regen_amount} boosters toutes les {status.regen_minutes} minutes, jusqu’à {status.max_boosters} en stock.
-            Chaque carte n’existe qu’en un exemplaire.
           </p>
         )}
         {status && category && (

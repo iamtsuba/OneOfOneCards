@@ -121,6 +121,11 @@ export default function CardModal({ sel, rarity, onClose, onChanged, onRefresh, 
             )}
             {sel.state === 'taken' && <button className="btn ghost" onClick={() => goMarket('browse')}>Aller au marché</button>}
           </>
+        ) : sel.inAlbum ? (
+          <>
+            <p className="overlay-hint">Cette carte est dans ton album : elle ne peut pas être vendue. Retire-la de l’album pour la vendre.</p>
+            <button className="btn ghost-light" disabled={busy} onClick={() => run(() => api.clearAlbumPick(sel.typeId, sel.rarityId))}>Retirer de l’album</button>
+          </>
         ) : sel.listingId ? (
           <>
             <p className="overlay-hint">Cette carte est en vente sur le marché.</p>

@@ -13,14 +13,14 @@ const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 // Le paquet est construit DANS le projet (pour trouver react) et contient aussi GameContext : une seule instance du contexte
 const out = mkdtempSync(path.join(root, 'tests', '.out-album-'))
 await build({
-  stdin: { contents: "export { Album, AlbumStats } from './src/components/Collection.jsx'; export { default as Card } from './src/components/Card.jsx'; export { GameContext } from './src/game.js'", resolveDir: root, loader: 'js' },
+  stdin: { contents: "export { Album, AlbumStats, AlbumPicker, StackModal } from './src/components/Collection.jsx'; export { default as Card } from './src/components/Card.jsx'; export { GameContext } from './src/game.js'", resolveDir: root, loader: 'js' },
   bundle: true, format: 'esm', platform: 'node', jsx: 'automatic', outfile: path.join(out, 'bundle.mjs'),
   external: ['react', 'react-dom', 'react/jsx-runtime', '@supabase/supabase-js'],
   define: { 'import.meta.env': JSON.stringify({ MODE: 'preprod', VITE_APP_ENV: 'preprod' }) }, logLevel: 'silent',
 })
 const React = require('react')
 const { renderToStaticMarkup } = require('react-dom/server')
-const { Album, AlbumStats, Card, GameContext } = await import(pathToFileURL(path.join(out, 'bundle.mjs')).href)
+const { Album, AlbumStats, AlbumPicker, StackModal, Card, GameContext } = await import(pathToFileURL(path.join(out, 'bundle.mjs')).href)
 rmSync(out, { recursive: true, force: true })
 
 let bad = 0
@@ -83,6 +83,63 @@ for (const size of ['lg', 'sm']) {
   ok(`carte ${size} nouvelle : l'étoile est hors de la face de la carte`, /<\/div><span class="card-new-star"/.test(withStar) && !/card-setno">[^<]*<\/span><span class="card-new-star"/.test(withStar))
   ok(`carte ${size} déjà possédée : pas d'étoile`, !/card-new-star/.test(without) && !/nouvelle carte/.test(without))
 }
+
+
+// ---- Unique = bonus : visible dans l'album, hors full set (statistiques, compteur par carte, étiquette)
+const rm2 = { ...rarityMap, unique: { id: 'unique', name: 'Unique', kind: 'unique', sort_order: 1, color: '#7c3aed', color2: '#5b21b6', text_color: '#fff' } }
+const bonusRows = []
+for (const t of [1, 2]) for (const r of ['common', 'ultra', 'alpha', 'unique']) bonusRows.push({ type_id: t, type_name: `Carte ${t}`, rarity_id: r, pick_series: null, pick_number: null, owned_count: 0 })
+bonusRows[0].pick_series = 10; bonusRows[0].pick_number = 7   // une Commune remplie
+bonusRows[3].pick_series = 1; bonusRows[3].pick_number = 1    // une Unique remplie (bonus)
+const bs = renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows: bonusRows, rarityMap: rm2 })))
+ok('stats : le full set exclut les Unique (1 rempli sur 6, pas sur 8)', /<strong>1<\/strong> emplacement rempli sur 6/.test(bs))
+ok('stats : le bonus Unique est annoncé à part (1/2), hors full set', /Bonus Unique, hors full set : <strong>1\/2<\/strong>/.test(bs))
+ok('stats : la puce Unique est marquée bonus', /Unique <strong>1\/2<\/strong><span class="muted"> · bonus/.test(bs))
+const allBase = bonusRows.map((r) => (r.rarity_id === 'unique' ? r : { ...r, pick_series: 5, pick_number: 2 }))
+ok('stats : « Full set complet » sans avoir aucune Unique', /Full set complet/.test(renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows: allBase.map((r) => ({ ...r, pick_series: r.rarity_id === 'unique' ? null : 5 })), rarityMap: rm2 })))))
+ok('stats : pas de « Full set complet » tant qu’il manque un emplacement', !/Full set complet/.test(bs))
+const catalog2 = { ...catalog, typeMap: { 1: { id: 1, name: 'Carte 1', image: '🐱' }, 2: { id: 2, name: 'Carte 2', image: '😾' } }, checklist: (id) => ({ no: id, total: 2, secret: false }) }
+const bAlbum = renderToStaticMarkup(wrap(React.createElement(Album, { rows: bonusRows, catalog: catalog2, rarityMap: rm2, onRefresh: () => {} })))
+ok('album : compteur par carte sans les Unique, bonus à côté (carte 1 : 1/3 · bonus 1/1 ; carte 2 : 0/3 · bonus 0/1)', /album-type-count">1\/3 · bonus 1\/1</.test(bAlbum) && /album-type-count">0\/3 · bonus 0\/1</.test(bAlbum))
+ok('album : emplacement Unique marqué « bonus » (classe et étiquette), les autres non', (bAlbum.match(/album-slot [a-z]+ bonus/g) || []).length === 2 && (bAlbum.match(/album-bonus-tag">bonus</g) || []).length === 2)
+ok('album : les Unique restent visibles (8 emplacements au total)', (bAlbum.match(/class="album-slot /g) || []).length === 8)
+
+// ---- Sélecteur de l'album : 200 cartes masquées = 1 proposition, + 3 numérotées = 4
+const mk = (series, number, visible, extra2 = {}) => ({ series, number, rarity_id: 'common', listed: false, picked: false, visible, ...extra2 })
+const pickCards = [...Array.from({ length: 200 }, (_, i) => mk(40 + (i % 30), 2 + Math.floor(i / 30), false)), mk(7, 2, true), mk(50, 30, true), mk(26, 25, true)]
+const picker = (cards2, extraProps = {}) => renderToStaticMarkup(wrap(React.createElement(AlbumPicker, { typeId: 1, typeName: 'Chat va ?', rarityId: 'common', rarityName: 'Commune', rarityMap, hasPick: false, onClose: () => {}, onChanged: () => {}, initialCards: cards2, ...extraProps })))
+const ph = picker(pickCards)
+ok('sélecteur : 4 propositions pour 200 cartes masquées + 3 numérotées', (ph.match(/<li/g) || []).length === 4)
+ok('sélecteur : la proposition regroupée porte le nombre de cartes (200)', /card-count" aria-hidden="true">200</.test(ph))
+ok('sélecteur : les trois numérotées montrent leur numéro (2/7, 30/50, 25/26)', /card-num">2\/7</.test(ph) && /card-num">30\/50</.test(ph) && /card-num">25\/26</.test(ph))
+ok('sélecteur : explication du regroupement', /regroupées en une seule proposition/.test(ph))
+ok('sélecteur : 20 cartes masquées seulement = une seule proposition', (picker(Array.from({ length: 20 }, (_, i) => mk(40, 2 + i, false))).match(/<li/g) || []).length === 1)
+const phPicked = picker([mk(40, 2, false), mk(40, 3, false, { picked: true }), mk(7, 2, true)], { hasPick: true })
+ok('sélecteur : la carte déjà dans l’album est marquée et on peut vider l’emplacement', /Dans l’album/.test(phPicked) && /Vider cet emplacement/.test(phPicked))
+ok('sélecteur : les cartes en vente ne sont pas proposées, et on le dit', /1 carte en vente non proposée/.test(picker([mk(40, 2, false), mk(7, 2, true, { listed: true })])) && (picker([mk(40, 2, false), mk(7, 2, true, { listed: true })]).match(/<li/g) || []).length === 1)
+ok('sélecteur : tout en vente → message explicite', /sont tous en vente/.test(picker([mk(7, 2, true, { listed: true })])))
+
+// ---- Fenêtre de pile : vente rapide en lot, mise en vente d'une seule carte
+const stackCards = [...Array.from({ length: 10 }, (_, i) => mk(40, 2 + i, false, { listed: i < 2, picked: i === 2 })), mk(7, 2, true)]
+const stackOf = (cards2, status, props = {}) => renderToStaticMarkup(React.createElement(M2.GameContext.Provider, { value: { catalog: catalog2, rarityMap, status, setStatus: () => {} } },
+  React.createElement(StackModal, { stack: { typeId: 1, rarityId: 'common', series: 40, number: 2 }, catalog: catalog2, rarityMap, onClose: () => {}, onChanged: () => {}, onListOne: () => {}, initialCards: cards2, ...props })))
+const M2 = { GameContext }
+const sm = stackOf(stackCards, { direct_sell_price: 2, closed_categories: [] })
+ok('pile : nombre total de cartes dans le rond (10) et dans le texte', /card-count" aria-hidden="true">10</.test(sm) && /10 cartes identiques/.test(sm))
+ok('pile : détail vendables / en vente / dans l’album (7 · 2 · 1)', /7 vendables · 2 en vente · 1 dans l’album/.test(sm))
+ok('pile : vente rapide d’une carte au prix du jeu (1 carte pour 2 pièces), choix du nombre, tout vendre', /Vendre 1 carte pour 2 pièces/.test(sm) && /max="7"/.test(sm) && /Tout \(7\)/.test(sm))
+ok('pile : mise en vente sur le marché, une carte à la fois', /Une carte à la fois/.test(sm) && !/disabled=""[^>]*>Mettre une carte en vente/.test(sm))
+const catalogClosed = { ...catalog2, typeMap: { ...catalog2.typeMap, 1: { ...catalog2.typeMap[1], category_id: 1 } }, categoryMap: { 1: { id: 1, name: 'Chats', closed: true } } }
+const closedHtml = stackOf(stackCards, { direct_sell_price: 2, closed_categories: [1] }, { catalog: catalogClosed })
+ok('pile : catégorie terminée → vente rapide indisponible (plus de bouton Vendre), marché toujours possible', /Indisponible : la catégorie « Chats » est terminée/.test(closedHtml) && !/Vendre \d+ carte/.test(closedHtml) && /Mettre une carte en vente/.test(closedHtml))
+const allListed = stackOf(Array.from({ length: 3 }, (_, i) => mk(40, 2 + i, false, { listed: true })), { direct_sell_price: 1, closed_categories: [] })
+ok('pile : rien de vendable → message et mise en vente désactivée', /Aucune carte vendable/.test(allListed) && /disabled=""[^>]*>Mettre une carte en vente/.test(allListed))
+
+// ---- Carte : rond de quantité et pastille « Album »
+const cardCount = renderToStaticMarkup(wrap(React.createElement(Card, { typeId: 1, series: 40, number: 2, rarity: rarityMap.common, size: 'sm', count: 12 })))
+ok('carte : rond de quantité en haut à droite pour une pile', /card-count" aria-hidden="true">12</.test(cardCount) && /pile de 12 cartes/.test(cardCount))
+ok('carte : pas de rond pour une carte seule', !/card-count/.test(renderToStaticMarkup(wrap(React.createElement(Card, { typeId: 1, series: 40, number: 2, rarity: rarityMap.common, size: 'sm', count: 1 })))))
+ok('carte : pastille « Album » quand elle est dans l’album', /card-inalbum">Album</.test(renderToStaticMarkup(wrap(React.createElement(Card, { typeId: 1, series: 7, number: 2, rarity: rarityMap.common, size: 'sm', inAlbum: true })))))
 
 if (bad) { console.error(`\n${bad} contrôle(s) en échec`); process.exit(1) }
 console.log('\nAlbum (rendu) : tous les contrôles sont passés.')

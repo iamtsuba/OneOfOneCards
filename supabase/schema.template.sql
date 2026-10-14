@@ -1147,6 +1147,11 @@ begin
 end $$;
 
 -- Mes cartes (filtres catégorie / type / rareté, tri, pagination)
+-- Ma collection (page « Mes cartes »), paginée. Une tuile par carte à numéro VISIBLE ; une seule pile par (type, rareté)
+-- pour les cartes à numéro masqué (elles sont indiscernables pour le joueur) : stack_qty = nombre de cartes de la pile,
+-- stack_free = celles qu'on peut vendre (ni dans l'album ni en vente). La carte portée par une pile est la plus grande série.
+-- total = nombre de tuiles (pagination), cards_total = nombre de cartes (somme des quantités).
+drop function if exists public.{{P}}list_collection(int, int, text, text, int, int);
 create or replace function public.{{P}}list_collection(
   p_category int  default null,
   p_type     int  default null,
@@ -1163,32 +1168,65 @@ returns table (
   obtained_at  timestamptz,
   listing_id   bigint,
   listing_kind text,
-  total        bigint
+  is_stack     boolean,
+  stack_qty    int,
+  stack_free   int,
+  in_album     boolean,
+  total        bigint,
+  cards_total  bigint
 )
 language plpgsql security definer set search_path = public as $$
-declare uid uuid := auth.uid();
+declare uid uuid := auth.uid(); v_unique text; v_alpha text; v_omega text;
 begin
   if uid is null then raise exception 'not_authenticated'; end if;
   perform public.{{P}}settle_due();
+  select r.id into v_unique from public.{{P}}rarities r where r.kind = 'unique' limit 1;
+  select r.id into v_alpha  from public.{{P}}rarities r where r.kind = 'alpha'  limit 1;
+  select r.id into v_omega  from public.{{P}}rarities r where r.kind = 'omega'  limit 1;
   return query
-  select x.type_id, x.series, x.number, x.rid, x.obtained_at, l.id, l.kind, count(*) over ()
-  from (
-    select c.type_id, c.series, c.number, c.obtained_at, ty.position as tpos,
-           public.{{P}}rarity_id(c.number, c.series, c.type_id) as rid
-    from public.{{P}}cards c
-    join public.{{P}}types ty on ty.id = c.type_id
+  with mine as (
+    select c.type_id, c.series, c.number, c.obtained_at, ty.position as tpos
+    from public.{{P}}cards c join public.{{P}}types ty on ty.id = c.type_id
     where c.owner_id = uid
       and (p_category is null or ty.category_id = p_category)
       and (p_type is null or c.type_id = p_type)
-  ) x
-  left join public.{{P}}rarities r on r.id = x.rid
-  left join public.{{P}}listings l
-         on l.type_id = x.type_id and l.series = x.series and l.number = x.number and l.status = 'active'
-  where p_rarity is null or x.rid = p_rarity
+  ),
+  pinfo as (   -- une seule évaluation par (type, série) : rareté « du milieu » et numéro masqué ou non
+    select d.type_id, d.series, public.{{P}}type_range_rarity(d.series, d.type_id) as rr,
+           not public.{{P}}number_visible(d.series, d.type_id) as hidden
+    from (select distinct m.type_id, m.series from mine m) d
+  ),
+  cardrows as (
+    select m.type_id, m.series, m.number, m.obtained_at, m.tpos, pi.hidden,
+           case when m.series = 1 then v_unique when m.number = 1 then v_alpha when m.number = m.series then v_omega else pi.rr end as rid,
+           (a.user_id is not null) as in_album, l.id as lid, l.kind as lkind
+    from mine m
+    join pinfo pi on pi.type_id = m.type_id and pi.series = m.series
+    left join public.{{P}}album_picks a on a.user_id = uid and a.type_id = m.type_id and a.series = m.series and a.number = m.number
+    left join public.{{P}}listings l on l.type_id = m.type_id and l.series = m.series and l.number = m.number and l.status = 'active'
+  ),
+  tiles as (
+    select r.type_id, r.series, r.number, r.obtained_at, r.tpos, r.rid, r.lid, r.lkind, false as is_stack,
+           1 as qty, case when r.in_album or r.lid is not null then 0 else 1 end as free, r.in_album
+    from cardrows r
+    where not r.hidden and (p_rarity is null or r.rid = p_rarity)
+    union all
+    select r.type_id,
+           (array_agg(r.series order by r.series desc, r.number desc))[1], (array_agg(r.number order by r.series desc, r.number desc))[1],
+           max(r.obtained_at), min(r.tpos), r.rid, null::bigint, null::text, true,
+           count(*)::int, (count(*) filter (where not r.in_album and r.lid is null))::int, bool_or(r.in_album)
+    from cardrows r
+    where r.hidden and (p_rarity is null or r.rid = p_rarity)
+    group by r.type_id, r.rid
+  )
+  select t.type_id, t.series, t.number, t.rid, t.obtained_at, t.lid, t.lkind, t.is_stack, t.qty, t.free, t.in_album,
+         count(*) over (), sum(t.qty) over ()
+  from tiles t
+  left join public.{{P}}rarities r on r.id = t.rid
   order by
     case when p_sort = 'rarity' then r.sort_order end asc nulls last,
-    case when p_sort = 'recent' then x.obtained_at end desc,
-    x.tpos, x.type_id, x.series asc, x.number asc
+    case when p_sort = 'recent' then t.obtained_at end desc,
+    t.tpos, t.type_id, t.series asc, t.number asc
   limit least(greatest(p_limit, 1), 200)
   offset greatest(p_offset, 0);
 end $$;
@@ -1436,6 +1474,10 @@ begin
              where type_id = p_type and series = p_series and number = p_number and status = 'active') then
     raise exception 'card_listed';
   end if;
+  if exists (select 1 from public.{{P}}album_picks
+             where user_id = uid and type_id = p_type and series = p_series and number = p_number) then
+    raise exception 'card_in_album';   -- une carte placée dans l'album ne peut pas être vendue
+  end if;
   if exists (select 1 from public.{{P}}types t join public.{{P}}categories c on c.id = t.category_id
              where t.id = p_type and c.closed) then
     raise exception 'category_closed';
@@ -1464,6 +1506,10 @@ begin
   if exists (select 1 from public.{{P}}listings
              where type_id = p_type and series = p_series and number = p_number and status = 'active') then
     raise exception 'card_listed';
+  end if;
+  if exists (select 1 from public.{{P}}album_picks
+             where user_id = uid and type_id = p_type and series = p_series and number = p_number) then
+    raise exception 'card_in_album';   -- une carte placée dans l'album ne peut pas être vendue
   end if;
 
   if p_kind = 'buy_now' then
@@ -1785,6 +1831,10 @@ begin
     return jsonb_build_object('status', public.{{P}}status_json(p));
   end if;
 
+  if exists (select 1 from public.{{P}}album_picks
+             where user_id = uid and type_id = o.type_id and series = o.series and number = o.number) then
+    raise exception 'card_in_album';   -- une carte placée dans l'album ne peut pas être vendue
+  end if;
   perform 1 from public.{{P}}listings
   where type_id = o.type_id and series = o.series and number = o.number and status = 'active' and kind = 'auction' and bid_count > 0
   for update;
@@ -1904,16 +1954,21 @@ begin
   order by ts.position, ts.id, r.sort_order desc;
 end $$;
 
--- Mes exemplaires d'un type, éventuellement d'une seule rareté (pour choisir lequel mettre dans l'emplacement)
-drop function if exists public.{{P}}my_type_cards(int);
+-- Mes exemplaires d'un type, éventuellement d'une seule rareté (pour choisir lequel mettre dans l'emplacement).
+-- listed : en vente (ne peut pas entrer dans l'album) ; picked : c'est l'exemplaire actuellement dans l'album ;
+-- visible : son numéro est visible (sinon il fait partie de la pile des cartes sans numéro).
+drop function if exists public.{{P}}my_type_cards(int, text);
 create or replace function public.{{P}}my_type_cards(p_type int, p_rarity text default null)
-returns table (series int, number int, rarity_id text)
+returns table (series int, number int, rarity_id text, listed boolean, picked boolean, visible boolean)
 language plpgsql security definer set search_path = public as $$
 declare uid uuid := auth.uid();
 begin
   if uid is null then raise exception 'not_authenticated'; end if;
   return query
-  select c.series, c.number, public.{{P}}rarity_id(c.number, c.series, c.type_id)
+  select c.series, c.number, public.{{P}}rarity_id(c.number, c.series, c.type_id),
+         exists (select 1 from public.{{P}}listings l where l.type_id = c.type_id and l.series = c.series and l.number = c.number and l.status = 'active'),
+         exists (select 1 from public.{{P}}album_picks a where a.user_id = uid and a.type_id = c.type_id and a.series = c.series and a.number = c.number),
+         public.{{P}}number_visible(c.series, c.type_id)
   from public.{{P}}cards c
   where c.type_id = p_type and c.owner_id = uid
     and (p_rarity is null or public.{{P}}rarity_id(c.number, c.series, c.type_id) = p_rarity)
@@ -1931,6 +1986,10 @@ begin
   ) then
     raise exception 'not_owner';
   end if;
+  if exists (select 1 from public.{{P}}listings
+             where type_id = p_type and series = p_series and number = p_number and status = 'active') then
+    raise exception 'card_listed';   -- une carte en vente ne peut pas entrer dans l'album
+  end if;
   v_rarity := public.{{P}}rarity_id(p_number, p_series, p_type);
   insert into public.{{P}}album_picks (user_id, type_id, rarity_id, series, number, updated_at)
   values (uid, p_type, v_rarity, p_series, p_number, now())
@@ -1947,6 +2006,83 @@ begin
   if uid is null then raise exception 'not_authenticated'; end if;
   delete from public.{{P}}album_picks where user_id = uid and type_id = p_type and rarity_id = p_rarity;
   return jsonb_build_object('ok', true);
+end $$;
+
+-- ---------- Cartes à numéro masqué : piles ----------
+-- Les cartes dont le numéro n'est pas visible n'ont pas d'identité pour le joueur : elles se rangent en une pile par
+-- (type, rareté). Les cartes à numéro visible restent individuelles. Les cartes placées dans l'album ou en vente ne sont
+-- pas vendables.
+-- Cartes à numéro masqué d'un type et d'une rareté (usage interne) ; sellable = ni dans l'album ni en vente.
+create or replace function public.{{P}}stack_cards(p_uid uuid, p_type int, p_rarity text)
+returns table (series int, number int, sellable boolean)
+language sql stable security definer set search_path = public as $$
+  with s as (select distinct c.series from public.{{P}}cards c where c.owner_id = p_uid and c.type_id = p_type),
+       sv as (select s.series, not public.{{P}}number_visible(s.series, p_type) as hidden from s)
+  select c.series, c.number,
+         not exists (select 1 from public.{{P}}album_picks a where a.user_id = p_uid and a.type_id = c.type_id and a.series = c.series and a.number = c.number)
+         and not exists (select 1 from public.{{P}}listings l where l.type_id = c.type_id and l.series = c.series and l.number = c.number and l.status = 'active')
+  from public.{{P}}cards c
+  join sv on sv.series = c.series and sv.hidden
+  where c.owner_id = p_uid and c.type_id = p_type
+    and public.{{P}}rarity_id(c.number, c.series, c.type_id) = p_rarity
+$$;
+
+-- Vente rapide de plusieurs cartes d'une pile à la banque, au même prix et aux mêmes règles que la revente d'une carte
+-- (refusée si la catégorie est terminée). Tout ou rien ; jamais la carte de l'album ni une carte en vente.
+create or replace function public.{{P}}sell_direct_many(p_type int, p_rarity text, p_count int)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  uid uuid := auth.uid();
+  v_price int := public.{{P}}cfg('direct_sell_price')::int;
+  v_series int[]; v_number int[]; v_rows int;
+  p public.{{P}}profiles;
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  perform public.{{P}}ensure_profile(uid);
+  if p_count is null or p_count < 1 or p_count > 10000 then raise exception 'invalid_count'; end if;
+  if exists (select 1 from public.{{P}}types t join public.{{P}}categories c on c.id = t.category_id
+             where t.id = p_type and c.closed) then
+    raise exception 'category_closed';
+  end if;
+
+  select array_agg(x.series), array_agg(x.number) into v_series, v_number
+  from (
+    select c.series, c.number
+    from public.{{P}}cards c
+    join (select sc.series, sc.number from public.{{P}}stack_cards(uid, p_type, p_rarity) sc where sc.sellable) sc
+      on sc.series = c.series and sc.number = c.number
+    where c.type_id = p_type and c.owner_id = uid
+    order by c.series desc, c.number desc
+    limit p_count
+    for update of c
+  ) x;
+  if coalesce(array_length(v_series, 1), 0) < p_count then raise exception 'not_enough_cards'; end if;
+  -- verrouillées : on revérifie qu'aucune n'a été mise en vente entre-temps
+  if exists (select 1 from public.{{P}}listings l join unnest(v_series, v_number) u(s, n)
+               on l.series = u.s and l.number = u.n where l.type_id = p_type and l.status = 'active') then
+    raise exception 'card_listed';
+  end if;
+
+  delete from public.{{P}}cards c using unnest(v_series, v_number) u(s, n)
+  where c.type_id = p_type and c.series = u.s and c.number = u.n and c.owner_id = uid;
+  get diagnostics v_rows = row_count;
+  if v_rows <> p_count then raise exception 'not_enough_cards'; end if;
+
+  update public.{{P}}profiles set coins = coins + v_price * p_count where id = uid returning * into p;
+  return jsonb_build_object('status', public.{{P}}status_json(p), 'sold', p_count, 'coins', v_price * p_count);
+end $$;
+
+-- Met UNE carte d'une pile en vente sur le marché (la plus grande série d'abord) : même règles que list_card
+create or replace function public.{{P}}list_stack_card(p_type int, p_rarity text, p_kind text, p_price int default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); v_series int; v_number int;
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  select sc.series, sc.number into v_series, v_number
+  from public.{{P}}stack_cards(uid, p_type, p_rarity) sc
+  where sc.sellable order by sc.series desc, sc.number desc limit 1;
+  if v_series is null then raise exception 'not_enough_cards'; end if;
+  return public.{{P}}list_card(p_type, v_series, v_number, p_kind, p_price);
 end $$;
 
 -- Migration : la vitrine d'avant gardait UN choix par type. Chaque choix existant passe dans l'emplacement de la rareté
@@ -2473,6 +2609,7 @@ revoke all on function public.{{P}}cards_counter() from public, anon, authentica
 revoke all on function public.{{P}}draw_rarity(text, int) from public, anon, authenticated;
 revoke all on function public.{{P}}draw_golden(uuid, int) from public, anon, authenticated;
 revoke all on function public.{{P}}owns_card_rarity(uuid, int, text) from public, anon, authenticated;
+revoke all on function public.{{P}}stack_cards(uuid, int, text) from public, anon, authenticated;
 revoke all on function public.{{P}}cards_reward() from public, anon, authenticated;
 revoke all on function public.{{P}}admin_guard(text) from public, anon, authenticated;
 -- Réservée au SQL Editor (mot de passe admin initial)
@@ -2514,6 +2651,8 @@ revoke all on function public.{{P}}admin_save_type_rarities(text, int, jsonb, bo
 revoke all on function public.{{P}}admin_delete_rarity(text, text)                                from public, anon;
 revoke all on function public.{{P}}admin_set_legal(text, text, text)                 from public, anon;
 revoke all on function public.{{P}}album_view(int)                                   from public, anon;
+revoke all on function public.{{P}}sell_direct_many(int, text, int)                   from public, anon;
+revoke all on function public.{{P}}list_stack_card(int, text, text, int)              from public, anon;
 revoke all on function public.{{P}}my_type_cards(int, text)                          from public, anon;
 revoke all on function public.{{P}}set_album_pick(int, int, int)                     from public, anon;
 revoke all on function public.{{P}}clear_album_pick(int, text)                       from public, anon;
@@ -2558,6 +2697,8 @@ grant execute on function public.{{P}}admin_save_type_rarities(text, int, jsonb,
 grant execute on function public.{{P}}admin_delete_rarity(text, text)                                to authenticated;
 grant execute on function public.{{P}}admin_set_legal(text, text, text)                 to authenticated;
 grant execute on function public.{{P}}album_view(int)                                   to authenticated;
+grant execute on function public.{{P}}sell_direct_many(int, text, int)                   to authenticated;
+grant execute on function public.{{P}}list_stack_card(int, text, text, int)              to authenticated;
 grant execute on function public.{{P}}my_type_cards(int, text)                          to authenticated;
 grant execute on function public.{{P}}set_album_pick(int, int, int)                     to authenticated;
 grant execute on function public.{{P}}clear_album_pick(int, text)                       to authenticated;
