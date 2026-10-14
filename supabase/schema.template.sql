@@ -365,14 +365,15 @@ create table if not exists public.{{P}}bids (
 );
 create index if not exists {{P}}bids_bidder_idx on public.{{P}}bids (bidder_id, listing_id);
 
--- ---------- Album : une carte numérotée choisie par type, pour la vitrine d'une catégorie ----------
+-- ---------- Album : un emplacement par carte (type) et par rareté, rempli avec un de ses exemplaires numérotés ----------
 create table if not exists public.{{P}}album_picks (
   user_id    uuid not null references auth.users (id) on delete cascade,
   type_id    int  not null references public.{{P}}types (id) on delete cascade,
+  rarity_id  text not null references public.{{P}}rarities (id) on delete cascade,
   series     int  not null,
   number     int  not null,
   updated_at timestamptz not null default now(),
-  primary key (user_id, type_id)
+  primary key (user_id, type_id, rarity_id)
 );
 create index if not exists {{P}}album_picks_card_idx on public.{{P}}album_picks (type_id, series, number);
 
@@ -1836,16 +1837,19 @@ begin
 end $$;
 
 -- ---------- Album ----------
--- État de l'album d'une catégorie : un emplacement par type, avec la carte choisie (si choisie) et le nombre
--- d'exemplaires possédés de ce type (pour savoir s'il y a quelque chose à choisir).
+-- Un emplacement par carte (type) ET par rareté : les tranches de raretés du type (si elles contiennent au moins une
+-- carte « du milieu », donc 3 séries ou plus) puis Unique, Alpha et Omega. Du plus commun au plus rare. Pour chaque
+-- emplacement : l'exemplaire choisi (s'il y en a un) et le nombre d'exemplaires possédés dans cette rareté.
+-- Un type secret n'apparaît qu'une fois qu'on en possède une carte.
+drop function if exists public.{{P}}album_view(int);
 create or replace function public.{{P}}album_view(p_category int)
 returns table (
   type_id     int,
   type_name   text,
   type_image  text,
+  rarity_id   text,
   pick_series int,
   pick_number int,
-  rarity_id   text,
   owned_count bigint
 )
 language plpgsql security definer set search_path = public as $$
@@ -1853,18 +1857,40 @@ declare uid uuid := auth.uid();
 begin
   if uid is null then raise exception 'not_authenticated'; end if;
   return query
-  select t.id, t.name, t.image, p.series, p.number,
-         case when p.series is not null then public.{{P}}rarity_id(p.number, p.series, t.id) else null end,
-         (select count(*) from public.{{P}}cards c where c.type_id = t.id and c.owner_id = uid)
-  from public.{{P}}types t
-  left join public.{{P}}album_picks p on p.user_id = uid and p.type_id = t.id
-  where t.category_id = p_category
-    and (not t.secret or exists (select 1 from public.{{P}}cards k where k.type_id = t.id and k.owner_id = uid))
-  order by t.position, t.id;
+  with ts as (
+    select t.id, t.name, t.image, t.position, public.{{P}}type_series_count(t.id) as nser
+    from public.{{P}}types t
+    where t.category_id = p_category
+      and (not t.secret or exists (select 1 from public.{{P}}cards k where k.type_id = t.id and k.owner_id = uid))
+  ),
+  slots as (
+    select ts.id as type_id, b.rarity_id
+    from ts cross join lateral public.{{P}}type_bands(ts.id) b
+    where b.hi >= 3
+    union
+    select ts.id, r.id from ts join public.{{P}}rarities r on r.kind = 'unique'
+    union
+    select ts.id, r.id from ts join public.{{P}}rarities r on r.kind in ('alpha', 'omega') where ts.nser >= 2
+  ),
+  mine as (
+    select c.type_id, public.{{P}}rarity_id(c.number, c.series, c.type_id) as rid
+    from public.{{P}}cards c
+    where c.owner_id = uid and c.type_id in (select id from ts)
+  )
+  select ts.id, ts.name, ts.image, s.rarity_id, p.series, p.number,
+         (select count(*) from mine m where m.type_id = ts.id and m.rid = s.rarity_id)
+  from ts
+  join slots s on s.type_id = ts.id
+  join public.{{P}}rarities r on r.id = s.rarity_id
+  left join public.{{P}}album_picks p
+         on p.user_id = uid and p.type_id = ts.id and p.rarity_id = s.rarity_id
+        and public.{{P}}rarity_id(p.number, p.series, p.type_id) = p.rarity_id   -- choix périmé si les raretés du type ont changé
+  order by ts.position, ts.id, r.sort_order desc;
 end $$;
 
--- Mes exemplaires d'un type (pour choisir lequel mettre dans l'album)
-create or replace function public.{{P}}my_type_cards(p_type int)
+-- Mes exemplaires d'un type, éventuellement d'une seule rareté (pour choisir lequel mettre dans l'emplacement)
+drop function if exists public.{{P}}my_type_cards(int);
+create or replace function public.{{P}}my_type_cards(p_type int, p_rarity text default null)
 returns table (series int, number int, rarity_id text)
 language plpgsql security definer set search_path = public as $$
 declare uid uuid := auth.uid();
@@ -1874,13 +1900,14 @@ begin
   select c.series, c.number, public.{{P}}rarity_id(c.number, c.series, c.type_id)
   from public.{{P}}cards c
   where c.type_id = p_type and c.owner_id = uid
+    and (p_rarity is null or public.{{P}}rarity_id(c.number, c.series, c.type_id) = p_rarity)
   order by c.series, c.number;
 end $$;
 
--- Choisit (ou change librement) la carte numérotée affichée pour ce type dans l'album ; doit m'appartenir
+-- Choisit (ou change librement) l'exemplaire affiché ; il doit m'appartenir. Il prend l'emplacement de SA rareté.
 create or replace function public.{{P}}set_album_pick(p_type int, p_series int, p_number int)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare uid uuid := auth.uid();
+declare uid uuid := auth.uid(); v_rarity text;
 begin
   if uid is null then raise exception 'not_authenticated'; end if;
   if not exists (
@@ -1888,20 +1915,38 @@ begin
   ) then
     raise exception 'not_owner';
   end if;
-  insert into public.{{P}}album_picks (user_id, type_id, series, number, updated_at)
-  values (uid, p_type, p_series, p_number, now())
-  on conflict (user_id, type_id) do update set series = excluded.series, number = excluded.number, updated_at = now();
-  return jsonb_build_object('ok', true);
+  v_rarity := public.{{P}}rarity_id(p_number, p_series, p_type);
+  insert into public.{{P}}album_picks (user_id, type_id, rarity_id, series, number, updated_at)
+  values (uid, p_type, v_rarity, p_series, p_number, now())
+  on conflict (user_id, type_id, rarity_id) do update set series = excluded.series, number = excluded.number, updated_at = now();
+  return jsonb_build_object('ok', true, 'rarity_id', v_rarity);
 end $$;
 
--- Vide l'emplacement (aucune carte affichée pour ce type)
-create or replace function public.{{P}}clear_album_pick(p_type int)
+-- Vide l'emplacement (type, rareté)
+drop function if exists public.{{P}}clear_album_pick(int);
+create or replace function public.{{P}}clear_album_pick(p_type int, p_rarity text)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare uid uuid := auth.uid();
 begin
   if uid is null then raise exception 'not_authenticated'; end if;
-  delete from public.{{P}}album_picks where user_id = uid and type_id = p_type;
+  delete from public.{{P}}album_picks where user_id = uid and type_id = p_type and rarity_id = p_rarity;
   return jsonb_build_object('ok', true);
+end $$;
+
+-- Migration : la vitrine d'avant gardait UN choix par type. Chaque choix existant passe dans l'emplacement de la rareté
+-- de sa carte, puis la clé devient (joueur, type, rareté). Sans effet sur une base déjà migrée ou neuve.
+do $$
+begin
+  if not exists (select 1 from information_schema.columns
+                 where table_schema = 'public' and table_name = '{{P}}album_picks' and column_name = 'rarity_id') then
+    alter table public.{{P}}album_picks add column rarity_id text;
+    update public.{{P}}album_picks set rarity_id = public.{{P}}rarity_id(number, series, type_id);
+    alter table public.{{P}}album_picks alter column rarity_id set not null;
+    alter table public.{{P}}album_picks drop constraint {{P}}album_picks_pkey;
+    alter table public.{{P}}album_picks add primary key (user_id, type_id, rarity_id);
+    alter table public.{{P}}album_picks add constraint {{P}}album_picks_rarity_fk
+      foreign key (rarity_id) references public.{{P}}rarities (id) on delete cascade;
+  end if;
 end $$;
 
 -- ---------- Notifications ----------
@@ -2452,9 +2497,9 @@ revoke all on function public.{{P}}admin_save_type_rarities(text, int, jsonb, bo
 revoke all on function public.{{P}}admin_delete_rarity(text, text)                                from public, anon;
 revoke all on function public.{{P}}admin_set_legal(text, text, text)                 from public, anon;
 revoke all on function public.{{P}}album_view(int)                                   from public, anon;
-revoke all on function public.{{P}}my_type_cards(int)                                from public, anon;
+revoke all on function public.{{P}}my_type_cards(int, text)                          from public, anon;
 revoke all on function public.{{P}}set_album_pick(int, int, int)                     from public, anon;
-revoke all on function public.{{P}}clear_album_pick(int)                             from public, anon;
+revoke all on function public.{{P}}clear_album_pick(int, text)                       from public, anon;
 revoke all on function public.{{P}}toggle_favorite(int, int, int)                    from public, anon;
 revoke all on function public.{{P}}list_favorites()                                  from public, anon;
 revoke all on function public.{{P}}make_offer(int, int, int, int)                    from public, anon;
@@ -2496,9 +2541,9 @@ grant execute on function public.{{P}}admin_save_type_rarities(text, int, jsonb,
 grant execute on function public.{{P}}admin_delete_rarity(text, text)                                to authenticated;
 grant execute on function public.{{P}}admin_set_legal(text, text, text)                 to authenticated;
 grant execute on function public.{{P}}album_view(int)                                   to authenticated;
-grant execute on function public.{{P}}my_type_cards(int)                                to authenticated;
+grant execute on function public.{{P}}my_type_cards(int, text)                          to authenticated;
 grant execute on function public.{{P}}set_album_pick(int, int, int)                     to authenticated;
-grant execute on function public.{{P}}clear_album_pick(int)                             to authenticated;
+grant execute on function public.{{P}}clear_album_pick(int, text)                       to authenticated;
 grant execute on function public.{{P}}toggle_favorite(int, int, int)                    to authenticated;
 grant execute on function public.{{P}}list_favorites()                                  to authenticated;
 grant execute on function public.{{P}}make_offer(int, int, int, int)                    to authenticated;

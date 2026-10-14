@@ -338,14 +338,29 @@ button.slot:hover { border-color: var(--ink-soft); color: var(--ink-soft); }
 .type-tile-name { font-family: var(--font-display); font-size: 15px; font-weight: 700; line-height: 1.2; }
 .type-tile-count { font-size: 13px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 
-.showcase-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
-.showcase-slot { display: grid; justify-items: center; gap: 6px; width: 100%; padding: 10px; border: 0; border-radius: 16px; background: var(--surface); text-align: center; cursor: pointer; box-shadow: 0 1px 2px rgba(27,31,59,.08); transition: transform .15s; }
-.showcase-slot:hover { transform: translateY(-3px); }
-.showcase-card-slot { display: block; width: 100%; max-width: 110px; }
-.showcase-empty { display: grid; place-items: center; overflow: hidden; width: 100%; aspect-ratio: 5 / 7; border-radius: 10px; border: 1.6px dashed var(--line); background: var(--bg); font-size: 34px; line-height: 1; opacity: .6; }
-.showcase-empty img.type-art { width: 62%; height: 62%; object-fit: contain; }
-.showcase-name { font-family: var(--font-display); font-size: 13px; font-weight: 700; line-height: 1.2; }
-.showcase-hint { font-size: 11px; color: var(--ink-soft); }
+/* Album : une section par carte (type), un emplacement par rareté */
+.album-types { display: grid; gap: 14px; }
+.album-type { display: grid; gap: 10px; padding: 12px; border-radius: 16px; background: var(--surface); box-shadow: 0 1px 2px rgba(27,31,59,.08); }
+.album-type-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+.album-type-head h3 { margin: 0; font-family: var(--font-display); font-size: 16px; }
+.album-type-count { margin-left: auto; font-variant-numeric: tabular-nums; }
+.album-slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 10px; }
+.album-slot { --r1: #cfc8b8; --r2: #9a917f; display: grid; justify-items: center; align-content: start; gap: 5px; width: 100%; padding: 8px 6px; border: 0; border-radius: 14px; background: var(--bg); text-align: center; cursor: pointer; transition: transform .15s; }
+.album-slot:hover:not(:disabled) { transform: translateY(-3px); }
+.album-slot:disabled { cursor: default; }
+.album-slot.filled { background: color-mix(in srgb, var(--r1) 14%, var(--bg)); }
+.album-slot.fillable { box-shadow: inset 0 0 0 2px var(--r1); }
+.album-slot.missing { opacity: .6; }
+.album-card-slot { display: block; width: 100%; max-width: 100px; }
+.album-empty { display: grid; place-items: center; overflow: hidden; width: 100%; aspect-ratio: 5 / 7; border-radius: 10px; border: 1.8px dashed var(--r1); background: rgba(255,255,255,.55); font-size: 34px; line-height: 1; }
+.album-empty .type-art { opacity: .35; filter: grayscale(.4); }
+.album-slot.fillable .album-empty .type-art { opacity: .7; filter: none; }
+.album-empty img.type-art { width: 62%; height: 62%; object-fit: contain; }
+.album-slot-label { font-family: var(--font-display); font-size: 12px; font-weight: 700; line-height: 1.2; }
+.album-slot-hint { font-size: 11px; color: var(--ink-soft); }
+.album-rarity-stats { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 0; padding: 0; list-style: none; }
+.album-rarity-stats li { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 99px; background: var(--surface); font-size: 12px; box-shadow: inset 0 0 0 1.5px var(--line); }
+.rarity-dot { width: 10px; height: 10px; border-radius: 50%; background: linear-gradient(135deg, var(--r1, #cfc8b8), var(--r2, #9a917f)); }
 .progress.small { width: 100%; height: 5px; }
 .album-title { display: flex; align-items: center; gap: 10px; margin: 6px 0 12px; font-family: var(--font-display); font-size: 24px; font-weight: 800; letter-spacing: -0.02em; }
 .album-art { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--surface); font-size: 26px; line-height: 1; overflow: hidden; }

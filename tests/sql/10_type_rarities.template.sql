@@ -60,10 +60,10 @@ select pg_temp.try(format('select public.{{P}}admin_save_type_rarities(''thomari
 select pg_temp.try(format('select public.{{P}}admin_save_type_rarities(''mauvais'', %s, ''[]''::jsonb)', :ta));
 select count(*) as tranches_du_type_a_inchangees from public.{{P}}type_rarities where type_id = :ta;
 
-\echo '=== le type secret est caché dans la vitrine tant qu''on n''en possède aucune carte'
-select string_agg(type_name, ', ' order by type_id) as vitrine_sans_le_secret from public.{{P}}album_view(:cat);
+\echo '=== le type secret est caché dans l''album tant qu''on n''en possède aucune carte ; un emplacement par rareté de chaque type'
+select type_name, count(*) as emplacements from public.{{P}}album_view(:cat) group by type_name, type_id order by type_id;   -- Chat Eau 9 (6 raretés + 3 spéciales), Chat Peau 9 : le secret n'y est pas
 insert into public.{{P}}cards (type_id, series, number, owner_id) values (:tb, 50, 7, :A);
-select string_agg(type_name, ', ' order by type_id) as vitrine_avec_le_secret from public.{{P}}album_view(:cat);
+select type_name, count(*) as emplacements from public.{{P}}album_view(:cat) group by type_name, type_id order by type_id;   -- le Chat Iny apparaît : Légende + Unique/Alpha/Omega = 4
 delete from public.{{P}}cards where type_id = :tb;
 
 \echo '=== tirage doré par rareté : chaque tirage est indépendant et respecte les tranches de chaque type'
