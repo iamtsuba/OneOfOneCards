@@ -290,25 +290,30 @@ button.slot:hover { border-color: var(--ink-soft); color: var(--ink-soft); }
 .card.mine .card-face { color: #fff;
   background: linear-gradient(160deg, #3fcf8e, #12804f) padding-box,
               linear-gradient(135deg, color-mix(in srgb, var(--r1) 55%, #000), color-mix(in srgb, var(--r2) 55%, #000)) border-box; }
-.card-rarity { position: absolute; top: 2.4cqw; left: 50%; transform: translateX(-50%); padding: .7cqw 4.4cqw; border-radius: 99px; background: linear-gradient(135deg, var(--r1), var(--r2)); color: var(--rt); font-size: 6.2cqw; font-weight: 700; white-space: nowrap; }
-.card-art { position: absolute; left: 6cqw; right: 6cqw; top: 14cqw; height: 66cqw; display: grid; place-items: center; overflow: hidden; border-radius: 5cqw; background: rgba(255,255,255,.55); }
-.card-art .type-art { font-size: 42cqw; line-height: 1; }
-.card-art img.type-art { width: 84%; height: 84%; object-fit: contain; }
-.card-type { position: absolute; left: 6cqw; right: 6cqw; top: 83cqw; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-align: center; font-size: 7cqw; font-weight: 700; line-height: 1.15; }
-.card-setno { position: absolute; left: 6cqw; right: 6cqw; top: 101cqw; text-align: center; font-size: 5.2cqw; font-weight: 700; letter-spacing: .02em; opacity: .7; font-variant-numeric: tabular-nums; }
-.card-num { position: absolute; left: 0; right: 0; bottom: 4cqw; display: flex; justify-content: center; align-items: baseline; gap: 2cqw; font-family: var(--font-display); line-height: 1; }
+/* Structure de la carte (unités cqw = % de sa largeur ; hauteur utile ≈ 135) :
+   rareté en texte, numéro n / m juste dessous, illustration, nom du type, numéro de checklist en bas à gauche */
+.card-rarity { position: absolute; top: 3cqw; left: 6cqw; right: 6cqw; text-align: center; font-size: 8.4cqw; font-weight: 700; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-num { position: absolute; top: 11.5cqw; left: 0; right: 0; display: flex; justify-content: center; align-items: baseline; gap: 2cqw; font-family: var(--font-display); line-height: 1; }
 .card-num .n { font-size: 20cqw; font-weight: 800; letter-spacing: -0.04em; }
 .card-num .m { font-size: 10cqw; font-weight: 500; opacity: .75; }
-.card-listed { position: absolute; top: 15.5cqw; left: 8cqw; padding: 1cqw 3.6cqw; border-radius: 99px; background: #fff; color: var(--ink); font-size: 6.6cqw; font-weight: 700; white-space: nowrap; box-shadow: 0 .6cqw 2cqw rgba(0,0,0,.25); }
+.card-art { position: absolute; left: 6cqw; right: 6cqw; top: 35cqw; height: 66cqw; display: grid; place-items: center; overflow: hidden; border-radius: 5cqw; background: rgba(255,255,255,.55); }
+.card-art .type-art { font-size: 42cqw; line-height: 1; }
+.card-art img.type-art { width: 84%; height: 84%; object-fit: contain; }
+.card-type { position: absolute; left: 6cqw; right: 6cqw; top: 104.5cqw; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-align: center; font-size: 7.4cqw; font-weight: 700; line-height: 1.15; }
+.card-setno { position: absolute; left: 5cqw; bottom: 3.2cqw; font-size: 5.6cqw; font-weight: 700; letter-spacing: .02em; opacity: .85; font-variant-numeric: tabular-nums; }
+.card-listed { position: absolute; top: 38cqw; left: 9cqw; padding: 1cqw 3.6cqw; border-radius: 99px; background: #fff; color: var(--ink); font-size: 6.6cqw; font-weight: 700; white-space: nowrap; box-shadow: 0 .6cqw 2cqw rgba(0,0,0,.25); }
+.card-favorite { position: absolute; top: 38cqw; right: 9cqw; display: grid; place-items: center; width: 9.4cqw; height: 9.4cqw; border-radius: 50%; background: #fff; color: var(--accent); font-size: 6.4cqw; box-shadow: 0 .6cqw 2cqw rgba(0,0,0,.25); }
+/* Petite carte : ni rareté, ni nom, ni checklist ; le numéro en haut, le visuel prend la place restante */
 .card.sm .card-rarity, .card.sm .card-type, .card.sm .card-setno { display: none; }
-.card.sm .card-art { top: 7cqw; height: 70cqw; }
+.card.sm .card-num { top: 3.5cqw; }
+.card.sm .card-num .n { font-size: 22cqw; }
+.card.sm .card-art { top: 29cqw; height: 100cqw; }
 .card.sm .card-art .type-art { font-size: 44cqw; }
-.card.sm .card-num { bottom: 5cqw; }
-.card.sm .card-num .n { font-size: 23cqw; }
-.card.sm .card-listed { top: 9cqw; font-size: 10cqw; }
-.card-favorite { position: absolute; top: 15.5cqw; right: 8cqw; display: grid; place-items: center; width: 9.4cqw; height: 9.4cqw; border-radius: 50%; background: #fff; color: var(--accent); font-size: 6.4cqw; box-shadow: 0 .6cqw 2cqw rgba(0,0,0,.25); }
-.card.sm .card-favorite { top: 9cqw; width: 13cqw; height: 13cqw; font-size: 9cqw; }
-.card.glow .card-face { box-shadow: 0 0 0 .8cqw color-mix(in srgb, var(--r1) 80%, #fff), 0 0 9cqw 2cqw color-mix(in srgb, var(--r1) 65%, transparent), 0 4cqw 7cqw -4cqw rgba(20,25,60,.5); }
+.card.sm .card-listed { top: 31cqw; font-size: 10cqw; }
+.card.sm .card-favorite { top: 31cqw; width: 13cqw; height: 13cqw; font-size: 9cqw; }
+/* Numéro masqué : la petite carte récupère la place du numéro */
+.card.sm.nonum .card-art { top: 6cqw; height: 123cqw; }
+.card.sm.nonum .card-listed, .card.sm.nonum .card-favorite { top: 8cqw; }
 .card.sm.glow .card-face { box-shadow: 0 .8cqw 0 rgba(0,0,0,.1), 0 4cqw 7cqw -4cqw rgba(20,25,60,.5); }
 .card.mine .card-art { background: rgba(255,255,255,.22); }
 
