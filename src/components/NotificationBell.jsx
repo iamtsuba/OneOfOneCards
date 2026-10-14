@@ -14,15 +14,17 @@ const KIND_ICON = {
 function describe(n, catalog) {
   const name = catalog?.typeMap?.[n.card_type]?.name ?? 'une carte'
   const who = n.actor_name || 'Un joueur'
+  const ref = catalog?.cardRef?.(n.card_type, n.card_number, n.card_series)?.trim()
+  const card = `${name}${ref ? ` (${ref})` : ''}`
   switch (n.kind) {
     case 'favorite_listed':
-      return `${who} a mis en vente ${name} (${n.card_number}/${n.card_series}), dans tes favoris, pour ${fmtCoins(n.amount)}.`
+      return `${who} a mis en vente ${card}, dans tes favoris, pour ${fmtCoins(n.amount)}.`
     case 'offer_received':
-      return `${who} te propose ${fmtCoins(n.amount)} pour ta carte ${name} (${n.card_number}/${n.card_series}).`
+      return `${who} te propose ${fmtCoins(n.amount)} pour ta carte ${card}.`
     case 'offer_accepted':
-      return `Ton offre de ${fmtCoins(n.amount)} pour ${name} (${n.card_number}/${n.card_series}) a été acceptée : la carte est à toi.`
+      return `Ton offre de ${fmtCoins(n.amount)} pour ${card} a été acceptée : la carte est à toi.`
     case 'offer_declined':
-      return `Ton offre de ${fmtCoins(n.amount)} pour ${name} (${n.card_number}/${n.card_series}) a été refusée.`
+      return `Ton offre de ${fmtCoins(n.amount)} pour ${card} a été refusée.`
     default:
       return ''
   }

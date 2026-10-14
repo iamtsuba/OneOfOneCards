@@ -4,6 +4,7 @@ import { explain } from '../api'
 import { useGame, fmt, fmtDate } from '../game'
 import TypeArt from './TypeArt'
 import { parseTypesFile, TEMPLATE_CSV, MAX_ROWS } from '../importTypes'
+import { bandsOf, inheritedBands, validateTypeRarities } from '../bands'
 
 const TABS = [
   ['categories', 'Catégories'],
@@ -321,10 +322,10 @@ function TypesTab({ data, run, busy }) {
         </select>
       </label>
       <p className="muted">
-        L’image est un emoji, une adresse https:// ou une image téléversée (réduite à 256 px). Chaque type a sa propre numérotation de 1/1 à N/N.
-        Attention aux droits des images que tu utilises.
+        L’image est un emoji, une adresse https:// ou une image téléversée (réduite à 256 px). Les raretés, le nombre de séries et les numéros visibles
+        se règlent <strong>par type</strong> (bloc « Raretés de ce type » de chaque fiche). Attention aux droits des images que tu utilises.
       </p>
-      {types.map((t) => <TypeForm key={t.id} type={t} categoryId={catId} run={run} busy={busy} />)}
+      {types.map((t) => <TypeForm key={t.id} type={t} categoryId={catId} data={data} run={run} busy={busy} />)}
       <h3>Nouveau type</h3>
       <TypeForm key={`new-${catId}-${types.length}`} type={null} categoryId={catId} nextPos={nextPos} run={run} busy={busy} />
       <h3>Importer des types</h3>
@@ -333,7 +334,7 @@ function TypesTab({ data, run, busy }) {
   )
 }
 
-function TypeForm({ type, categoryId, nextPos, run, busy }) {
+function TypeForm({ type, categoryId, nextPos, data, run, busy }) {
   const [f, setF] = useState({ name: type?.name ?? '', position: type?.position ?? nextPos ?? 1, image: type?.image ?? '' })
   const [localError, setLocalError] = useState('')
   const uploaded = f.image.startsWith('data:')
@@ -355,6 +356,8 @@ function TypeForm({ type, categoryId, nextPos, run, busy }) {
         <span className="admin-type-art"><TypeArt type={{ image: f.image }} /></span>
         <strong>{type ? type.name : 'Nouveau type'}</strong>
         {type && type.taken > 0 && <span className="badge">{fmt(type.taken)} tirées</span>}
+        {type?.series_count && <span className="badge">{fmt(type.series_count)} séries</span>}
+        {type?.secret && <span className="badge">secret</span>}
       </div>
       <div className="admin-grid">
         <label>Nom<input value={f.name} maxLength={60} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
@@ -386,7 +389,106 @@ function TypeForm({ type, categoryId, nextPos, run, busy }) {
           </button>
         )}
       </div>
+      {type && data && <TypeRaritiesEditor key={`${type.id}-${type.series_count}-${type.secret}`} type={type} data={data} run={run} busy={busy} />}
     </div>
+  )
+}
+
+// Raretés d'un type (logique « Topps ») : tranches de séries, numéros visibles, type secret
+function TypeRaritiesEditor({ type, data, run, busy }) {
+  const rarityList = data.rarities.filter((r) => r.kind === 'range').sort((a, b) => a.sort_order - b.sort_order)
+  const nameOf = (id) => data.rarities.find((r) => r.id === id)?.name ?? id
+  const category = data.categories.find((c) => c.id === type.category_id)
+  const own = (data.type_rarities ?? []).filter((r) => r.type_id === type.id)
+  const toRow = (r) => ({ rarity_id: r.rarity_id, max_series: String(r.max_series), numbered_series: String(r.numbered_series) })
+  const [custom, setCustom] = useState(own.length > 0)
+  const [rows, setRows] = useState(() => own.map(toRow))
+  const [secret, setSecret] = useState(!!type.secret)
+  const inherited = inheritedBands(data.category_rarities, rarityList, category)
+
+  const customize = () => {
+    setRows(inherited.map((b) => ({ rarity_id: b.rarity_id, max_series: String(b.hi), numbered_series: String(b.hi - b.lo + 1) })))
+    setCustom(true)
+  }
+  const setRow = (i, k, v) => setRows((cur) => cur.map((r, j) => (j === i ? { ...r, [k]: v } : r)))
+  const addRow = () => {
+    const used = new Set(rows.map((r) => r.rarity_id))
+    const free = rarityList.find((r) => !used.has(r.id))
+    if (!free) return
+    const top = Math.max(0, ...rows.map((r) => Number(r.max_series) || 0))
+    setRows((cur) => [...cur, { rarity_id: free.id, max_series: String(Math.min(5000, top + 100)), numbered_series: '0' }])
+  }
+  const problem = custom ? validateTypeRarities(rows) : ''
+  const payload = rows.map((r) => ({ rarity_id: r.rarity_id, max_series: Number(r.max_series), numbered_series: Number(r.numbered_series || 0) }))
+  const bands = custom ? (problem ? [] : bandsOf(payload)) : inherited
+  const describeNumbers = (b) => {
+    const size = b.hi - b.lo + 1
+    if (b.numbered >= size) return 'tous les numéros visibles'
+    if (b.numbered <= 0) return 'non numérotée (numéro jamais visible)'
+    return `numéro visible sur les ${b.numbered} première${b.numbered > 1 ? 's' : ''} série${b.numbered > 1 ? 's' : ''} (séries ${b.lo} à ${b.lo + b.numbered - 1}), masqué ensuite`
+  }
+  const save = () =>
+    run(
+      (pw) => api.adminSaveTypeRarities(pw, type.id, custom ? payload : own.length ? [] : null, secret),
+      'Raretés du type enregistrées.',
+    )
+
+  return (
+    <details className="type-rarities">
+      <summary>
+        Raretés de ce type
+        <span className="muted"> — {custom ? 'propres à ce type' : `seuils de la catégorie « ${category?.name} »`}</span>
+      </summary>
+      <label className="check inline">
+        <input type="checkbox" checked={secret} onChange={(e) => setSecret(e.target.checked)} />
+        <span>Type secret : caché des joueurs tant qu’ils n’en possèdent aucune carte, numéroté au-delà de la checklist (ex. [51/50])</span>
+      </label>
+
+      {custom && (
+        <>
+          <p className="fine">
+            Chaque rareté couvre une tranche de tailles de série, à la suite de la précédente (dans l’ordre des tailles). « Séries numérotées » : nombre
+            de séries de la tranche, en partant de la plus petite, dont le numéro n/m est visible sur la carte ; les autres sont numérotées en interne mais
+            sans numéro visible. 0 = rareté non numérotée. Le nombre de séries du type est la plus grande taille.
+          </p>
+          <div className="type-rarity-rows">
+            {rows.map((r, i) => (
+              <div className="type-rarity-row" key={i}>
+                <select value={r.rarity_id} onChange={(e) => setRow(i, 'rarity_id', e.target.value)} aria-label="Rareté">
+                  {rarityList.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                </select>
+                <label>Taille de série max.<input type="number" min="1" max="5000" value={r.max_series} onChange={(e) => setRow(i, 'max_series', e.target.value)} /></label>
+                <label>Séries numérotées<input type="number" min="0" value={r.numbered_series} onChange={(e) => setRow(i, 'numbered_series', e.target.value)} /></label>
+                <button type="button" className="btn ghost icon" onClick={() => setRows((cur) => cur.filter((_, j) => j !== i))} aria-label="Retirer cette rareté">×</button>
+              </div>
+            ))}
+          </div>
+          <div className="row">
+            <button type="button" className="btn ghost" onClick={addRow} disabled={rows.length >= rarityList.length}>Ajouter une rareté</button>
+            <button type="button" className="btn ghost" onClick={() => { setCustom(false); setRows([]) }}>Revenir aux seuils de la catégorie</button>
+          </div>
+          {problem && <p className="msg error">{problem}</p>}
+        </>
+      )}
+
+      {!custom && <p className="fine">Ce type utilise les seuils de sa catégorie (numéros toujours visibles). Seuils actuels :</p>}
+      {bands.length > 0 && (
+        <ul className="type-rarity-bands">
+          {bands.map((b) => (
+            <li key={b.rarity_id}>
+              <strong>{nameOf(b.rarity_id)}</strong> : séries {b.lo} à {b.hi}
+              <span className="muted"> — {describeNumbers(b)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!custom && <div className="row"><button type="button" className="btn ghost" onClick={customize}>Personnaliser les raretés de ce type</button></div>}
+      {type.taken > 0 && custom && <p className="fine">Des cartes de ce type ont déjà été tirées : réduire le nombre de séries sous une carte existante est refusé.</p>}
+
+      <div className="row">
+        <button className="btn" disabled={busy || !!problem} onClick={save}>Enregistrer les raretés</button>
+      </div>
+    </details>
   )
 }
 
@@ -519,7 +621,7 @@ function RaritiesTab({ data, run, busy }) {
         Unique, Alpha et Omega sont fixes (1/1, 1/m, m/m) : on ne peut ajouter qu’une rareté « à seuil », entre les raretés existantes. Elle
         s’ajoute aux seuils des catégories qui ont déjà les leurs (modifiable ensuite catégorie par catégorie).
       </p>
-      <NewRarityForm key={`new-rarity-${data.rarities.length}`} run={run} busy={busy} />
+      <NewRarityForm key={`new-rarity-${data.rarities.length}`} rarities={data.rarities} run={run} busy={busy} />
     </div>
   )
 }
@@ -553,8 +655,8 @@ function RarityForm({ rarity, run, busy }) {
   )
 }
 
-function NewRarityForm({ run, busy }) {
-  const [f, setF] = useState({ id: '', name: '', max_series: '', color: '#a5b4fc', color2: '#4338ca', text_color: '#ffffff' })
+function NewRarityForm({ rarities, run, busy }) {
+  const [f, setF] = useState({ id: '', name: '', max_series: '', before: '', color: '#a5b4fc', color2: '#4338ca', text_color: '#ffffff' })
   const set = (k) => (v) => setF((cur) => ({ ...cur, [k]: v }))
   const slug = f.id.trim().toLowerCase().replace(/[^a-z0-9_]/g, '')
   const valid = /^[a-z][a-z0-9_]{1,19}$/.test(slug) && f.name.trim() && Number(f.max_series) >= 1
@@ -565,6 +667,13 @@ function NewRarityForm({ run, busy }) {
         <label>Identifiant (fixe)<input value={f.id} maxLength={20} placeholder="ex. legendaire" onChange={(e) => set('id')(e.target.value)} /></label>
         <label>Nom<input value={f.name} maxLength={30} onChange={(e) => set('name')(e.target.value)} /></label>
         <label>Taille de série maximale<input type="number" min="1" value={f.max_series} placeholder="ex. 15" onChange={(e) => set('max_series')(e.target.value)} /></label>
+        <label>
+          Place dans l’ordre d’affichage
+          <select value={f.before} onChange={(e) => set('before')(e.target.value)}>
+            <option value="">À la fin (la moins rare)</option>
+            {[...rarities].sort((a, b) => a.sort_order - b.sort_order).map((r) => <option key={r.id} value={r.id}>Avant « {r.name} »</option>)}
+          </select>
+        </label>
       </div>
       <div className="admin-colors">
         <Color label="Couleur" value={f.color} onChange={set('color')} />

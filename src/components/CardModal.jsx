@@ -82,7 +82,7 @@ export default function CardModal({ sel, rarity, onClose, onChanged, onRefresh, 
           <Card typeId={sel.typeId} series={sel.series} number={sel.number} rarity={rarity} size="lg" glow shine />
         </div>
         <p className="reveal-line">
-          <strong>{rarity?.name}</strong> : {type?.name}, carte {sel.number} de la série de {sel.series}
+          <strong>{rarity?.name}</strong> : {type?.name}{catalog.numberHidden(sel.typeId, sel.series) ? '' : `, carte ${sel.number} de la série de ${sel.series}`}
           {category ? ` (${category.name})` : ''}.
         </p>
 

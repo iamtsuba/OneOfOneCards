@@ -80,7 +80,7 @@ export default function Profile({ session }) {
           </div>
           <div>
             <p className="identity-name">Ta carte la plus rare</p>
-            <p className="muted">{rarityMap[rarest.rarity_id]?.name}, {catalog.typeMap[rarest.type_id]?.name} {rarest.number} sur {rarest.series}.</p>
+            <p className="muted">{rarityMap[rarest.rarity_id]?.name}, {catalog.typeMap[rarest.type_id]?.name}{catalog.numberHidden(rarest.type_id, rarest.series) ? '' : ` ${rarest.number} sur ${rarest.series}`}.</p>
           </div>
         </div>
       )}

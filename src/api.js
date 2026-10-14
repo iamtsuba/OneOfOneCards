@@ -84,13 +84,15 @@ export async function getLegal() {
 
 // Catalogue : catégories de boosters et types de cartes (lisible par tous)
 export async function getCatalog() {
-  const [cats, types] = await Promise.all([
+  const [cats, types, typeRarities] = await Promise.all([
     supabase.from(table('categories')).select('*').order('position').order('id'),
     supabase.from(table('types')).select('*').order('position').order('id'),
+    supabase.from(table('type_rarities')).select('*').order('type_id').order('max_series'),
   ])
   if (cats.error) throw cats.error
   if (types.error) throw types.error
-  return { categories: cats.data, types: types.data }
+  if (typeRarities.error) throw typeRarities.error
+  return { categories: cats.data, types: types.data, typeRarities: typeRarities.data }
 }
 
 // ---------- Console admin : chaque appel renvoie le mot de passe, vérifié côté serveur ----------
@@ -121,8 +123,11 @@ export const adminSaveRarity = (pw, r) =>
 export const adminCreateRarity = (pw, r) =>
   rpc('admin_create_rarity', {
     p_password: pw, p_id: r.id, p_name: r.name, p_max_series: Number(r.max_series),
-    p_color: r.color, p_color2: r.color2, p_text_color: r.text_color,
+    p_color: r.color, p_color2: r.color2, p_text_color: r.text_color, p_before: r.before || null,
   })
+// Raretés d'un type : rows = [{rarity_id, max_series, numbered_series}], [] = retour aux seuils de la catégorie, null = inchangé
+export const adminSaveTypeRarities = (pw, typeId, rows, secret = null) =>
+  rpc('admin_save_type_rarities', { p_password: pw, p_type: typeId, p_rarities: rows, p_secret: secret })
 export const adminDeleteRarity = (pw, id) => rpc('admin_delete_rarity', { p_password: pw, p_id: id })
 export const adminSetLegal = (pw, key, value) => rpc('admin_set_legal', { p_password: pw, p_key: key, p_value: value })
 export const adminChangePassword = (pw, next) => rpc('admin_change_password', { p_password: pw, p_new: next })
@@ -179,6 +184,7 @@ export function explain(e) {
   if (m.includes('listing_unavailable')) return 'Cette annonce n’est plus disponible.'
   if (m.includes('invalid_price')) return 'Prix invalide : entre un nombre entier de pièces, minimum 1.'
   if (m.includes('invalid_rarity_thresholds')) return 'Seuils de rareté invalides : ils doivent être strictement croissants, dans la limite du nombre de séries, et seule la dernière rareté peut rester sans plafond.'
+  if (m.includes('invalid_type_rarities')) return 'Raretés du type invalides : tranches strictement croissantes, une même rareté une seule fois, « numérotées » entre 0 et la taille de la tranche.'
   if (m.includes('id_taken')) return 'Cet identifiant de rareté existe déjà.'
   if (m.includes('invalid_id')) return 'Identifiant invalide : minuscules, chiffres et _ uniquement, 2 à 20 caractères, débute par une lettre.'
   if (m.includes('invalid_max_series')) return 'Taille de série maximale invalide : un nombre entier d’au moins 1 (pas de plafond ouvert pour une nouvelle rareté).'

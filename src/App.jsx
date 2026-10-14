@@ -13,6 +13,7 @@ import Profile from './components/Profile'
 import RewardModal from './components/RewardModal'
 import EnvBanner from './components/EnvBanner'
 import NotificationBell from './components/NotificationBell'
+import { numberVisible, typeSeries, checklistNumbers } from './bands'
 
 export default function App() {
   const [session, setSession] = useState(undefined)
@@ -74,10 +75,20 @@ function Game({ session }) {
   const rarityMap = useMemo(() => Object.fromEntries((rarities || []).map((r) => [r.id, r])), [rarities])
   const catalog = useMemo(() => {
     if (!catalogRaw) return null
+    const typeMap = Object.fromEntries(catalogRaw.types.map((t) => [t.id, t]))
+    const categoryMap = Object.fromEntries(catalogRaw.categories.map((c) => [c.id, c]))
+    const rowsByType = {}
+    for (const r of catalogRaw.typeRarities ?? []) (rowsByType[r.type_id] ??= []).push(r)
+    const lists = checklistNumbers(catalogRaw.types)
     return {
       ...catalogRaw,
-      typeMap: Object.fromEntries(catalogRaw.types.map((t) => [t.id, t])),
-      categoryMap: Object.fromEntries(catalogRaw.categories.map((c) => [c.id, c])),
+      typeMap,
+      categoryMap,
+      // Raretés par type : nombre de séries du type, numéros masqués, numéro de checklist « [k/N] »
+      seriesOf: (typeId) => typeSeries(typeMap[typeId], categoryMap[typeMap[typeId]?.category_id]),
+      numberHidden: (typeId, series) => !numberVisible(rowsByType[typeId], series),
+      cardRef: (typeId, number, series) => (numberVisible(rowsByType[typeId], series) ? ` ${number}/${series}` : ''),
+      checklist: (typeId) => lists[typeId] ?? null,
     }
   }, [catalogRaw])
   const ctx = useMemo(

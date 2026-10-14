@@ -295,11 +295,12 @@ button.slot:hover { border-color: var(--ink-soft); color: var(--ink-soft); }
 .card-art .type-art { font-size: 42cqw; line-height: 1; }
 .card-art img.type-art { width: 84%; height: 84%; object-fit: contain; }
 .card-type { position: absolute; left: 6cqw; right: 6cqw; top: 83cqw; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-align: center; font-size: 7cqw; font-weight: 700; line-height: 1.15; }
+.card-setno { position: absolute; left: 6cqw; right: 6cqw; top: 101cqw; text-align: center; font-size: 5.2cqw; font-weight: 700; letter-spacing: .02em; opacity: .7; font-variant-numeric: tabular-nums; }
 .card-num { position: absolute; left: 0; right: 0; bottom: 4cqw; display: flex; justify-content: center; align-items: baseline; gap: 2cqw; font-family: var(--font-display); line-height: 1; }
 .card-num .n { font-size: 20cqw; font-weight: 800; letter-spacing: -0.04em; }
 .card-num .m { font-size: 10cqw; font-weight: 500; opacity: .75; }
 .card-listed { position: absolute; top: 15.5cqw; left: 8cqw; padding: 1cqw 3.6cqw; border-radius: 99px; background: #fff; color: var(--ink); font-size: 6.6cqw; font-weight: 700; white-space: nowrap; box-shadow: 0 .6cqw 2cqw rgba(0,0,0,.25); }
-.card.sm .card-rarity, .card.sm .card-type { display: none; }
+.card.sm .card-rarity, .card.sm .card-type, .card.sm .card-setno { display: none; }
 .card.sm .card-art { top: 7cqw; height: 70cqw; }
 .card.sm .card-art .type-art { font-size: 44cqw; }
 .card.sm .card-num { bottom: 5cqw; }
@@ -370,6 +371,13 @@ textarea { width: 100%; padding: 10px 14px; border: 1.5px solid var(--line); bor
 .import-preview li.bad { background: #fef2f1; box-shadow: inset 0 0 0 1.5px #e9b4ad; }
 .import-preview li.skip { opacity: .6; }
 .import-name { font-weight: 700; overflow-wrap: anywhere; }
+.type-rarities { margin-top: 4px; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 12px; background: var(--bg); display: grid; gap: 8px; }
+.type-rarities > summary { cursor: pointer; font-weight: 700; }
+.type-rarity-rows { display: grid; gap: 8px; }
+.type-rarity-row { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+.type-rarity-row > label { display: grid; gap: 4px; font-size: 12px; }
+.type-rarity-bands { display: grid; gap: 4px; padding-left: 18px; list-style: disc; }
+@media (max-width: 560px) { .type-rarity-row { grid-template-columns: 1fr 1fr; } .type-rarity-row select { grid-column: 1 / -1; } }
 .rarity-thresholds label { font-size: 13px; }
 .rarity-threshold-label { display: flex; align-items: center; gap: 6px; }
 .rarity-threshold-label .cat-dot { grid-row: auto; width: 12px; height: 12px; }

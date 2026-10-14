@@ -26,7 +26,9 @@ export default function Collection({ goMarket }) {
   const [error, setError] = useState('')
 
   const category = catalog.categoryMap[catId]
-  const catTypes = types.filter((t) => t.category_id === catId)
+  // Un type secret reste caché tant qu'on n'en possède aucune carte
+  const ownedByType = Object.fromEntries((stats?.types ?? []).map((t) => [t.id, t.owned]))
+  const catTypes = types.filter((t) => t.category_id === catId && (!t.secret || ownedByType[t.id] > 0))
 
   useEffect(() => {
     if (catId == null) return
@@ -100,7 +102,7 @@ export default function Collection({ goMarket }) {
           <Album
             key={typeId}
             type={catalog.typeMap[typeId]}
-            seriesCount={category.series_count}
+            seriesCount={catalog.seriesOf(typeId)}
             rarities={rarities}
             rarityMap={rarityMap}
             version={version}
@@ -378,6 +380,7 @@ function MyCards({ catId, catTypes, rarities, rarityMap, stats, version, onSelec
 }
 
 function Album({ type, seriesCount, rarities, rarityMap, version, onBack, onSelect }) {
+  const { catalog } = useGame()
   const [series, setSeries] = useState(null)
   const [input, setInput] = useState('')
   const [state, setState] = useState({ mine: {}, taken: [], reward: 'none', reward_eligible: false })
@@ -409,6 +412,7 @@ function Album({ type, seriesCount, rarities, rarityMap, version, onBack, onSele
 
   if (series == null) return <p className="muted">Chargement…</p>
 
+  const hidden = catalog.numberHidden(type.id, series)   // numéros masqués pour cette série (rareté non numérotée)
   const taken = new Set(state.taken)
   const owners = state.owners || {}
   const favs = new Set(state.favorites || [])
@@ -472,9 +476,9 @@ function Album({ type, seriesCount, rarities, rarityMap, version, onBack, onSele
           }
           return (
             <li key={n}>
-              <button className={`slot ${favs.has(n) ? 'favorite' : ''}`} aria-label={`Carte ${n}, encore dans les boosters${favs.has(n) ? ', favorite' : ''}`}
+              <button className={`slot ${favs.has(n) ? 'favorite' : ''}`} aria-label={`${hidden ? 'Carte' : `Carte ${n}`}, encore dans les boosters${favs.has(n) ? ', favorite' : ''}`}
                 onClick={() => onSelect({ typeId: type.id, series, number: n, rarityId: rid, state: 'free', favorited: favs.has(n) })}>
-                {n}
+                {hidden ? '·' : n}
                 {favs.has(n) && <span className="slot-favorite" aria-hidden="true">♥</span>}
               </button>
             </li>
