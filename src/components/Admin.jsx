@@ -5,8 +5,23 @@ import { useGame, fmt, fmtDate } from '../game'
 import TypeArt from './TypeArt'
 import Pack from './Pack'
 import Card from './Card'
-import { parseTypesFile, TEMPLATE_CSV, MAX_ROWS } from '../importTypes'
+import { parseTypesFile, makeTemplate, matchPhotos, photoKey, describeRarities, MAX_ROWS } from '../importTypes'
 import { CARD_STYLES, cardCount, defaultConfig, validateTypeRarities } from '../bands'
+
+// Écran large (PC) : la console passe en mise en page horizontale (navigation à gauche, listes à gauche et détail à droite)
+const WIDE_QUERY = '(min-width: 1100px)'
+export function useWide() {
+  const [wide, setWide] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.(WIDE_QUERY).matches)
+  useEffect(() => {
+    const mq = window.matchMedia?.(WIDE_QUERY)
+    if (!mq) return undefined
+    const on = () => setWide(mq.matches)
+    on()
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
+  return wide
+}
 
 const TABS = [
   ['categories', 'Catégories'],
@@ -64,6 +79,7 @@ export default function Admin({ onClose }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const wide = useWide()
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose() }
@@ -144,30 +160,56 @@ export default function Admin({ onClose }) {
   }
 
   return (
+    <AdminShell
+      data={data} tab={tab} onTab={(id) => { setTab(id); setError(''); setNotice('') }} busy={busy} error={error} notice={notice}
+      run={run} onChangePassword={changePassword} onClose={onClose} wide={wide}
+    />
+  )
+}
+
+// Coque de la console (sans connexion ni appels réseau : testable seule). wide : mise en page PC.
+export function AdminShell({ data, tab, onTab, busy, error, notice, run, onChangePassword, onClose, wide = false }) {
+  const fill = wide && (tab === 'types' || tab === 'categories')   // ces écrans gèrent eux-mêmes le défilement de leurs colonnes
+  const count = { categories: data.categories.length, types: data.types.length }
+  const players = `${fmt(data.players)} joueur${data.players > 1 ? 's' : ''} inscrit${data.players > 1 ? 's' : ''}.`
+  return (
     <div className="legal-overlay" role="dialog" aria-modal="true" aria-label="Console admin">
-      <div className="legal-panel admin">
+      <div className={`legal-panel admin${wide ? ' wide' : ''}`}>
         <div className="admin-head">
           <h2>Console admin</h2>
+          {wide && <span className="fine admin-players">{players}</span>}
           <button className="btn ghost" onClick={onClose}>Fermer</button>
         </div>
-        <p className="fine">{fmt(data.players)} joueur{data.players > 1 ? 's' : ''} inscrit{data.players > 1 ? 's' : ''}.</p>
+        {!wide && <p className="fine">{players}</p>}
 
-        <div className="chips admin-tabs" role="tablist" aria-label="Sections">
-          {TABS.map(([id, label]) => (
-            <button key={id} role="tab" aria-selected={tab === id} className={`chip ${tab === id ? 'on' : ''}`} onClick={() => { setTab(id); setError(''); setNotice('') }}>{label}</button>
-          ))}
+        {wide ? (
+          <nav className="admin-nav" role="tablist" aria-label="Sections" aria-orientation="vertical">
+            {TABS.map(([id, label]) => (
+              <button key={id} role="tab" aria-selected={tab === id} className={`admin-nav-item${tab === id ? ' on' : ''}`} onClick={() => onTab(id)}>
+                {label}{count[id] != null && <span className="nav-count">{count[id]}</span>}
+              </button>
+            ))}
+          </nav>
+        ) : (
+          <div className="chips admin-tabs" role="tablist" aria-label="Sections">
+            {TABS.map(([id, label]) => (
+              <button key={id} role="tab" aria-selected={tab === id} className={`chip ${tab === id ? 'on' : ''}`} onClick={() => onTab(id)}>{label}</button>
+            ))}
+          </div>
+        )}
+
+        <div className={`admin-main${fill ? ' fill' : ''}`}>
+          {error && <p className="msg error" role="alert">{error}</p>}
+          {notice && <p className="msg info" role="status">{notice}</p>}
+
+          {tab === 'categories' && <CategoriesTab data={data} run={run} busy={busy} wide={wide} />}
+          {tab === 'types' && <TypesTab data={data} run={run} busy={busy} wide={wide} />}
+          {tab === 'config' && <ConfigTab data={data} run={run} busy={busy} />}
+          {tab === 'rarities' && <RaritiesTab data={data} run={run} busy={busy} />}
+          {tab === 'uniques' && <UniqueWinsTab data={data} />}
+          {tab === 'legal' && <LegalTab data={data} run={run} busy={busy} />}
+          {tab === 'security' && <SecurityTab busy={busy} onChange={onChangePassword} />}
         </div>
-
-        {error && <p className="msg error" role="alert">{error}</p>}
-        {notice && <p className="msg info" role="status">{notice}</p>}
-
-        {tab === 'categories' && <CategoriesTab data={data} run={run} busy={busy} />}
-        {tab === 'types' && <TypesTab data={data} run={run} busy={busy} />}
-        {tab === 'config' && <ConfigTab data={data} run={run} busy={busy} />}
-        {tab === 'rarities' && <RaritiesTab data={data} run={run} busy={busy} />}
-        {tab === 'uniques' && <UniqueWinsTab data={data} />}
-        {tab === 'legal' && <LegalTab data={data} run={run} busy={busy} />}
-        {tab === 'security' && <SecurityTab busy={busy} onChange={changePassword} />}
       </div>
     </div>
   )
@@ -181,7 +223,8 @@ const Color = ({ label, value, onChange }) => (
 )
 
 // ---------- Catégories ----------
-export function CategoriesTab({ data, run, busy }) {
+export function CategoriesTab({ data, run, busy, wide = false }) {
+  if (wide) return <CategoriesWide data={data} run={run} busy={busy} />
   const nextPos = Math.max(0, ...data.categories.map((c) => c.position)) + 1
   return (
     <div className="admin-list">
@@ -194,6 +237,45 @@ export function CategoriesTab({ data, run, busy }) {
       ))}
       <h3>Nouvelle catégorie</h3>
       <CategoryForm key={`new-${data.categories.length}`} cat={null} nextPos={nextPos} run={run} busy={busy} />
+    </div>
+  )
+}
+
+// Catégories sur PC : à gauche la liste, à droite la fiche de la catégorie choisie
+function CategoriesWide({ data, run, busy }) {
+  const [sel, setSel] = useState(data.categories[0]?.id ?? 'new')
+  const cat = typeof sel === 'number' ? data.categories.find((c) => c.id === sel) ?? null : null
+  const nextPos = Math.max(0, ...data.categories.map((c) => c.position)) + 1
+  return (
+    <div className="md cats-wide">
+      <aside className="md-list" aria-label="Catégories">
+        <button type="button" className={`btn ${!cat ? '' : 'ghost'}`} onClick={() => setSel('new')}>+ Nouvelle catégorie</button>
+        <ul className="md-items">
+          {data.categories.map((c) => {
+            const pct = c.total ? (c.taken / c.total) * 100 : 0
+            return (
+              <li key={c.id}>
+                <button type="button" className={`md-item${c.id === sel ? ' on' : ''}`} aria-current={c.id === sel ? 'true' : undefined} onClick={() => setSel(c.id)}>
+                  <i className="cat-dot" style={{ '--cat1': c.color, '--cat2': c.color2 }} />
+                  <span className="md-item-text">
+                    <strong>{c.name}</strong>
+                    <small>n° {c.position} · {c.closed ? 'Terminée' : c.enabled ? 'Active' : 'Désactivée'} · {pct.toFixed(pct < 1 ? 2 : 0)} %</small>
+                  </span>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+        <p className="fine">
+          Une seule catégorie est ouvrable à la fois : la première (par position) qui est activée et pas terminée. Quand toutes ses cartes sont tirées, la suivante s’ouvre.
+          Les raretés et leur nombre de séries se règlent par type (écran « Types »).
+        </p>
+      </aside>
+      <section className="md-detail">
+        {cat
+          ? <CategoryForm key={cat.id} cat={cat} run={run} busy={busy} />
+          : <CategoryForm key={`new-${data.categories.length}`} cat={null} nextPos={nextPos} run={run} busy={busy} />}
+      </section>
     </div>
   )
 }
@@ -216,6 +298,8 @@ function CategoryForm({ cat, nextPos, run, busy }) {
         {cat && <span className={`badge ${cat.closed ? 'done' : ''}`}>{cat.closed ? 'Terminée' : cat.enabled ? 'Active' : 'Désactivée'}</span>}
       </div>
       {cat && <p className="fine">{fmt(cat.taken)} cartes tirées sur {fmt(cat.total)} ({pct.toFixed(pct < 1 ? 3 : 1)} %)</p>}
+      <div className="cat-cols">
+      <div className="cat-fields">
       <div className="admin-grid">
         <label>Nom<input value={f.name} maxLength={40} onChange={(e) => set('name')(e.target.value)} /></label>
         <label>Position<input type="number" value={f.position} onChange={(e) => set('position')(e.target.value)} /></label>
@@ -226,9 +310,13 @@ function CategoryForm({ cat, nextPos, run, busy }) {
         <Color label="Texte" value={f.text_color} onChange={set('text_color')} />
         <label className="check inline"><input type="checkbox" checked={f.enabled} onChange={(e) => set('enabled')(e.target.checked)} /><span>Activée</span></label>
       </div>
+      </div>
+      <div className="cat-side">
       <ImageField label="Image du booster (emoji ou adresse https://), au centre ; « 1/1 » si vide" value={f.image} onChange={set('image')} />
       <p className="fine">Aperçu du booster : le nom de la catégorie en haut, son image au centre.</p>
       <div className="admin-pack-preview"><Pack category={{ name: f.name || 'Catégorie', color: f.color, color2: f.color2, text_color: f.text_color, image: f.image }} /></div>
+      </div>
+      </div>
 
       <div className="row">
         <button className="btn" disabled={busy || !f.name.trim()} onClick={() => run((pw) => api.adminSaveCategory(pw, { id: cat?.id, ...f }), cat ? 'Catégorie enregistrée.' : 'Catégorie créée.')}>
@@ -271,12 +359,13 @@ function CategoryForm({ cat, nextPos, run, busy }) {
 }
 
 // ---------- Types ----------
-export function TypesTab({ data, run, busy, initialCollapsed = [] }) {
+export function TypesTab({ data, run, busy, initialCollapsed = [], wide = false, initialSelection = null }) {
   const [catId, setCatId] = useState(data.categories[0]?.id ?? null)
   const [collapsed, setCollapsed] = useState(() => new Set(initialCollapsed))   // types réduits (seul leur en-tête reste visible)
   const toggle = (id) => setCollapsed((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const types = data.types.filter((t) => t.category_id === catId)
   const nextPos = Math.max(0, ...types.map((t) => t.position)) + 1
+  if (wide) return <TypesWide data={data} run={run} busy={busy} initialSelection={initialSelection} />
   if (!data.categories.length) return <p className="muted">Crée d’abord une catégorie.</p>
   return (
     <div className="admin-list">
@@ -302,7 +391,7 @@ export function TypesTab({ data, run, busy, initialCollapsed = [] }) {
       <h3>Nouveau type</h3>
       <TypeForm key={`new-${catId}-${types.length}`} type={null} categoryId={catId} nextPos={nextPos} run={run} busy={busy} />
       <h3>Importer des types</h3>
-      <ImportTypes key={`import-${catId}-${types.length}`} categoryId={catId} existing={types.map((t) => t.name)} run={run} busy={busy} />
+      <ImportPanel key={`import-${catId}-${types.length}`} categoryId={catId} types={types} data={data} run={run} busy={busy} />
     </div>
   )
 }
@@ -385,13 +474,14 @@ function TypeForm({ type, categoryId, nextPos, data, run, busy, collapsed = fals
   )
 }
 
-// Raretés d'un type (logique « Topps ») : CHAQUE rareté a ses propres séries, de 1/1 à N/N ; 0 série = la rareté n'existe pas pour
-// ce type ; numéros visibles ; type secret
-function TypeRaritiesEditor({ type, data, run, busy }) {
+// ---------- Raretés d'un type : état partagé par l'éditeur étroit (mobile) et l'éditeur large (PC) ----------
+// CHAQUE rareté a ses propres séries, de 1/1 à N/N ; 0 série = la rareté n'existe pas pour ce type ; numéros visibles ; style de carte ;
+// type secret. type peut être null (type en cours de création : categoryId donne alors la catégorie).
+function useRarityEditor(type, data, categoryId) {
   const rarityList = data.rarities.filter((r) => r.kind === 'range').sort((a, b) => a.sort_order - b.sort_order)
   const nameOf = (id) => data.rarities.find((r) => r.id === id)?.name ?? id
-  const category = data.categories.find((c) => c.id === type.category_id)
-  const own = (data.type_rarities ?? []).filter((r) => r.type_id === type.id)
+  const category = data.categories.find((c) => c.id === (type?.category_id ?? categoryId))
+  const own = type ? (data.type_rarities ?? []).filter((r) => r.type_id === type.id) : []
   // Une ligne par rareté (dans l'ordre d'affichage) : celles que le type n'a pas valent 0 série
   const allRows = (existing) => rarityList.map((r) => {
     const o = existing.find((x) => x.rarity_id === r.id)
@@ -399,20 +489,19 @@ function TypeRaritiesEditor({ type, data, run, busy }) {
   })
   const [custom, setCustom] = useState(own.length > 0)
   const [rows, setRows] = useState(() => allRows(own))
-  const [secret, setSecret] = useState(!!type.secret)
+  const [secret, setSecret] = useState(!!type?.secret)
   const defaults = defaultConfig(rarityList, category)
 
   const customize = () => {
     setRows(allRows(defaults.map((d) => ({ rarity_id: d.rarity_id, max_series: d.max_series, numbered_series: d.max_series, card_style: 'simple' }))))
     setCustom(true)
   }
+  const resetToDefaults = () => { setCustom(false); setRows(allRows([])) }
   const setRow = (i, k, v) => setRows((cur) => cur.map((r, j) => (j === i ? { ...r, [k]: v } : r)))
   const problem = custom ? validateTypeRarities(rows) : ''
-  const payload = rows.filter((r) => Number(r.max_series) >= 1)
-    .map((r) => ({ rarity_id: r.rarity_id, max_series: Number(r.max_series), numbered_series: Number(r.numbered_series || 0), card_style: r.card_style || 'simple' }))
-  const shown = custom
-    ? (problem ? [] : rows.map((r) => ({ rarity_id: r.rarity_id, max_series: Number(r.max_series), numbered_series: Number(r.numbered_series || 0), card_style: r.card_style || 'simple' })))
-    : defaults
+  const toNum = (r) => ({ rarity_id: r.rarity_id, max_series: Number(r.max_series), numbered_series: Number(r.numbered_series || 0), card_style: r.card_style || 'simple' })
+  const payload = rows.filter((r) => Number(r.max_series) >= 1).map(toNum)
+  const shown = custom ? (problem ? [] : rows.map(toNum)) : defaults
   const describe = (r) => {
     const smax = r.max_series
     if (smax < 1) return 'absente de ce type (0 série)'
@@ -423,13 +512,18 @@ function TypeRaritiesEditor({ type, data, run, busy }) {
     if (k <= 0) return `${cards} — non numérotée (numéro jamais visible)${fa}`
     return `${cards} — numéro visible de 1/1 à ${fmt(k)}/${fmt(k)} (séries 1 à ${fmt(k)}), masqué ensuite${fa}`
   }
-  // Aperçu des deux styles avec l'image de ce type, dans la première rareté qui a des séries
+  // Aperçu des deux styles avec l'image du type, dans la première rareté qui a des séries
   const sampleRarity = data.rarities.find((x) => x.id === (shown.find((b) => b.max_series >= 1)?.rarity_id ?? 'ultra')) ?? rarityList[0]
-  const save = () =>
-    run(
-      (pw) => api.adminSaveTypeRarities(pw, type.id, custom ? payload : own.length ? [] : null, secret),
-      'Raretés du type enregistrées.',
-    )
+  // Ce qu'il faut envoyer au serveur : réglages propres, [] pour revenir aux défauts (si le type en avait), null = ne rien changer
+  const toSend = custom ? payload : own.length ? [] : null
+  return { rarityList, nameOf, own, custom, rows, secret, setSecret, defaults, customize, resetToDefaults, setRow, problem, payload, shown, describe, sampleRarity, toSend }
+}
+
+// Éditeur étroit (mobile) : sous la fiche de chaque type
+function TypeRaritiesEditor({ type, data, run, busy }) {
+  const ed = useRarityEditor(type, data)
+  const { custom, rows, secret, setSecret, setRow, problem, shown, describe, sampleRarity, nameOf } = ed
+  const save = () => run((pw) => api.adminSaveTypeRarities(pw, type.id, ed.toSend, secret), 'Raretés du type enregistrées.')
 
   return (
     <details className="type-rarities">
@@ -466,7 +560,7 @@ function TypeRaritiesEditor({ type, data, run, busy }) {
             ))}
           </div>
           <div className="row">
-            <button type="button" className="btn ghost" onClick={() => { setCustom(false); setRows(allRows([])) }}>Revenir aux réglages par défaut</button>
+            <button type="button" className="btn ghost" onClick={ed.resetToDefaults}>Revenir aux réglages par défaut</button>
           </div>
           {problem && <p className="msg error">{problem}</p>}
         </>
@@ -482,7 +576,7 @@ function TypeRaritiesEditor({ type, data, run, busy }) {
           ))}
         </ul>
       )}
-      {!custom && <div className="row"><button type="button" className="btn ghost" onClick={customize}>Personnaliser les raretés de ce type</button></div>}
+      {!custom && <div className="row"><button type="button" className="btn ghost" onClick={ed.customize}>Personnaliser les raretés de ce type</button></div>}
       {!custom && <p className="fine">Style de carte : Simple pour toutes les raretés. Personnalise les raretés pour choisir FullArt rareté par rareté.</p>}
       {sampleRarity && (
         <div className="style-previews" aria-label="Aperçu des deux styles de carte">
@@ -503,11 +597,255 @@ function TypeRaritiesEditor({ type, data, run, busy }) {
   )
 }
 
-// Import d'un fichier CSV/TSV (nom ; position ; image) dans la catégorie choisie : aperçu ligne par ligne, tout ou rien
-function ImportTypes({ categoryId, existing, run, busy }) {
+// ---------- Vue PC : les raretés d'un type en tableau (une ligne par rareté) avec l'aperçu des deux styles ----------
+function RaritiesTable({ ed, previewType }) {
+  const { custom, rows, defaults, nameOf, problem } = ed
+  const [focusId, setFocusId] = useState(null)
+  const lines = custom
+    ? rows.map((r, i) => ({ i, id: r.rarity_id, max: Number(r.max_series) || 0, num: Number(r.numbered_series) || 0, style: r.card_style, raw: r }))
+    : ed.rarityList.map((rr) => {
+        const d = defaults.find((x) => x.rarity_id === rr.id)
+        return { i: -1, id: rr.id, max: d?.max_series ?? 0, num: d?.max_series ?? 0, style: 'simple', raw: null }
+      })
+  const rarityObj = (id) => ed.rarityList.find((x) => x.id === id)
+  const firstPresent = lines.find((l) => l.max >= 1)
+  const focus = lines.find((l) => l.id === focusId && l.max >= 1) ?? firstPresent
+  const visible = (l) => (l.max < 1 ? '—' : l.num >= l.max ? 'tous' : l.num <= 0 ? 'aucun' : `1/1 → ${fmt(l.num)}/${fmt(l.num)}`)
+  return (
+    <div className="rar-body">
+      <table className="rar-table">
+        <thead>
+          <tr><th>Rareté</th><th>Séries</th><th>Numérotées</th><th>Style</th><th>Cartes</th><th>N° visibles</th></tr>
+        </thead>
+        <tbody>
+          {lines.map((l) => {
+            const r = rarityObj(l.id)
+            return (
+              <tr key={l.id} className={`${l.max < 1 ? 'absent' : ''}${focus?.id === l.id ? ' focus' : ''}`} onClick={() => setFocusId(l.id)}>
+                <th scope="row">
+                  <i className="rar-dot" style={{ background: `linear-gradient(135deg, ${r?.color}, ${r?.color2})` }} />
+                  {nameOf(l.id)}
+                </th>
+                <td>
+                  {custom
+                    ? <input type="number" min="0" max="5000" value={l.raw.max_series} aria-label={`Séries max. ${nameOf(l.id)}`} onFocus={() => setFocusId(l.id)} onChange={(e) => ed.setRow(l.i, 'max_series', e.target.value)} />
+                    : <span>{l.max >= 1 ? fmt(l.max) : '—'}</span>}
+                </td>
+                <td>
+                  {custom
+                    ? <input type="number" min="0" value={l.raw.numbered_series} aria-label={`Séries numérotées ${nameOf(l.id)}`} onFocus={() => setFocusId(l.id)} onChange={(e) => ed.setRow(l.i, 'numbered_series', e.target.value)} />
+                    : <span>{l.max >= 1 ? fmt(l.num) : '—'}</span>}
+                </td>
+                <td>
+                  {custom
+                    ? (
+                      <select value={l.raw.card_style} aria-label={`Style de carte ${nameOf(l.id)}`} onFocus={() => setFocusId(l.id)} onChange={(e) => ed.setRow(l.i, 'card_style', e.target.value)}>
+                        {CARD_STYLES.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                    )
+                    : <span>Simple</span>}
+                </td>
+                <td className="num">{l.max >= 1 ? fmt(cardCount(l.max)) : '—'}</td>
+                <td>{visible(l)}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+      {problem && <p className="msg error rar-problem">{problem}</p>}
+      {focus && (
+        <aside className="rar-preview" aria-label="Aperçu des deux styles de carte">
+          <p className="fine">Aperçu : {nameOf(focus.id)}</p>
+          <div className="style-previews">
+            {CARD_STYLES.map((s) => (
+              <figure key={s.id} className={focus.style === s.id ? 'current' : ''}>
+                <Card typeId={previewType.id} type={previewType} styleName={s.id} rarity={rarityObj(focus.id)} series={50} number={3} size="md" />
+                <figcaption>{s.name}{focus.style === s.id ? ' ✓' : ''}</figcaption>
+              </figure>
+            ))}
+          </div>
+        </aside>
+      )}
+    </div>
+  )
+}
+
+// Appliquer les raretés de ce type à d'autres types de la catégorie (réglage identique pour beaucoup de types)
+function CopyRarities({ ed, others, run, busy }) {
+  const [open, setOpen] = useState(false)
+  const [picked, setPicked] = useState(() => new Set())
+  const toggle = (id) => setPicked((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  if (!others.length) return null
+  const targets = others.filter((t) => picked.has(t.id))
+  const apply = () =>
+    run(
+      async (pw) => {
+        const failed = []
+        let done = 0
+        for (const t of targets) {
+          try { await api.adminSaveTypeRarities(pw, t.id, ed.custom ? ed.payload : [], null); done += 1 }
+          catch (e) { failed.push(`${t.name} (${explain(e)})`) }
+        }
+        return { done, failed }
+      },
+      (res) => `Raretés appliquées à ${res.done} type${res.done > 1 ? 's' : ''}${res.failed.length ? `. Refusé pour : ${res.failed.join(' ; ')}` : '.'}`,
+    )
+  return (
+    <details className="rar-copy" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary>Appliquer ces raretés à d’autres types…</summary>
+      <p className="fine">
+        Copie {ed.custom ? 'les raretés ci-dessus (séries, numérotées, style)' : 'le retour aux réglages par défaut'} vers les types cochés. Le statut « secret » n’est pas copié.
+        Un type dont des cartes ne rentreraient plus dans ces réglages est refusé (les autres sont traités).
+      </p>
+      <div className="rar-copy-list">
+        {others.map((t) => (
+          <label key={t.id} className="check inline"><input type="checkbox" checked={picked.has(t.id)} onChange={() => toggle(t.id)} /><span>{t.name}</span></label>
+        ))}
+      </div>
+      <div className="row">
+        <button type="button" className="btn ghost" onClick={() => setPicked(new Set(others.map((t) => t.id)))}>Tout cocher</button>
+        <button type="button" className="btn ghost" onClick={() => setPicked(new Set())}>Tout décocher</button>
+        <button type="button" className="btn" disabled={busy || targets.length === 0 || !!ed.problem} onClick={apply}>Appliquer à {targets.length} type{targets.length > 1 ? 's' : ''}</button>
+      </div>
+    </details>
+  )
+}
+
+// Éditeur de type pour PC : le détail du type en haut, ses raretés dessous, un seul bouton « Enregistrer le type »
+function TypeEditorWide({ type, categoryId, nextPos, data, run, busy, others, onSaved }) {
+  const [f, setF] = useState({ name: type?.name ?? '', position: type?.position ?? nextPos ?? 1, image: type?.image ?? '' })
+  const ed = useRarityEditor(type, data, categoryId)
+  const previewType = { id: type?.id ?? 0, name: f.name || 'Nouveau type', image: f.image }
+  const valid = f.name.trim() && !ed.problem
+  const save = () =>
+    run(async (pw) => {
+      const res = await api.adminSaveType(pw, { id: type?.id, category_id: categoryId, ...f })
+      const id = type?.id ?? res?.id
+      // Raretés et statut secret : seulement s'il y a quelque chose à envoyer (réglages propres, retour aux défauts, secret)
+      if (id && (ed.toSend !== null || ed.secret !== !!type?.secret)) await api.adminSaveTypeRarities(pw, id, ed.toSend, ed.secret)
+      onSaved?.(id)
+      return res
+    }, type ? 'Type enregistré.' : 'Type créé.')
+  return (
+    <div className="ted">
+      <section className="ted-card ted-detail" aria-label="Détail du type">
+        <header className="ted-head">
+          <span className="admin-type-art big"><TypeArt type={{ image: f.image }} /></span>
+          <div className="ted-title">
+            <h3>{type ? type.name : 'Nouveau type'}</h3>
+            <p className="fine">
+              {type && type.taken > 0 && <span className="badge">{fmt(type.taken)} tirées</span>}
+              {type?.series_count && <span className="badge">{fmt(type.series_count)} séries</span>}
+              {ed.secret && <span className="badge">secret</span>}
+            </p>
+          </div>
+          <div className="ted-actions">
+            <button className="btn" disabled={busy || !valid} onClick={save}>{type ? 'Enregistrer le type' : 'Créer le type'}</button>
+            {type && type.taken === 0 && (
+              <button className="btn ghost danger" disabled={busy} onClick={() => window.confirm(`Supprimer « ${type.name} » ?`) && run((pw) => api.adminDeleteType(pw, type.id), 'Type supprimé.')}>
+                Supprimer
+              </button>
+            )}
+          </div>
+        </header>
+        <div className="ted-fields">
+          <label>Nom<input value={f.name} maxLength={60} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+          <label>Position<input type="number" value={f.position} onChange={(e) => setF({ ...f, position: e.target.value })} /></label>
+          <label className="check inline ted-secret">
+            <input type="checkbox" checked={ed.secret} onChange={(e) => ed.setSecret(e.target.checked)} />
+            <span>Type secret : carte mystère dans l’album tant qu’aucune carte n’est possédée (numéro au-delà de la checklist, ex. 4/3)</span>
+          </label>
+          <div className="ted-image"><ImageField label="Image (emoji ou adresse https://)" value={f.image} onChange={(v) => setF((cur) => ({ ...cur, image: v }))} /></div>
+        </div>
+      </section>
+
+      <section className="ted-card ted-rarities" aria-label="Raretés du type">
+        <header className="rar-head">
+          <h3>Raretés</h3>
+          <span className="muted">{ed.custom ? 'propres à ce type' : 'réglages par défaut (onglet Raretés)'}</span>
+          <div className="ted-actions">
+            {ed.custom
+              ? <button type="button" className="btn ghost" onClick={ed.resetToDefaults}>Revenir aux réglages par défaut</button>
+              : <button type="button" className="btn ghost" onClick={ed.customize}>Personnaliser les raretés de ce type</button>}
+          </div>
+        </header>
+        <p className="fine">
+          Chaque rareté a ses propres séries (1/1 à N/N). <strong>0 série = la rareté n’existe pas pour ce type.</strong> « Numérotées » = les premières séries au numéro visible.
+          {type?.taken > 0 && ed.custom ? ' Des cartes ont déjà été tirées : retirer une rareté ou réduire ses séries sous une carte existante est refusé.' : ''}
+          {!ed.custom && ' Réglages par défaut : personnalise-les pour choisir les raretés et le style (FullArt…).'}
+        </p>
+        <RaritiesTable ed={ed} previewType={previewType} />
+        <CopyRarities ed={ed} others={others} run={run} busy={busy} />
+      </section>
+    </div>
+  )
+}
+
+// Types sur PC : à gauche la liste de tous les types, à droite le détail du type en haut et ses raretés dessous
+function TypesWide({ data, run, busy, initialSelection = null }) {
+  const [catId, setCatId] = useState(data.types.find((t) => t.id === initialSelection)?.category_id ?? data.categories[0]?.id ?? null)
+  const [sel, setSel] = useState(initialSelection)   // identifiant d'un type, 'new' ou 'import'
+  const [query, setQuery] = useState('')
+  const types = data.types.filter((t) => t.category_id === catId).slice().sort((a, b) => a.position - b.position || a.id - b.id)
+  const q = query.trim().toLowerCase()
+  const shown = q ? types.filter((t) => t.name.toLowerCase().includes(q)) : types
+  const type = typeof sel === 'number' ? types.find((t) => t.id === sel) ?? null : null
+  const nextPos = Math.max(0, ...types.map((t) => t.position)) + 1
+  const pickCat = (id) => { setCatId(id); setSel(null); setQuery('') }
+  if (!data.categories.length) return <p className="muted">Crée d’abord une catégorie.</p>
+  const mode = sel === 'new' ? 'new' : sel === 'import' ? 'import' : type ? 'edit' : 'none'
+  return (
+    <div className="md types-wide">
+      <aside className="md-list" aria-label="Types">
+        <label>
+          Catégorie
+          <select value={catId ?? ''} onChange={(e) => pickCat(Number(e.target.value))}>
+            {data.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </label>
+        <input type="search" className="md-search" placeholder={`Rechercher parmi ${types.length} type${types.length > 1 ? 's' : ''}…`} value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Rechercher un type" />
+        <div className="row nowrap">
+          <button type="button" className={`btn ${mode === 'new' ? '' : 'ghost'}`} onClick={() => setSel('new')}>+ Nouveau</button>
+          <button type="button" className={`btn ${mode === 'import' ? '' : 'ghost'}`} onClick={() => setSel('import')}>Importer</button>
+        </div>
+        <ul className="md-items">
+          {shown.map((t) => (
+            <li key={t.id}>
+              <button type="button" className={`md-item${t.id === sel ? ' on' : ''}`} aria-current={t.id === sel ? 'true' : undefined} onClick={() => setSel(t.id)}>
+                <span className="admin-type-art"><TypeArt type={{ image: t.image }} /></span>
+                <span className="md-item-text">
+                  <strong>{t.name}</strong>
+                  <small>n° {t.position}{t.secret ? ' · secret' : ''}{t.taken > 0 ? ` · ${fmt(t.taken)} tirées` : ''}</small>
+                </span>
+              </button>
+            </li>
+          ))}
+          {shown.length === 0 && <li className="muted md-empty">{types.length ? 'Aucun type ne correspond.' : 'Aucun type dans cette catégorie.'}</li>}
+        </ul>
+      </aside>
+      <section className="md-detail">
+        {mode === 'new' && <TypeEditorWide key={`new-${catId}-${types.length}`} type={null} categoryId={catId} nextPos={nextPos} data={data} run={run} busy={busy} others={[]} onSaved={(id) => id && setSel(id)} />}
+        {mode === 'edit' && (
+          <TypeEditorWide
+            key={`${type.id}-${type.series_count}-${type.secret}-${(data.type_rarities ?? []).filter((r) => r.type_id === type.id).map((r) => `${r.rarity_id}${r.max_series}${r.numbered_series}${r.card_style}`).join('')}`}
+            type={type} categoryId={catId} data={data} run={run} busy={busy} others={types.filter((t) => t.id !== type.id)} />
+        )}
+        {mode === 'import' && <ImportPanel key={`import-${catId}-${types.length}`} categoryId={catId} types={types} data={data} run={run} busy={busy} />}
+        {mode === 'none' && <p className="muted md-empty">Choisis un type dans la liste, crée-en un nouveau, ou importe-en plusieurs d’un coup (fichier CSV et photos).</p>}
+      </section>
+    </div>
+  )
+}
+
+// ---------- Import en masse : fichier de types (nom, position, image, secret, raretés) et/ou photos ----------
+function ImportPanel({ categoryId, types, data, run, busy }) {
+  const rarityList = data.rarities.filter((r) => r.kind === 'range').sort((a, b) => a.sort_order - b.sort_order)
   const [parsed, setParsed] = useState(null)
   const [fileName, setFileName] = useState('')
   const [readError, setReadError] = useState('')
+  const [photos, setPhotos] = useState([])        // [{name, url, error}] : photos déjà réduites (256 px)
+  const [photoBusy, setPhotoBusy] = useState(false)
+  const [createMissing, setCreateMissing] = useState(false)
 
   const onFile = async (e) => {
     const file = e.target.files?.[0]
@@ -515,15 +853,27 @@ function ImportTypes({ categoryId, existing, run, busy }) {
     if (!file) return
     setReadError('')
     try {
-      setParsed(parseTypesFile(await file.text(), existing))
+      setParsed(parseTypesFile(await file.text(), types.map((t) => t.name), rarityList))
       setFileName(file.name)
     } catch {
       setParsed(null)
       setReadError('Impossible de lire ce fichier.')
     }
   }
+  const onPhotos = async (e) => {
+    const files = [...(e.target.files ?? [])]
+    e.target.value = ''
+    if (!files.length) return
+    setPhotoBusy(true)
+    const out = []
+    for (const f of files.slice(0, 300)) {
+      try { out.push({ name: f.name, url: await fileToDataUrl(f) }) } catch { out.push({ name: f.name, url: '', error: 'image illisible' }) }
+    }
+    setPhotos((cur) => [...cur, ...out])
+    setPhotoBusy(false)
+  }
   const downloadTemplate = () => {
-    const url = URL.createObjectURL(new Blob([TEMPLATE_CSV], { type: 'text/csv;charset=utf-8' }))
+    const url = URL.createObjectURL(new Blob([makeTemplate(rarityList)], { type: 'text/csv;charset=utf-8' }))
     const a = document.createElement('a')
     a.href = url
     a.download = 'modele-types.csv'
@@ -532,57 +882,156 @@ function ImportTypes({ categoryId, existing, run, busy }) {
   }
 
   const rows = parsed?.rows ?? []
+  const okPhotos = photos.filter((p) => !p.error)
+  const matches = matchPhotos(okPhotos, rows, types)
+  const photoByLine = new Map()
+  const updates = []                              // photos de types déjà présents : leur photo est mise à jour
+  const orphans = []                              // photos qui ne correspondent à aucun type
+  const dupPhotos = []
+  matches.forEach((m, i) => {
+    if (m.duplicate) dupPhotos.push(okPhotos[i])
+    else if (m.target?.kind === 'row') photoByLine.set(m.target.line, okPhotos[i].url)
+    else if (m.target?.kind === 'existing') updates.push({ type: types.find((t) => t.id === m.target.id), url: okPhotos[i].url, file: okPhotos[i].name })
+    else orphans.push(okPhotos[i])
+  })
+  // Option : un type par photo sans correspondance (nom = nom du fichier)
+  const known = new Set([...rows.map((r) => photoKey(r.name)), ...types.map((t) => photoKey(t.name))])
+  const created = []
+  if (createMissing) {
+    for (const p of orphans) {
+      const key = photoKey(p.name)
+      if (!key || known.has(key)) continue
+      known.add(key)
+      const nice = p.name.replace(/\.[a-z0-9]{2,5}$/i, '').replace(/[_\-.]+/g, ' ').replace(/\s+/g, ' ').trim()
+      created.push({ line: `photo:${p.name}`, name: nice.charAt(0).toUpperCase() + nice.slice(1), position: null, image: p.url, kind: 'photo', secret: false, rarities: null, error: '', duplicate: false, fromPhoto: true })
+    }
+  }
+  const allRows = [...rows, ...created]
   const errors = rows.filter((r) => r.error)
   const dupes = rows.filter((r) => r.duplicate)
-  const toCreate = rows.filter((r) => !r.error && !r.duplicate)
+  const toCreate = allRows.filter((r) => !r.error && !r.duplicate)
+  const nothing = toCreate.length === 0 && updates.length === 0
+  const loaded = allRows.length > 0 || photos.length > 0
+  const canImport = (allRows.length > 0 || updates.length > 0)
   const doImport = () =>
     run(
-      (pw) => api.adminImportTypes(pw, categoryId, toCreate.map((r) => ({ name: r.name, position: r.position, image: r.image }))),
-      (res) => `${res.created} type${res.created > 1 ? 's' : ''} importé${res.created > 1 ? 's' : ''}${res.skipped ? `, ${res.skipped} ignoré${res.skipped > 1 ? 's' : ''} (déjà présent${res.skipped > 1 ? 's' : ''})` : ''}.`,
+      async (pw) => {
+        let made = 0
+        let skipped = 0
+        if (toCreate.length) {
+          const res = await api.adminImportTypes(pw, categoryId, toCreate.map((r) => ({
+            name: r.name, position: r.position, image: photoByLine.get(r.line) ?? r.image, secret: r.secret, ...(r.rarities ? { rarities: r.rarities } : {}),
+          })))
+          made = res.created
+          skipped = res.skipped
+        }
+        let updated = 0
+        for (const u of updates) {
+          await api.adminSaveType(pw, { id: u.type.id, category_id: categoryId, name: u.type.name, position: u.type.position, image: u.url })
+          updated += 1
+        }
+        return { made, skipped, updated }
+      },
+      (res) => [
+        `${res.made} type${res.made > 1 ? 's' : ''} importé${res.made > 1 ? 's' : ''}`,
+        res.skipped ? `${res.skipped} ignoré${res.skipped > 1 ? 's' : ''} (déjà présent${res.skipped > 1 ? 's' : ''})` : '',
+        res.updated ? `${res.updated} photo${res.updated > 1 ? 's' : ''} mise${res.updated > 1 ? 's' : ''} à jour` : '',
+      ].filter(Boolean).join(', ') + '.',
     )
 
   return (
-    <div className="admin-card">
-      <p className="muted">
-        Fichier CSV ou texte, une ligne par type : <strong>nom ; position ; image</strong> (position et image facultatives). L’image est un emoji ou une
-        adresse https://. Séparateur ; , ou tabulation, en-tête facultatif. {MAX_ROWS} types maximum, tout ou rien : une ligne invalide annule
-        l’import. Un nom déjà présent dans la catégorie est ignoré.
-      </p>
+    <div className="import-panel">
+      <header className="ted-head">
+        <h3>Importer des types</h3>
+        {canImport && (
+          <div className="ted-actions">
+            <button className="btn" disabled={busy || photoBusy || errors.length > 0 || nothing} onClick={doImport}>
+              {nothing && !errors.length ? 'Rien de nouveau à importer' : `Importer ${toCreate.length} type${toCreate.length > 1 ? 's' : ''}${updates.length ? ` et mettre à jour ${updates.length} photo${updates.length > 1 ? 's' : ''}` : ''}`}
+            </button>
+            <button type="button" className="btn ghost" onClick={() => { setParsed(null); setPhotos([]); setFileName(''); setCreateMissing(false) }}>Annuler</button>
+          </div>
+        )}
+      </header>
+      <details className="import-help" open={!loaded}>
+        <summary>Format du fichier de types et des photos</summary>
+        <p className="muted">
+          <strong>1. Fichier de types</strong> (CSV ou texte, une ligne par type) : <strong>nom ; position ; image ; secret ; raretés</strong>. Seul le nom est obligatoire. Image : un emoji ou une
+          adresse https://. Secret : oui / non. Raretés : <code>Ultra Rare:50:5:fullart|Super Rare:100:1|Commune:500:0</code> (rareté : séries : numérotées : style, séparées par « | ;
+          séries à 0 = la rareté n’existe pas pour ce type ; numérotées et style facultatifs). {MAX_ROWS} types maximum, tout ou rien : une ligne invalide annule l’import. Un nom déjà présent dans
+          la catégorie est ignoré.
+        </p>
+        <p className="muted">
+          <strong>2. Photos</strong> (plusieurs fichiers image d’un coup, facultatif) : chaque photo est rapprochée d’un type par <strong>le nom du fichier</strong> (« chat-va.png » → type « Chat va »,
+          accents et majuscules ignorés). Elle remplace l’image du fichier de types, ou met à jour la photo d’un type déjà présent. Les photos sont réduites à 256 px.
+        </p>
+      </details>
       <div className="row">
         <label className="btn ghost file-btn">
-          Choisir un fichier
+          1. Choisir le fichier de types
           <input type="file" accept=".csv,.tsv,.txt,text/csv,text/plain" onChange={onFile} hidden />
         </label>
-        <button type="button" className="btn ghost" onClick={downloadTemplate}>Télécharger un modèle</button>
+        <button type="button" className="btn ghost" onClick={downloadTemplate}>Télécharger un modèle complet</button>
+        <label className="btn ghost file-btn">
+          2. Ajouter des photos
+          <input type="file" accept="image/*" multiple onChange={onPhotos} hidden />
+        </label>
+        {photos.length > 0 && <button type="button" className="btn ghost" onClick={() => setPhotos([])}>Retirer les {photos.length} photos</button>}
       </div>
       {readError && <p className="msg error">{readError}</p>}
       {parsed?.fileError && <p className="msg error">{parsed.fileError}</p>}
+      {photoBusy && <p className="muted">Lecture des photos…</p>}
 
-      {rows.length > 0 && (
+      {photos.length > 0 && (
+        <div className="import-photos">
+          <p>
+            <strong>{photos.length} photo{photos.length > 1 ? 's' : ''}</strong> : {photoByLine.size} rapprochée{photoByLine.size > 1 ? 's' : ''} d’une ligne du fichier, {updates.length} pour un type déjà présent,
+            {' '}{orphans.length} sans correspondance{dupPhotos.length ? `, ${dupPhotos.length} en double` : ''}{photos.length > okPhotos.length ? `, ${photos.length - okPhotos.length} illisible${photos.length - okPhotos.length > 1 ? 's' : ''}` : ''}.
+          </p>
+          {orphans.length > 0 && (
+            <label className="check inline">
+              <input type="checkbox" checked={createMissing} onChange={(e) => setCreateMissing(e.target.checked)} />
+              <span>Créer un type pour chaque photo sans correspondance ({orphans.length}) : {orphans.slice(0, 4).map((p) => p.name).join(', ')}{orphans.length > 4 ? '…' : ''}</span>
+            </label>
+          )}
+          {updates.length > 0 && <p className="fine">Photos mises à jour : {updates.map((u) => u.type.name).join(', ')}.</p>}
+        </div>
+      )}
+
+      {allRows.length > 0 && (
         <>
           <p>
-            <strong>{fileName}</strong> : {rows.length} ligne{rows.length > 1 ? 's' : ''} — {toCreate.length} à créer
+            <strong>{fileName || 'Photos'}</strong> : {allRows.length} ligne{allRows.length > 1 ? 's' : ''} — {toCreate.length} à créer
             {dupes.length ? `, ${dupes.length} déjà présente${dupes.length > 1 ? 's' : ''} (ignorée${dupes.length > 1 ? 's' : ''})` : ''}
             {errors.length ? `, ${errors.length} en erreur` : ''}.
           </p>
-          {errors.length > 0 && <p className="msg error">Corrige les lignes en erreur dans ton fichier puis recharge-le : l’import est bloqué tant qu’il en reste.</p>}
-          <ul className="import-preview">
-            {rows.map((r) => (
-              <li key={r.line} className={r.error ? 'bad' : r.duplicate ? 'skip' : ''}>
-                <span className="admin-type-art">{r.kind === 'invalid' ? '⚠️' : <TypeArt type={{ image: r.image }} />}</span>
-                <span className="import-name">{r.name || '(sans nom)'}</span>
-                <span className="muted">{r.position ?? 'auto'}</span>
-                <span className="fine">
-                  ligne {r.line}{r.error ? ` : ${r.error}` : r.duplicate ? ' : déjà présent, ignoré' : ''}
-                </span>
-              </li>
-            ))}
-          </ul>
-          <div className="row">
-            <button className="btn" disabled={busy || errors.length > 0 || toCreate.length === 0} onClick={doImport}>
-              {toCreate.length === 0 && !errors.length ? 'Rien de nouveau à importer' : `Importer ${toCreate.length} type${toCreate.length > 1 ? 's' : ''}`}
-            </button>
-            <button type="button" className="btn ghost" onClick={() => setParsed(null)}>Annuler</button>
+          {errors.length > 0 && (
+            <div className="msg error" role="alert">
+              <p>Corrige les lignes en erreur dans ton fichier puis recharge-le : l’import est bloqué tant qu’il en reste.</p>
+              <ul className="import-errors">
+                {errors.slice(0, 5).map((r) => <li key={r.line}>Ligne {r.line}{r.name ? ` (${r.name})` : ''} : {r.error}</li>)}
+                {errors.length > 5 && <li>… et {errors.length - 5} autre{errors.length - 5 > 1 ? 's' : ''}.</li>}
+              </ul>
+            </div>
+          )}
+          <div className="import-scroll">
+            <table className="import-table">
+              <thead><tr><th>Image</th><th>Nom</th><th>Position</th><th>Secret</th><th>Raretés</th><th>État</th></tr></thead>
+              <tbody>
+                {allRows.map((r) => {
+                  const pic = photoByLine.get(r.line)
+                  return (
+                    <tr key={r.line} className={r.error ? 'bad' : r.duplicate ? 'skip' : ''}>
+                      <td><div className="import-img"><span className="admin-type-art">{r.kind === 'invalid' ? '⚠️' : <TypeArt type={{ image: pic ?? r.image }} />}</span>{pic && <span className="badge">photo</span>}</div></td>
+                      <td className="import-name">{r.name || '(sans nom)'}</td>
+                      <td>{r.position ?? 'auto'}</td>
+                      <td>{r.secret ? 'oui' : ''}</td>
+                      <td className="fine">{r.rarities ? describeRarities(r.rarities, rarityList) : 'réglages par défaut'}</td>
+                      <td className="fine">{r.error ? `ligne ${r.line} : ${r.error}` : r.duplicate ? 'déjà présent, ignoré' : r.fromPhoto ? 'créé depuis la photo' : 'à créer'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         </>
       )}
@@ -593,7 +1042,7 @@ function ImportTypes({ categoryId, existing, run, busy }) {
 // ---------- Réglages ----------
 export function ConfigTab({ data, run, busy }) {
   return (
-    <div className="admin-list">
+    <div className="admin-list cols-2">
       <p className="muted">Réglages du jeu et de la boutique. Les modifications s’appliquent tout de suite.</p>
       {data.config.map((row) => <ConfigRow key={row.key} row={row} run={run} busy={busy} />)}
     </div>
@@ -620,7 +1069,7 @@ function ConfigRow({ row, run, busy }) {
 // ---------- Raretés ----------
 export function RaritiesTab({ data, run, busy }) {
   return (
-    <div className="admin-list">
+    <div className="admin-list cols-2">
       <p className="muted">
         Nom, couleurs et seuils. « Taille de série maximale » : une rareté à seuil concerne les séries jusqu’à cette taille (vide = toutes les
         autres). Ce sont les seuils par défaut des types qui n’ont pas de raretés propres ; chaque type peut les personnaliser (tranches, numéros
@@ -704,7 +1153,7 @@ function NewRarityForm({ rarities, run, busy }) {
 export function UniqueWinsTab({ data }) {
   const wins = data.unique_wins ?? []
   return (
-    <div className="admin-list">
+    <div className="admin-list cols-2">
       <p className="muted">Chaque carte Unique (1/1) obtenue, la plus récente en premier (les 500 dernières).</p>
       {wins.length === 0 ? (
         <p className="muted">Aucune 1/1 obtenue pour l’instant.</p>
@@ -725,7 +1174,7 @@ export function UniqueWinsTab({ data }) {
 // ---------- Infos légales ----------
 export function LegalTab({ data, run, busy }) {
   return (
-    <div className="admin-list">
+    <div className="admin-list cols-2">
       <p className="muted">Ces informations apparaissent dans les conditions de vente et les mentions légales. À renseigner avant de vendre pour de vrai.</p>
       {data.legal.map((row) => <LegalRow key={row.key} row={row} run={run} busy={busy} />)}
     </div>
@@ -754,7 +1203,7 @@ export function SecurityTab({ busy, onChange }) {
   const [again, setAgain] = useState('')
   const ok = next.length >= 8 && next === again
   return (
-    <div className="admin-list">
+    <div className="admin-list narrow">
       <h3>Changer le mot de passe admin</h3>
       <label>Nouveau mot de passe (8 caractères minimum)<input type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" /></label>
       <label>Confirmer<input type="password" value={again} onChange={(e) => setAgain(e.target.value)} autoComplete="new-password" /></label>

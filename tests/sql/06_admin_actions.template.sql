@@ -46,6 +46,36 @@ select 'rien d''importé après les refus (toujours 3 types, pas de Rugby)', cou
 -- Mauvais mot de passe : refusé, rien créé
 select public.{{P}}admin_import_types('mauvais', :cat_imp, '[{"name":"Judo"}]'::jsonb) ->> 'error' as erreur_mdp;
 select count(*) as judo_non_cree from public.{{P}}types where category_id = :cat_imp and name = 'Judo';
+\echo '--- import complet : image téléversée, type secret, raretés (séries, numérotées, style) ; tout ou rien'
+select public.{{P}}admin_import_types('thomarie', :cat_imp, '[
+  {"name":"Natation","position":10,"image":"data:image/webp;base64,UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA","secret":true,
+   "rarities":[{"rarity_id":"ultra","max_series":50,"numbered_series":5,"card_style":"fullart"},{"rarity_id":"common","max_series":200,"numbered_series":0}]},
+  {"name":"Boxe","rarities":[{"rarity_id":"super","max_series":100,"numbered_series":100}]},
+  {"name":"Ski"}]'::jsonb) as import_riche;
+select t.name, t.secret, left(t.image, 11) as image, t.series_count,
+       (select string_agg(r.rarity_id || ':' || r.max_series || '/' || r.numbered_series || '/' || r.card_style, ', ' order by r.rarity_id) from public.{{P}}type_rarities r where r.type_id = t.id) as raretes
+from public.{{P}}types t where t.category_id = :cat_imp and t.name in ('Natation', 'Boxe', 'Ski') order by t.name;
+-- Boxe : super:100/100/simple, 100 séries ; Natation : secrète, image data:image/, common:200/0/simple + ultra:50/5/fullart, 200 séries ; Ski : aucun réglage propre
+\echo '--- import complet : refus (une ligne invalide annule tout, même les lignes valides avant elle)'
+select pg_temp.try('select public.{{P}}admin_import_types(''thomarie'', ' || :cat_imp || ', ''[{"name":"Valide"},{"name":"Raté","rarities":[{"rarity_id":"ultra","max_series":10,"numbered_series":20}]}]''::jsonb)');   -- numérotées > séries
+select pg_temp.try('select public.{{P}}admin_import_types(''thomarie'', ' || :cat_imp || ', ''[{"name":"Valide"},{"name":"Raté","rarities":[{"rarity_id":"inconnue","max_series":10}]}]''::jsonb)');                -- rareté inconnue
+select pg_temp.try('select public.{{P}}admin_import_types(''thomarie'', ' || :cat_imp || ', ''[{"name":"Valide"},{"name":"Raté","rarities":[{"rarity_id":"ultra","max_series":10,"card_style":"holo"}]}]''::jsonb)');   -- style inconnu
+select pg_temp.try('select public.{{P}}admin_import_types(''thomarie'', ' || :cat_imp || ', ''[{"name":"Valide"},{"name":"Raté","rarities":[{"rarity_id":"ultra","max_series":0}]}]''::jsonb)');                       -- tout à 0 série
+select pg_temp.try('select public.{{P}}admin_import_types(''thomarie'', ' || :cat_imp || ', ''[{"name":"Valide"},{"name":"Raté","rarities":[{"rarity_id":"ultra","max_series":10},{"rarity_id":"ultra","max_series":20}]}]''::jsonb)');   -- même rareté deux fois
+select pg_temp.try('select public.{{P}}admin_import_types(''thomarie'', ' || :cat_imp || ', ''[{"name":"Valide"},{"name":"Raté","secret":"oui"}]''::jsonb)');                                                      -- secret non booléen
+select pg_temp.try('select public.{{P}}admin_import_types(''thomarie'', ' || :cat_imp || ', ''[{"name":"Valide"},{"name":"Raté","rarities":"ultra"}]''::jsonb)');                                                    -- raretés pas un tableau
+select pg_temp.try('select public.{{P}}admin_import_types(''thomarie'', ' || :cat_imp || ', ''[{"name":"Valide"},{"name":"Raté","image":"data:text/html;base64,PHNjcmlwdD4="}]''::jsonb)');                            -- image intégrée non image
+select pg_temp.try('select public.{{P}}admin_import_types(''thomarie'', ' || :cat_imp || ', ''[{"name":"Valide"},{"name":"Raté","image":"data:image/svg+xml;base64,PHN2Zz4="}]''::jsonb)');                             -- svg refusé à l''import
+select count(*) filter (where name = 'Valide') as valide_non_cree, count(*) filter (where name = 'Raté') as rate_non_cree from public.{{P}}types where category_id = :cat_imp;   -- 0 / 0
+select count(*) as types_apres_les_refus from public.{{P}}types where category_id = :cat_imp;   -- 6 : Football, Tennis, Golf, Natation, Boxe, Ski
+-- Réimport : les types déjà présents sont ignorés, leurs raretés ne sont pas réappliquées
+select public.{{P}}admin_import_types('thomarie', :cat_imp, '[{"name":"Boxe","rarities":[{"rarity_id":"ultra","max_series":5}]}]'::jsonb) ->> 'skipped' as reimport_ignore;
+select string_agg(rarity_id || ':' || max_series, ', ') as boxe_inchangee from public.{{P}}type_rarities where type_id = (select id from public.{{P}}types where category_id = :cat_imp and name = 'Boxe');   -- super:100
+\echo '--- la fonction interne n''est pas appelable depuis l''extérieur ; l''enregistrement des raretés par l''admin reste autorisé'
+select has_function_privilege('authenticated', 'public.{{P}}apply_type_rarities(int, jsonb, boolean)', 'execute') as interne_appelable_par_un_joueur,
+       has_function_privilege('anon', 'public.{{P}}apply_type_rarities(int, jsonb, boolean)', 'execute') as interne_appelable_par_anon,
+       has_function_privilege('authenticated', 'public.{{P}}admin_save_type_rarities(text, int, jsonb, boolean)', 'execute') as public_appelable_avec_mdp;   -- f / f / t
+
 delete from public.{{P}}categories where id = :cat_imp;
 
 \echo '--- suppression forcée : catégorie entamée, avec annonces, enchère, offre, favori'

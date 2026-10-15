@@ -22,7 +22,7 @@ insert into public.{{P}}config (key, value, description) values
   ('regen_amount',           10,   'Boosters gagnés à chaque recharge'),
   ('max_boosters',           10,   'Plafond de boosters en stock'),
   ('rarity_exponent',        0,    'Poids d''une carte = taille_de_série ^ exposant. 0 = chaque carte disponible a la même chance (recommandé), 1 = les petites séries sont très difficiles à obtenir'),
-  ('direct_sell_price',      1,    'Pièces reçues pour une revente directe (la carte retourne dans les boosters)'),
+  ('direct_sell_price',      1,    'Pièces reçues pour une revente directe (la carte est retirée du jeu pour de bon)'),
   ('auction_minutes',        60,   'Durée d''une enchère (minutes)'),
   ('auction_start_price',    1,    'Prix de départ d''une enchère (pièces)'),
   ('auction_min_increment',  1,    'Surenchère minimale (pièces)'),
@@ -35,6 +35,9 @@ insert into public.{{P}}config (key, value, description) values
   ('stripe_pack_price_cents', 99,  'Prix d''un pack en centimes d''euro (99 = 0,99 EUR)'),
   ('cgv_version',            3,    'Version des conditions générales de vente. À incrémenter à chaque modification du texte : les joueurs doivent alors ré-accepter avant de payer')
 on conflict (key) do nothing;
+-- Libellé corrigé : la revente directe retire la carte du jeu (elle ne retourne plus dans les boosters). Sans effet une fois corrigé.
+update public.{{P}}config set description = 'Pièces reçues pour une revente directe (la carte est retirée du jeu pour de bon)'
+where key = 'direct_sell_price' and description like '%retourne dans les boosters%';
 -- Le nombre de séries se règle maintenant par catégorie (console admin)
 delete from public.{{P}}config where key = 'max_series';
 
@@ -1578,7 +1581,7 @@ end $$;
 
 -- ---------- Marché ----------
 
--- Revente directe : la carte retourne dans les boosters, tu reçois des pièces.
+-- Revente directe : la carte est retirée du jeu pour de bon, tu reçois des pièces.
 -- Refusée pour une catégorie terminée : la progression est définitive.
 drop function if exists public.{{P}}sell_direct(int, int, int);
 create or replace function public.{{P}}sell_direct(p_type int, p_base text, p_series int, p_number int)
@@ -2567,14 +2570,16 @@ begin
 end $$;
 
 -- Import en masse de types dans une catégorie : [{"name":"Football","position":1,"image":"⚽"}, ...] (500 max).
--- image : vide, un emoji (16 caractères max) ou une adresse https://. position vide = à la suite des types existants.
+-- image : vide, un emoji (16 caractères max), une adresse https:// ou une image intégrée (data:image/png|jpeg|webp|gif ; 300 000
+-- caractères max). position vide = à la suite des types existants. secret : booléen facultatif. rarities : tableau facultatif de
+-- {rarity_id, max_series, numbered_series, card_style}, mêmes règles que admin_save_type_rarities (absent = réglages par défaut).
 -- Tout ou rien : une ligne invalide annule l'import entier ('invalid_import_row:N', N = rang dans le fichier). Un type dont
 -- le nom existe déjà dans la catégorie (casse ignorée) est ignoré, pour pouvoir réimporter un fichier sans doublons.
 create or replace function public.{{P}}admin_import_types(p_password text, p_category int, p_types jsonb)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   err text := public.{{P}}admin_guard(p_password);
-  x jsonb; i int := 0; v_name text; v_image text; v_pos int; v_created int := 0; v_skipped int := 0;
+  x jsonb; i int := 0; v_name text; v_image text; v_pos int; v_created int := 0; v_skipped int := 0; v_id int; v_secret boolean;
 begin
   if err is not null then return jsonb_build_object('error', err); end if;
   if not exists (select 1 from public.{{P}}categories where id = p_category) then raise exception 'not_found'; end if;
@@ -2590,22 +2595,35 @@ begin
     elsif (x->>'position') ~ '^[0-9]{1,6}$' then v_pos := (x->>'position')::int;
     else raise exception 'invalid_import_row:%', i;
     end if;
-    -- image : vide, https:// (sans espace, 2000 caractères max) ou emoji court ; http:, javascript:, data:... refusés
+    -- image : vide, https:// (sans espace, 2000 caractères max), image intégrée png/jpeg/webp/gif ou emoji court ; http:, javascript:... refusés
     if v_image <> '' then
       if v_image ~ '^https://' then
         if v_image ~ '\s' or char_length(v_image) > 2000 then raise exception 'invalid_import_row:%', i; end if;
+      elsif v_image ~ '^data:image/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$' then
+        if char_length(v_image) > 300000 then raise exception 'invalid_import_row:%', i; end if;
       elsif v_image ~ '^[A-Za-z][A-Za-z0-9+.-]*:' or char_length(v_image) > 16 then
         raise exception 'invalid_import_row:%', i;
       end if;
     end if;
+    if x ? 'secret' and jsonb_typeof(x->'secret') not in ('boolean', 'null') then raise exception 'invalid_import_row:%', i; end if;
+    v_secret := coalesce((x->>'secret')::boolean, false);
+    if x ? 'rarities' and jsonb_typeof(x->'rarities') not in ('array', 'null') then raise exception 'invalid_import_row:%', i; end if;
 
     if exists (select 1 from public.{{P}}types where category_id = p_category and lower(name) = lower(v_name)) then
       v_skipped := v_skipped + 1;
       continue;
     end if;
-    insert into public.{{P}}types (category_id, name, image, position)
+    insert into public.{{P}}types (category_id, name, image, position, secret)
     values (p_category, v_name, v_image,
-            coalesce(v_pos, (select coalesce(max(position), 0) + 1 from public.{{P}}types where category_id = p_category)));
+            coalesce(v_pos, (select coalesce(max(position), 0) + 1 from public.{{P}}types where category_id = p_category)), v_secret)
+    returning id into v_id;
+    if jsonb_typeof(x->'rarities') = 'array' and jsonb_array_length(x->'rarities') > 0 then
+      begin
+        perform public.{{P}}apply_type_rarities(v_id, x->'rarities', null);
+      exception when others then
+        raise exception 'invalid_import_row:%', i;   -- une rareté invalide annule tout l'import (tout ou rien)
+      end;
+    end if;
     v_created := v_created + 1;
   end loop;
 
@@ -2698,15 +2716,12 @@ end $$;
 -- Tableau vide : le type retrouve les réglages par défaut (table rarities). null : inchangé. p_secret : type secret (caché aux
 -- joueurs tant qu'ils n'en ont aucune carte) ; null : inchangé.
 -- Refusé si des cartes déjà tirées ne rentreraient plus dans les nouveaux réglages (rareté retirée ou série réduite).
-create or replace function public.{{P}}admin_save_type_rarities(
-  p_password text, p_type int, p_rarities jsonb default null, p_secret boolean default null
-)
-returns jsonb language plpgsql security definer set search_path = public as $$
-declare
-  err text := public.{{P}}admin_guard(p_password);
-  v_n int; v_top int;
+-- Logique commune (sans mot de passe) : enregistre les raretés d'un type et son statut secret. Appelée par admin_save_type_rarities
+-- et par admin_import_types ; elle n'est pas appelable directement (droits retirés plus bas).
+create or replace function public.{{P}}apply_type_rarities(p_type int, p_rarities jsonb, p_secret boolean)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_n int; v_top int;
 begin
-  if err is not null then return jsonb_build_object('error', err); end if;
   if not exists (select 1 from public.{{P}}types where id = p_type) then raise exception 'not_found'; end if;
 
   if p_rarities is not null then
@@ -2764,6 +2779,16 @@ begin
   end if;
 
   if p_secret is not null then update public.{{P}}types set secret = p_secret where id = p_type; end if;
+end $$;
+
+create or replace function public.{{P}}admin_save_type_rarities(
+  p_password text, p_type int, p_rarities jsonb default null, p_secret boolean default null
+)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare err text := public.{{P}}admin_guard(p_password);
+begin
+  if err is not null then return jsonb_build_object('error', err); end if;
+  perform public.{{P}}apply_type_rarities(p_type, p_rarities, p_secret);
   return jsonb_build_object('ok', true);
 end $$;
 
@@ -2845,6 +2870,7 @@ revoke all on function public.{{P}}admin_set_config(text, text, numeric)        
 revoke all on function public.{{P}}admin_save_rarity(text, text, text, int, text, text, text) from public, anon;
 revoke all on function public.{{P}}admin_create_rarity(text, text, text, int, text, text, text, text) from public, anon;
 revoke all on function public.{{P}}admin_save_type_rarities(text, int, jsonb, boolean)             from public, anon;
+revoke all on function public.{{P}}apply_type_rarities(int, jsonb, boolean)                           from public, anon, authenticated;
 revoke all on function public.{{P}}admin_delete_rarity(text, text)                                from public, anon;
 revoke all on function public.{{P}}admin_set_legal(text, text, text)                 from public, anon;
 revoke all on function public.{{P}}album_view(int)                                   from public, anon;

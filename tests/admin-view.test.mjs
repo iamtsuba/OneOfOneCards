@@ -12,7 +12,7 @@ const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const out = mkdtempSync(path.join(root, 'tests', '.out-admin-'))
 await build({
   stdin: {
-    contents: "export { CategoriesTab, TypesTab, ConfigTab, RaritiesTab, UniqueWinsTab, LegalTab, SecurityTab } from './src/components/Admin.jsx'; export { GameContext } from './src/game.js'",
+    contents: "export { AdminShell, CategoriesTab, TypesTab, ConfigTab, RaritiesTab, UniqueWinsTab, LegalTab, SecurityTab } from './src/components/Admin.jsx'; export { GameContext } from './src/game.js'",
     resolveDir: root, loader: 'js',
   },
   bundle: true, format: 'esm', platform: 'node', jsx: 'automatic', outfile: path.join(out, 'bundle.mjs'),
@@ -98,6 +98,58 @@ ok('onglet Infos légales : s’affiche', clean(show(M.LegalTab, { data })))
 const uw = show(M.UniqueWinsTab, { data })
 ok('onglet 1/1 gagnées : s’affiche avec l’email du joueur', clean(uw) && /joueur@example\.com/.test(uw))
 ok('onglet Sécurité : s’affiche', clean(show(M.SecurityTab, { onChange: async () => true })))
+
+// ---------- Console pour PC (≥ 1100 px) : navigation à gauche, liste à gauche, détail en haut à droite, raretés dessous ----------
+{
+  const shell = (props) => show(M.AdminShell, { data, tab: 'types', onTab: () => {}, error: '', notice: '', onChangePassword: async () => true, onClose: () => {}, ...props })
+  const wideHtml = shell({ wide: true })
+  const narrowHtml = shell({ wide: false })
+  ok('PC : le panneau passe en mise en page large avec une navigation verticale (un onglet par module)', wideHtml !== null && /legal-panel admin wide/.test(wideHtml) && /<nav class="admin-nav"[^>]*aria-orientation="vertical"/.test(wideHtml) && (wideHtml.match(/class="admin-nav-item/g) || []).length === 7)
+  ok('PC : l’onglet actif est marqué et les compteurs (catégories, types) sont affichés', /admin-nav-item on"[^>]*>Types<span class="nav-count">\d+<\/span>/.test(wideHtml) && /aria-selected="true"/.test(wideHtml) && /Catégories<span class="nav-count">/.test(wideHtml))
+  ok('PC : les écrans à deux colonnes gèrent eux-mêmes leur défilement (admin-main fill) ; les autres défilent d’un bloc', /admin-main fill/.test(wideHtml) && !/admin-main fill/.test(shell({ wide: true, tab: 'config' })))
+  ok('mobile : inchangé (pastilles horizontales, pas de navigation verticale ni de panneau large)', /class="chips admin-tabs"/.test(narrowHtml) && !/admin-nav/.test(narrowHtml) && !/legal-panel admin wide/.test(narrowHtml) && !/class="md /.test(narrowHtml))
+  ok('PC : le nombre de joueurs est dans l’en-tête (pas sous le titre)', /admin-players/.test(wideHtml) && !/admin-players/.test(narrowHtml))
+
+  const cat0 = data.categories[0]
+  const list = data.types.filter((t) => t.category_id === cat0.id)              // catégorie ouverte par défaut (aucun réglage propre)
+  const withRows = data.types.find((t) => data.type_rarities.some((r) => r.type_id === t.id))
+  const listR = data.types.filter((t) => t.category_id === withRows.category_id) // catégorie du type aux raretés propres
+  const without = list.find((t) => !data.type_rarities.some((r) => r.type_id === t.id))
+  const wt = (props) => show(M.TypesTab, { data, wide: true, ...props })
+  const empty = wt({})
+  ok('types PC : à gauche, la liste de TOUS les types de la catégorie (nom, position), avec recherche, « Nouveau » et « Importer »', /class="md types-wide"/.test(empty) && /aria-label="Types"/.test(empty) && list.every((t) => empty.includes(`>${t.name}</strong>`)) && /type="search"/.test(empty) && />\+ Nouveau</.test(empty) && />Importer</.test(empty))
+  ok('types PC : sans sélection, un message invite à choisir un type', /md-empty/.test(empty) && !/ted-detail/.test(empty))
+  const ed = wt({ initialSelection: withRows.id })
+  ok('types PC : le type choisi est marqué dans la liste', new RegExp(`md-item on"[^>]*aria-current="true"`).test(ed) && (ed.match(/md-item on/g) || []).length === 1)
+  ok('types PC : le détail du type est EN HAUT et ses raretés DESSOUS', ed.indexOf('aria-label="Détail du type"') > 0 && ed.indexOf('aria-label="Détail du type"') < ed.indexOf('aria-label="Raretés du type"'))
+  ok('types PC : le détail porte nom, position, image, secret et UN bouton « Enregistrer le type »', /ted-fields/.test(ed) && ed.includes(`value="${withRows.name}"`) && /Image \(emoji ou adresse https/.test(ed) && /Type secret/.test(ed) && (ed.match(/Enregistrer le type/g) || []).length === 1)
+  const rangeN = data.rarities.filter((r) => r.kind === 'range').length
+  ok('types PC : les raretés forment un tableau, une ligne par rareté, avec séries, numérotées, style, nombre de cartes et numéros visibles', /<table class="rar-table"/.test(ed) && (ed.match(/<tr class="[^"]*"[^>]*><th scope="row">/g) || []).length === rangeN && /<th>Séries<\/th><th>Numérotées<\/th><th>Style<\/th><th>Cartes<\/th><th>N° visibles<\/th>/.test(ed))
+  ok('types PC : un type aux raretés propres a des champs modifiables (séries, numérotées, style) pour chaque rareté', (ed.match(/aria-label="Séries max\. [^"]*"/g) || []).length === rangeN && (ed.match(/aria-label="Séries numérotées [^"]*"/g) || []).length === rangeN && (ed.match(/aria-label="Style de carte [^"]*"/g) || []).length === rangeN && /Revenir aux réglages par défaut/.test(ed))
+  ok('types PC : le nombre de cartes de chaque rareté est calculé (20 séries = 210 cartes)', /<td class="num">210<\/td>/.test(ed.replace(/ | /g, '')) || /210/.test(ed))
+  ok('types PC : l’aperçu montre les deux styles de carte (Simple, FullArt)', /aria-label="Aperçu des deux styles de carte"/.test(ed) && (ed.match(/<figure/g) || []).length === 2 && /<figcaption>Simple/.test(ed) && /<figcaption>FullArt/.test(ed))
+  ok('types PC : « Appliquer ces raretés à d’autres types » propose les AUTRES types de la catégorie', /Appliquer ces raretés à d’autres types/.test(ed) && listR.filter((t) => t.id !== withRows.id).every((t) => new RegExp(`<span>${t.name.replace(/[?]/g, '\\?')}</span>`).test(ed)))
+  const ed2 = wt({ initialSelection: without.id })
+  ok('types PC : un type sans réglage propre montre ses réglages par défaut en lecture seule, avec « Personnaliser »', !/aria-label="Séries /.test(ed2) && /<table class="rar-table"/.test(ed2) && /Personnaliser les raretés de ce type/.test(ed2) && /réglages par défaut/.test(ed2))
+  const nw = wt({ initialSelection: 'new' })
+  ok('types PC : « Nouveau » ouvre un détail vide avec « Créer le type »', /Créer le type/.test(nw) && /Nouveau type/.test(nw) && !/Supprimer/.test(nw))
+  ok('types PC : un type dont des cartes sont tirées ne peut pas être supprimé ; un type vide si', (() => { const a = data.types.find((t) => t.taken > 0); const b = data.types.find((t) => t.taken === 0); return (!a || !/>Supprimer</.test(wt({ initialSelection: a.id }))) && (!b || />Supprimer</.test(wt({ initialSelection: b.id }))) })())
+  const imp = wt({ initialSelection: 'import' })
+  ok('import PC : fichier de types, photos en plusieurs fichiers, modèle complet, format expliqué', /Importer des types/.test(imp) && /type="file"[^>]*multiple/.test(imp) && /Télécharger un modèle complet/.test(imp) && /nom ; position ; image ; secret ; raretés/.test(imp) && /nom du fichier/.test(imp))
+  ok('import PC : aucun bouton d’import tant que rien n’est chargé', !/Importer \d+ type/.test(imp) && !/Rien de nouveau/.test(imp))
+  ok('types PC : aucun texte parasite (undefined, NaN) dans les vues', [empty, ed, ed2, nw, imp].every(clean))
+  const secretType = data.types.find((t) => t.secret)
+  ok('types PC : la liste signale les types secrets et le nombre de cartes tirées', /· secret/.test(wt({ initialSelection: secretType.id })) && /tirées/.test(ed))
+
+  const cw = show(M.CategoriesTab, { data, wide: true })
+  ok('catégories PC : liste à gauche (avec statut et avancement), fiche à droite avec l’aperçu du booster', /class="md cats-wide"/.test(cw) && /aria-label="Catégories"/.test(cw) && data.categories.every((c) => cw.includes(`>${c.name}</strong>`)) && /\+ Nouvelle catégorie/.test(cw) && /class="cat-cols"/.test(cw) && /class="admin-pack-preview"/.test(cw) && clean(cw))
+  ok('catégories PC : la première catégorie est ouverte et marquée dans la liste', /md-item on"/.test(cw) && (cw.match(/md-item on/g) || []).length === 1)
+  for (const tab of ['config', 'rarities', 'uniques', 'legal', 'security']) {
+    const h = shell({ wide: true, tab })
+    ok(`PC : l’écran « ${tab} » s’affiche sans erreur`, h !== null && clean(h) && /legal-panel admin wide/.test(h))
+  }
+  ok('PC : les écrans de liste passent en grille à plusieurs colonnes (cols-2), la sécurité reste étroite', /admin-list cols-2/.test(shell({ wide: true, tab: 'config' })) && /admin-list cols-2/.test(shell({ wide: true, tab: 'rarities' })) && /admin-list narrow/.test(shell({ wide: true, tab: 'security' })))
+}
 
 if (bad) { console.error(`\n${bad} contrôle(s) en échec`); process.exit(1) }
 console.log('\nConsole admin (rendu) : tous les contrôles sont passés.')
