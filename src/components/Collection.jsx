@@ -124,7 +124,7 @@ export default function Collection({ goMarket }) {
   )
 }
 
-// Statistiques de l'album de la catégorie : le full set compte tous les emplacements SAUF la rareté Unique, qui est un bonus
+// Statistiques de l'album de la catégorie : le full set compte tous les emplacements SAUF la rareté Unique, qui n'en fait pas partie (cartes 1/1)
 export function AlbumStats({ rows, rarityMap }) {
   if (!rows) return <div className="collection-head"><p className="fine">Chargement de l’album…</p></div>
   const st = albumStats(rows, rarityMap)
@@ -138,7 +138,7 @@ export function AlbumStats({ rows, rarityMap }) {
       <div className="progress" aria-hidden="true"><span style={{ width: `${Math.max(base.pct, base.filled ? 1 : 0)}%` }} /></div>
       {base.complete && <p className="album-complete">★ Full set complet !</p>}
       {bonus.total > 0 && (
-        <p className="fine">Bonus Unique, hors full set : <strong>{bonus.filled}/{bonus.total}</strong></p>
+        <p className="fine">Cartes 1/1, hors full set : <strong>{bonus.filled}/{bonus.total}</strong></p>
       )}
       <p className="fine">
         {st.fillable > 0
@@ -151,7 +151,7 @@ export function AlbumStats({ rows, rarityMap }) {
             <li key={e.id} style={{ '--r1': rarityMap[e.id]?.color, '--r2': rarityMap[e.id]?.color2 }}>
               <i className="rarity-dot" aria-hidden="true" />
               {rarityMap[e.id]?.name ?? e.id} <strong>{e.filled}/{e.total}</strong>
-              {e.bonus && <span className="muted"> · bonus</span>}
+              {e.bonus && <span className="muted"> · 1/1</span>}
             </li>
           ))}
         </ul>
@@ -177,7 +177,7 @@ export function Album({ rows, catalog, rarityMap, onRefresh }) {
     <>
       <p className="fine">
         Un emplacement par rareté de chaque carte : clique-en un pour choisir, parmi tes exemplaires de cette rareté, celui qui y figure.
-        Une carte placée dans l’album ne peut plus être vendue. La rareté Unique est un bonus : elle ne compte pas dans le full set.
+        Une carte placée dans l’album ne peut plus être vendue. Les cartes 1/1 (rareté Unique) ne comptent pas dans le full set.
       </p>
       <div className="album-types">
         {groups.map((g) => {
@@ -192,7 +192,7 @@ export function Album({ rows, catalog, rarityMap, onRefresh }) {
                 <h3>{g.name}</h3>
                 {setNo && <span className="muted">n° {setNo.no}/{setNo.total}{setNo.secret ? ' · secrète' : ''}</span>}
                 <span className="fine album-type-count">
-                  {done}/{base.length}{bonus.length > 0 ? ` · bonus ${bonusDone}/${bonus.length}` : ''}
+                  {done}/{base.length}{bonus.length > 0 ? ` · 1/1 : ${bonusDone}/${bonus.length}` : ''}
                 </span>
               </header>
               <ul className="album-slots">
@@ -207,7 +207,7 @@ export function Album({ rows, catalog, rarityMap, onRefresh }) {
                         className={`album-slot ${picked ? 'filled' : owned > 0 ? 'fillable' : 'missing'} ${bonusSlot ? 'bonus' : ''}`}
                         style={{ '--r1': rarity?.color, '--r2': rarity?.color2 }}
                         disabled={!picked && owned === 0}
-                        aria-label={`${g.name}, ${rarity?.name}${bonusSlot ? ' (bonus, hors full set)' : ''} : ${picked ? 'rempli, changer' : owned > 0 ? 'à remplir' : 'aucune carte'}`}
+                        aria-label={`${g.name}, ${rarity?.name}${bonusSlot ? ' (1/1, hors full set)' : ''} : ${picked ? 'rempli, changer' : owned > 0 ? 'à remplir' : 'aucune carte'}`}
                         onClick={() => setPicker({ typeId: g.typeId, typeName: g.name, rarityId: slot.rarity_id, hasPick: picked })}
                       >
                         <span className="album-card-slot">
@@ -217,7 +217,7 @@ export function Album({ rows, catalog, rarityMap, onRefresh }) {
                             <span className="album-empty"><TypeArt type={catalog.typeMap[g.typeId]} /></span>
                           )}
                         </span>
-                        <span className="album-slot-label">{rarity?.name}{bonusSlot && <small className="album-bonus-tag">bonus</small>}</span>
+                        <span className="album-slot-label">{rarity?.name}{bonusSlot && <small className="album-bonus-tag">1/1</small>}</span>
                         {!picked && <span className="album-slot-hint">{owned > 0 ? `À remplir (${owned})` : 'Manquante'}</span>}
                       </button>
                     </li>

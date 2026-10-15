@@ -93,15 +93,15 @@ bonusRows[0].pick_series = 10; bonusRows[0].pick_number = 7   // une Commune rem
 bonusRows[3].pick_series = 1; bonusRows[3].pick_number = 1    // une Unique remplie (bonus)
 const bs = renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows: bonusRows, rarityMap: rm2 })))
 ok('stats : le full set exclut les Unique (1 rempli sur 6, pas sur 8)', /<strong>1<\/strong> emplacement rempli sur 6/.test(bs))
-ok('stats : le bonus Unique est annoncé à part (1/2), hors full set', /Bonus Unique, hors full set : <strong>1\/2<\/strong>/.test(bs))
-ok('stats : la puce Unique est marquée bonus', /Unique <strong>1\/2<\/strong><span class="muted"> · bonus/.test(bs))
+ok('stats : les cartes 1/1 sont annoncées à part (1/2), hors full set, sans le mot « bonus »', /Cartes 1\/1, hors full set : <strong>1\/2<\/strong>/.test(bs) && !/[Bb]onus/.test(bs))
+ok('stats : la puce Unique est marquée 1/1', /Unique <strong>1\/2<\/strong><span class="muted"> · 1\/1</.test(bs))
 const allBase = bonusRows.map((r) => (r.rarity_id === 'unique' ? r : { ...r, pick_series: 5, pick_number: 2 }))
 ok('stats : « Full set complet » sans avoir aucune Unique', /Full set complet/.test(renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows: allBase.map((r) => ({ ...r, pick_series: r.rarity_id === 'unique' ? null : 5 })), rarityMap: rm2 })))))
 ok('stats : pas de « Full set complet » tant qu’il manque un emplacement', !/Full set complet/.test(bs))
 const catalog2 = { ...catalog, typeMap: { 1: { id: 1, name: 'Carte 1', image: '🐱' }, 2: { id: 2, name: 'Carte 2', image: '😾' } }, checklist: (id) => ({ no: id, total: 2, secret: false }) }
 const bAlbum = renderToStaticMarkup(wrap(React.createElement(Album, { rows: bonusRows, catalog: catalog2, rarityMap: rm2, onRefresh: () => {} })))
-ok('album : compteur par carte sans les Unique, bonus à côté (carte 1 : 1/3 · bonus 1/1 ; carte 2 : 0/3 · bonus 0/1)', /album-type-count">1\/3 · bonus 1\/1</.test(bAlbum) && /album-type-count">0\/3 · bonus 0\/1</.test(bAlbum))
-ok('album : emplacement Unique marqué « bonus » (classe et étiquette), les autres non', (bAlbum.match(/album-slot [a-z]+ bonus/g) || []).length === 2 && (bAlbum.match(/album-bonus-tag">bonus</g) || []).length === 2)
+ok('album : compteur par carte sans les Unique, 1/1 à côté (carte 1 : 1/3 · 1/1 : 1/1 ; carte 2 : 0/3 · 1/1 : 0/1)', /album-type-count">1\/3 · 1\/1 : 1\/1</.test(bAlbum) && /album-type-count">0\/3 · 1\/1 : 0\/1</.test(bAlbum))
+ok('album : emplacement Unique marqué « 1/1 » (étiquette), les autres non, et plus aucun mot « bonus » à l’écran', (bAlbum.match(/album-slot [a-z]+ bonus/g) || []).length === 2 && (bAlbum.match(/album-bonus-tag">1\/1</g) || []).length === 2 && !/>[^<]*[Bb]onus[^<]*</.test(bAlbum) && !/aria-label="[^"]*bonus/.test(bAlbum))
 ok('album : les Unique restent visibles (8 emplacements au total)', (bAlbum.match(/class="album-slot /g) || []).length === 8)
 
 // ---- Sélecteur de l'album : 200 cartes masquées = 1 proposition, + 3 numérotées = 4
