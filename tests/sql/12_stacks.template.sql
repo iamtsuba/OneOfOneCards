@@ -32,7 +32,7 @@ insert into public.{{P}}cards (type_id, series, number, owner_id) values
   (1, 3, 2, :A),                                                                   -- Ultra Rare à numéro VISIBLE (série 3)
   (1, 10, 5, :A),                                                                  -- Ultra Rare à numéro masqué (série 10)
   (1, 2, 1, :A), (1, 2, 2, :A), (1, 1, 1, :A),                                     -- Alpha, Omega et Unique à numéro visible
-  (1, 15, 1, :A), (1, 15, 15, :A);                                                 -- Alpha et Omega à numéro masqué
+  (1, 15, 1, :A), (1, 15, 15, :A);                                                 -- 1/15 et 15/15, série à numéro masqué : plus Alpha/Omega, mais Ultra Rare comme le reste de la série
 
 \echo '=== ma collection : une ligne par carte à numéro visible, une pile par (type, rareté) pour les numéros masqués'
 select kind, rarity_id, series, number, qty, sellable from pg_temp.cv(:cat) where type_id = 1 order by kind desc, rarity_id, series, number;
@@ -92,14 +92,17 @@ update public.{{P}}categories set closed = true where id = :cat;
 select pg_temp.try('select public.{{P}}sell_direct_many(1, ''ultra'', 1)');           -- category_closed
 update public.{{P}}categories set closed = false where id = :cat;
 
-\echo '=== mise en vente d''UNE carte de la pile, une par une'
+\echo '=== mise en vente d''UNE carte de la pile, une par une : la pile Ultra Rare compte 3 cartes (10/5, 15/1, 15/15)'
 select (public.{{P}}list_stack_card(1, 'ultra', 'buy_now', 5) ->> 'listing_id')::bigint as lid \gset
-select count(*) as annonces_actives from public.{{P}}listings where type_id = 1 and series = 10 and number = 5 and status = 'active';
+select count(*) as annonce_de_la_plus_grande_serie from public.{{P}}listings where type_id = 1 and series = 15 and number = 15 and status = 'active';
 select kind, qty, sellable from pg_temp.cv(:cat) where type_id = 1 and rarity_id = 'ultra' and kind = 'stack';
-select pg_temp.try('select public.{{P}}list_stack_card(1, ''ultra'', ''buy_now'', 5)');   -- not_enough_cards : l'unique carte masquée est en vente
+select pg_temp.try('select public.{{P}}list_stack_card(1, ''ultra'', ''lot'', 5)');       -- invalid_kind (il reste des cartes vendables)
+select (public.{{P}}list_stack_card(1, 'ultra', 'auction') ->> 'listing_id') is not null as deuxieme_carte_aux_encheres;
+select (public.{{P}}list_stack_card(1, 'ultra', 'buy_now', 7) ->> 'listing_id') is not null as troisieme_carte;
+select kind, qty, sellable from pg_temp.cv(:cat) where type_id = 1 and rarity_id = 'ultra' and kind = 'stack';
+select pg_temp.try('select public.{{P}}list_stack_card(1, ''ultra'', ''buy_now'', 5)');   -- not_enough_cards : les 3 sont en vente
 select pg_temp.try('select public.{{P}}list_stack_card(1, ''common'', ''buy_now'', 5)');  -- not_enough_cards : seule la carte de l'album reste
-select pg_temp.try('select public.{{P}}list_stack_card(1, ''alpha'', ''lot'', 5)');       -- invalid_kind
-select (public.{{P}}list_stack_card(1, 'alpha', 'auction') ->> 'listing_id') is not null as alpha_masquee_mise_aux_encheres;
+select pg_temp.try('select public.{{P}}list_stack_card(1, ''alpha'', ''buy_now'', 5)');   -- not_enough_cards : plus d'Alpha à numéro masqué
 
 \echo '=== accepter une offre = vendre : refusé pour une carte de l''album (le refus reste possible)'
 set request.jwt.claim.sub = :B;

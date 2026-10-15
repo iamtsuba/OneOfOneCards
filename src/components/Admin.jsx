@@ -577,7 +577,7 @@ export function RaritiesTab({ data, run, busy }) {
       {data.rarities.map((r) => <RarityForm key={r.id} rarity={r} run={run} busy={busy} />)}
       <h3>Nouvelle rareté</h3>
       <p className="muted">
-        Unique, Alpha et Omega sont fixes (1/1, 1/m, m/m) : on ne peut ajouter qu’une rareté « à seuil », entre les raretés existantes. Elle
+        Unique, Alpha et Omega sont fixes (1/1, 1/m, m/m) ; Alpha et Omega ne concernent que les séries dont le numéro est visible (ailleurs, ces cartes ont la rareté de leur tranche). On ne peut ajouter qu’une rareté « à seuil », entre les raretés existantes. Elle
         devient un seuil par défaut ; pour l’utiliser sur un type qui a déjà ses propres raretés, ajoute-la dans sa fiche (onglet « Types »).
       </p>
       <NewRarityForm key={`new-rarity-${data.rarities.length}`} rarities={data.rarities} run={run} busy={busy} />

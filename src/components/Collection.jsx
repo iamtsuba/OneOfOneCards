@@ -387,7 +387,7 @@ export function StackModal({ stack, catalog, rarityMap, onClose, onChanged, onLi
                 <p className="muted">Aucune carte vendable dans cette pile (elles sont en vente ou dans l’album).</p>
               ) : (
                 <>
-                  <p className="muted">Tu reçois {price} pièce{price > 1 ? 's' : ''} par carte. Les cartes retournent dans les boosters.</p>
+                  <p className="muted">Tu reçois {price} pièce{price > 1 ? 's' : ''} par carte. Les cartes sont définitivement retirées du jeu : elles ne reviendront plus dans les boosters.</p>
                   <div className="stack-qty">
                     <button type="button" className="btn ghost icon" onClick={() => setQty(Math.max(n - 1, 1))} disabled={busy || n <= 1} aria-label="Une carte de moins">−</button>
                     <input type="number" inputMode="numeric" min="1" max={info.free} value={n} aria-label="Nombre de cartes à vendre"

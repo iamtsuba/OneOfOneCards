@@ -142,7 +142,7 @@ export default function CardModal({ sel, rarity, onClose, onChanged, onRefresh, 
               ) : (
                 <>
                   <p className="muted">
-                    Tu reçois {fmtCoins(sellPrice)}. La carte retourne dans les boosters : un autre joueur pourra la tirer.
+                    Tu reçois {fmtCoins(sellPrice)}. La carte est définitivement retirée du jeu : elle ne reviendra plus dans les boosters.
                   </p>
                   {confirm ? (
                     <div className="row">
