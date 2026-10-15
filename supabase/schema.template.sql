@@ -176,13 +176,13 @@ create table if not exists public.{{P}}type_rarities (
 );
 
 -- Migration : la rareté ne dépend plus de la catégorie. Sur une base qui avait encore des seuils par catégorie, on convertit
--- UNE fois chaque type sans raretés propres (il garde exactement ses tranches actuelles, tous les numéros visibles),
--- puis on supprime les seuils par catégorie. Sans effet sur une base neuve.
+-- UNE fois chaque type sans raretés propres (chaque rareté garde la fin de sa tranche comme nombre de séries ; TOUS les numéros
+-- restent visibles, comme avant : numbered_series = max_series), puis on supprime les seuils par catégorie. Sans effet sur une base neuve.
 do $$
 begin
   if to_regclass('public.{{P}}category_rarities') is not null then
     insert into public.{{P}}type_rarities (type_id, rarity_id, max_series, numbered_series)
-    select t.id, b.rarity_id, b.hi, b.hi - b.lo + 1
+    select t.id, b.rarity_id, b.hi, b.hi
     from public.{{P}}types t
     join public.{{P}}categories c on c.id = t.category_id
     cross join lateral (
@@ -2245,6 +2245,22 @@ begin
   where sc.sellable order by sc.series desc, sc.number desc, sc.base_rarity limit 1;
   if v_series is null then raise exception 'not_enough_cards'; end if;
   return public.{{P}}list_card(p_type, v_base, v_series, v_number, p_kind, p_price);
+end $$;
+
+-- Migration : l'ancien album gardait UN choix par carte (type). Chaque choix existant passe dans l'emplacement de la rareté AFFICHÉE
+-- de sa carte, puis la clé devient (joueur, type, rareté). Sans effet sur une base déjà migrée ou neuve.
+do $$
+begin
+  if not exists (select 1 from information_schema.columns
+                 where table_schema = 'public' and table_name = '{{P}}album_picks' and column_name = 'rarity_id') then
+    alter table public.{{P}}album_picks add column rarity_id text;
+    update public.{{P}}album_picks set rarity_id = public.{{P}}rarity_id(number, series, type_id, base_rarity);
+    alter table public.{{P}}album_picks alter column rarity_id set not null;
+    alter table public.{{P}}album_picks drop constraint {{P}}album_picks_pkey;
+    alter table public.{{P}}album_picks add primary key (user_id, type_id, rarity_id);
+    alter table public.{{P}}album_picks add constraint {{P}}album_picks_rarity_fk
+      foreign key (rarity_id) references public.{{P}}rarities (id) on delete cascade;
+  end if;
 end $$;
 
 -- Un choix d'album dont la carte n'a plus la rareté de son emplacement (réglages du type modifiés, conversion, Alpha/Omega à
