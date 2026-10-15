@@ -43,7 +43,45 @@ const headers = [
   '/assets/*', '  Cache-Control: public, max-age=31536000, immutable', '',
   '/', '  Cache-Control: no-cache', '',
   '/index.html', '  Cache-Control: no-cache', '',
-  '/version.json', '  Cache-Control: no-store', '',
+  '/version.json', '  Cache-Control: no-store', '  X-Robots-Tag: noindex', '',
 ].join('\n')
 fs.writeFileSync(path.join(dir, '_headers'), headers)
-console.log(`dist/${env} prêt : version.json (${commit.slice(0, 7)}, ${branch}) et _headers${env === 'preprod' ? ' (noindex)' : ''}`)
+
+// ---------- Référencement ----------
+// Adresse du site : VITE_SITE_URL du fichier .env.<env> (repli sur les adresses connues si le fichier manque)
+let siteUrl = env === 'prod' ? 'https://1o1cards.cc' : 'https://pp.1o1cards.cc'
+try {
+  const m = fs.readFileSync(path.join(root, `.env.${env}`), 'utf8').match(/^\s*VITE_SITE_URL\s*=\s*(\S+)\s*$/m)
+  if (m) siteUrl = m[1]
+} catch { /* pas de fichier : repli */ }
+siteUrl = siteUrl.replace(/\/+$/, '')
+
+if (env === 'prod') {
+  // Production : tout est exploré, le plan du site est indiqué
+  fs.writeFileSync(path.join(dir, 'robots.txt'), `User-agent: *\nAllow: /\n\nSitemap: ${siteUrl}/sitemap.xml\n`)
+  fs.writeFileSync(path.join(dir, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>${siteUrl}/</loc>
+    <lastmod>${new Date().toISOString().slice(0, 10)}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>
+`)
+} else {
+  // Préproduction : rien ne doit être exploré (en plus de l'en-tête X-Robots-Tag et de la balise noindex), et aucun plan de site
+  fs.writeFileSync(path.join(dir, 'robots.txt'), 'User-agent: *\nDisallow: /\n')
+}
+
+// Page d'accueil pré-rendue : du vrai texte dans le HTML, lisible sans JavaScript. Un échec ne bloque pas la mise en ligne.
+let prerendered = ''
+try {
+  const { prerender } = await import('./prerender.mjs')
+  const n = await prerender({ root, env, dir })
+  prerendered = `, page d'accueil pré-rendue (${(n / 1024).toFixed(1)} Ko)`
+} catch (e) {
+  prerendered = `, pré-rendu IGNORÉ (${e.message})`
+  console.warn(`ATTENTION : pré-rendu de la page d'accueil ignoré : ${e.message}`)
+}
+console.log(`dist/${env} prêt : version.json (${commit.slice(0, 7)}, ${branch}), _headers${env === 'preprod' ? ' (noindex)' : ''}, robots.txt${env === 'prod' ? ', sitemap.xml' : ''}${prerendered}`)

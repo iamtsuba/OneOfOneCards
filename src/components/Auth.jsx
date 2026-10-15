@@ -3,6 +3,7 @@ import { supabase } from '../supabase'
 import { explain } from '../api'
 import Brand from './Brand'
 import LegalSheet from './Legal'
+import Landing from './Landing'
 
 export default function Auth() {
   const [mode, setMode] = useState('login')
@@ -48,11 +49,12 @@ export default function Auth() {
 
   const signup = mode === 'signup'
   return (
+    <>
     <main className="auth">
       <div className="auth-card">
         <Brand size="lg" />
         <p className="auth-lead">
-          Ouvre des boosters de cartes numérotées de 1/1 à 1413/1413. Plus la série est petite, plus la carte est rare.
+          Ouvre des boosters de cartes numérotées, chacune en un seul exemplaire, et complète ton album.
         </p>
 
         <div className="segmented" role="tablist" aria-label="Mode de connexion">
@@ -86,5 +88,7 @@ export default function Auth() {
         {terms && <LegalSheet onClose={() => setTerms(false)} />}
       </div>
     </main>
+    <Landing />
+    </>
   )
 }

@@ -25,7 +25,7 @@ const ok = (name, cond) => { console.log(cond ? 'OK  ' : 'FAIL', name); if (!con
 const h = React.createElement
 
 const CASES = [
-  { mode: 'prod', prefix: 'o1ocards_', fn: 'o1ocards-checkout', auth: 'o1ocards-auth', banner: false, title: '1/1 Cards' },
+  { mode: 'prod', prefix: 'o1ocards_', fn: 'o1ocards-checkout', auth: 'o1ocards-auth', banner: false, title: '1/1 Cards – Boosters de cartes numérotées à collectionner' },
   { mode: 'preprod', prefix: 'pp_o1ocards_', fn: 'pp-o1ocards-checkout', auth: 'pp-o1ocards-auth', banner: true, title: '1/1 Cards (préprod)' },
 ]
 
