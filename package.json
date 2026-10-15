@@ -14,14 +14,15 @@
     "test:sql": "bash tests/run-sql.sh",
     "test:functions": "node tests/functions.test.mjs",
     "test:front": "node tests/front.test.mjs",
-    "test": "npm run build:all && npm run test:build && npm run test:seo && npm run test:front && npm run test:import && npm run test:bands && npm run test:albumlogic && npm run test:album && npm run test:admin && npm run test:functions && npm run test:sql",
+    "test": "npm run build:all && npm run test:build && npm run test:seo && npm run test:front && npm run test:import && npm run test:bands && npm run test:albumlogic && npm run test:album && npm run test:cardpack && npm run test:admin && npm run test:functions && npm run test:sql",
     "test:build": "node tests/build.test.mjs",
     "test:seo": "node tests/seo.test.mjs",
     "test:import": "node tests/import-types.test.mjs",
     "test:bands": "node tests/bands.test.mjs",
     "test:album": "node tests/album-view.test.mjs",
     "test:admin": "node tests/admin-view.test.mjs",
-    "test:albumlogic": "node tests/album-logic.test.mjs"
+    "test:albumlogic": "node tests/album-logic.test.mjs",
+    "test:cardpack": "node tests/card-pack.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

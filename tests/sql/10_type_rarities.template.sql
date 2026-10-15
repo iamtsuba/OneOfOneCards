@@ -80,6 +80,18 @@ select (select count(*) from public.{{P}}type_rarities where type_id = :tc) as l
 select pg_temp.try(format('select public.{{P}}admin_save_type_rarities(''thomarie'', %s, ''[{"rarity_id":"ultra","max_series":0,"numbered_series":0},{"rarity_id":"super","max_series":0}]''::jsonb)', :tc));       -- tout à 0 : refusé
 select pg_temp.try(format('select public.{{P}}admin_save_type_rarities(''thomarie'', %s, ''[{"rarity_id":"ultra","max_series":0,"numbered_series":3},{"rarity_id":"super","max_series":40}]''::jsonb)', :tc));  -- numérotées sans série : refusé
 select count(*) as type_c_inchange_apres_les_refus from public.{{P}}type_config(:tc) where rarity_id = 'super' and smax = 40;
+\echo '--- style de carte par rareté d''un type : « simple » par défaut, « fullart » au choix, autre valeur refusée'
+select (public.{{P}}admin_save_type('thomarie', null, :cat, 'Style', 'x', 98) ->> 'id')::int as td \gset
+select (public.{{P}}admin_save_type_rarities('thomarie', :td, '[{"rarity_id":"ultra","max_series":50,"numbered_series":5,"card_style":"fullart"},{"rarity_id":"super","max_series":100,"numbered_series":1},{"rarity_id":"common","max_series":200,"numbered_series":0,"card_style":"simple"}]'::jsonb) ->> 'ok')::bool as styles_enregistres;
+select rarity_id, card_style from public.{{P}}type_rarities where type_id = :td order by rarity_id;   -- common simple, super simple (défaut), ultra fullart
+select pg_temp.try(format('select public.{{P}}admin_save_type_rarities(''thomarie'', %s, ''[{"rarity_id":"ultra","max_series":50,"card_style":"holo"}]''::jsonb)', :td));   -- refusé
+select count(*) filter (where card_style = 'fullart') as fullart_apres_le_refus from public.{{P}}type_rarities where type_id = :td;   -- 1 : inchangé
+select x.card_style as style_dans_admin_data from jsonb_to_recordset(public.{{P}}admin_data('thomarie') -> 'type_rarities') as x(type_id int, rarity_id text, card_style text) where x.type_id = :td and x.rarity_id = 'ultra';   -- fullart
+select (public.{{P}}admin_save_type_rarities('thomarie', :td, '[{"rarity_id":"ultra","max_series":50,"numbered_series":5},{"rarity_id":"super","max_series":100,"numbered_series":1}]'::jsonb) ->> 'ok')::bool as resauvegarde_sans_style;
+select string_agg(rarity_id || ':' || card_style, ', ' order by rarity_id) as retour_au_style_simple from public.{{P}}type_rarities where type_id = :td;   -- super:simple, ultra:simple
+select (public.{{P}}admin_save_type_rarities('thomarie', :td, '[]'::jsonb) ->> 'ok')::bool as reglages_par_defaut;
+select count(*) as lignes_apres_retour_aux_defauts from public.{{P}}type_rarities where type_id = :td;   -- 0
+
 \echo '--- aucun ordre à respecter : Super Rare avec MOINS de séries que Ultra Rare est accepté (séries indépendantes)'
 select (public.{{P}}admin_save_type_rarities('thomarie', :tc, '[{"rarity_id":"ultra","max_series":100,"numbered_series":3},{"rarity_id":"super","max_series":40,"numbered_series":0}]'::jsonb) ->> 'ok')::bool as ordre_libre_accepte;
 select string_agg(rarity_id || ' ' || smax, ', ' order by rarity_id) as type_c_apres from public.{{P}}type_config(:tc);

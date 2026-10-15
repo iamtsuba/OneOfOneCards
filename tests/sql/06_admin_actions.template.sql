@@ -97,6 +97,27 @@ select public.{{P}}admin_save_rarity('thomarie', 'rare', 'Rare', 250, '#10b981',
 select public.{{P}}admin_set_legal('thomarie', 'seller_name', 'Thomas Test') ->> 'ok' as legal_ok, (select value from public.{{P}}legal where key='seller_name') as v;
 select public.{{P}}admin_set_legal('thomarie', 'seller_name', '') ->> 'ok' as remis;
 
+\echo '--- image de la catégorie (booster) : emoji, https ou image intégrée ; vide = « 1/1 » ; non envoyée = inchangée'
+select (public.{{P}}admin_save_category('thomarie', null, 'Test Image', 94, 50, '#ffffff', '#000000', '#000000', true, '🎞️') ->> 'id')::int as cat_img \gset
+select image as a_la_creation from public.{{P}}categories where id = :cat_img;                         -- 🎞️
+select (public.{{P}}admin_save_category('thomarie', null, 'Test Sans Image', 93, 50, '#ffffff', '#000000', '#000000', true) ->> 'id')::int as cat_sans \gset
+select image = '' as sans_p_image_a_la_creation_image_vide from public.{{P}}categories where id = :cat_sans;   -- t
+select public.{{P}}admin_delete_category('thomarie', :cat_sans) ->> 'ok' as nettoyee_sans;
+select (public.{{P}}admin_save_category('thomarie', :cat_img, 'Test Image', 94, 50, '#ffffff', '#000000', '#000000', false) ->> 'ok')::bool as enregistree_sans_p_image;
+select image as inchangee_si_non_envoyee, enabled from public.{{P}}categories where id = :cat_img;      -- 🎞️, false
+select (public.{{P}}admin_save_category('thomarie', :cat_img, 'Test Image', 94, 50, '#ffffff', '#000000', '#000000', true, 'https://exemple.test/booster.png') ->> 'ok')::bool as https_ok;
+select image as https from public.{{P}}categories where id = :cat_img;
+select (public.{{P}}admin_save_category('thomarie', :cat_img, 'Test Image', 94, 50, '#ffffff', '#000000', '#000000', true, 'data:image/png;base64,iVBORw0KGgo=') ->> 'ok')::bool as image_integree_ok;
+select pg_temp.try('select public.{{P}}admin_save_category(''thomarie'', ' || :cat_img || ', ''Test Image'', 94, 50, ''#ffffff'', ''#000000'', ''#000000'', true, ''http://exemple.test/a.png'')');          -- invalid_image
+select pg_temp.try('select public.{{P}}admin_save_category(''thomarie'', ' || :cat_img || ', ''Test Image'', 94, 50, ''#ffffff'', ''#000000'', ''#000000'', true, ''data:text/html;base64,AAAAAAAAAAAAAAAAAAAA'')');   -- invalid_image
+select pg_temp.try('select public.{{P}}admin_save_category(''thomarie'', ' || :cat_img || ', ''Test Image'', 94, 50, ''#ffffff'', ''#000000'', ''#000000'', true, repeat(''a'', 300001))');       -- image_too_large
+select (select image from public.{{P}}categories where id = :cat_img) like 'data:image/png%' as inchangee_apres_les_refus;
+select (select c ->> 'image' from jsonb_array_elements(public.{{P}}admin_data('thomarie') -> 'categories') c where (c ->> 'id')::int = :cat_img) like 'data:image/png%' as admin_data_renvoie_l_image;
+select (public.{{P}}admin_save_category('thomarie', :cat_img, 'Test Image', 94, 50, '#ffffff', '#000000', '#000000', true, '') ->> 'ok')::bool as retiree;
+select image = '' as image_vide_apres_retrait from public.{{P}}categories where id = :cat_img;
+select (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = '{{P}}admin_save_category') as une_seule_fonction;   -- 1 (pas de doublon d'ancienne signature)
+select public.{{P}}admin_delete_category('thomarie', :cat_img) ->> 'ok' as nettoyee;
+
 \echo '--- changement de mot de passe'
 select pg_temp.try('select public.{{P}}admin_change_password(''thomarie'', ''court'')');
 select public.{{P}}admin_change_password('thomarie', 'nouveau-mdp-solide') ->> 'ok' as change;

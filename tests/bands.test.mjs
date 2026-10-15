@@ -1,7 +1,7 @@
 // Teste src/bands.js avec les MÊMES cas que tests/sql/10_type_rarities.template.sql (cohérence client / base) :
 // chaque rareté a ses propres séries 1..max ; numéros visibles de la série 1 à la série numérotée de CETTE rareté.
 //   node tests/bands.test.mjs
-import { numberVisible, typeSeries, cardCount, checklistNumbers, defaultConfig, validateTypeRarities } from '../src/bands.js'
+import { numberVisible, typeSeries, cardCount, checklistNumbers, defaultConfig, validateTypeRarities, cardStyle, CARD_STYLES } from '../src/bands.js'
 
 let bad = 0
 const ok = (name, cond) => { console.log(cond ? 'OK  ' : 'FAIL', name); if (!cond) bad++ }
@@ -62,6 +62,13 @@ ok('validation : tout à 0 refusé (un type sans aucune carte)', validateTypeRar
 ok('validation : des séries numérotées sans série sont refusées (3 > 0)', validateTypeRarities([{ rarity_id: 'ultra', max_series: 0, numbered_series: 3 }, { rarity_id: 'super', max_series: 40 }]) !== '')
 ok('validation : une seule rareté dans tout le type est possible (ex. carte secrète en Légende seulement)', validateTypeRarities([{ rarity_id: 'legende', max_series: 100, numbered_series: 10 }, { rarity_id: 'ultra', max_series: '0' }, { rarity_id: 'common', max_series: '0' }]) === '')
 ok('validation : une ligne sans rareté refusée', validateTypeRarities([{ rarity_id: '', max_series: 50 }]) !== '')
+
+// Style de carte (Simple / FullArt) : par rareté de base d'un type ; Simple sans réglage
+const styled = [{ rarity_id: 'ultra', max_series: 50, numbered_series: 5, card_style: 'fullart' }, { rarity_id: 'super', max_series: 100, numbered_series: 1, card_style: 'simple' }, { rarity_id: 'rare', max_series: 200, numbered_series: 20 }]
+ok('style : Ultra Rare en FullArt, Super Rare en Simple, Rare sans style = Simple', cardStyle(styled, 'ultra') === 'fullart' && cardStyle(styled, 'super') === 'simple' && cardStyle(styled, 'rare') === 'simple')
+ok('style : une rareté absente du type, un type sans réglage ou une valeur inconnue : Simple', cardStyle(styled, 'common') === 'simple' && cardStyle([], 'ultra') === 'simple' && cardStyle(undefined, 'ultra') === 'simple' && cardStyle([{ rarity_id: 'ultra', card_style: 'holo' }], 'ultra') === 'simple')
+ok('style : deux choix, Simple et FullArt', CARD_STYLES.map((x) => x.id).join() === 'simple,fullart' && CARD_STYLES.map((x) => x.name).join() === 'Simple,FullArt')
+ok('validation : un style Simple ou FullArt est accepté, un autre refusé', validateTypeRarities([{ rarity_id: 'ultra', max_series: 50, numbered_series: 5, card_style: 'fullart' }]) === '' && validateTypeRarities([{ rarity_id: 'ultra', max_series: 50, card_style: 'holo' }]) !== '' && validateTypeRarities([{ rarity_id: 'ultra', max_series: 50 }]) === '')
 
 if (bad) { console.error(`\n${bad} contrôle(s) en échec`); process.exit(1) }
 console.log('\nRaretés par type (client) : tous les contrôles sont passés.')

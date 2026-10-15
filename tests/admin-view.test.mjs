@@ -42,6 +42,8 @@ if (cats) {
   const started = data.categories.filter((c) => c.taken > 0).length
   ok(`zone dangereuse : une par catégorie entamée (${started})`, (cats.match(/danger-zone/g) || []).length === started && /Supprimer la catégorie et tout son contenu/.test(cats))
   ok('plus de seuils de rareté par catégorie', !/Seuils de rareté de cette catégorie/.test(cats) && /raretés et leur nombre de séries ne se règlent plus par catégorie/.test(cats))
+  ok('catégorie : champ « Image du booster » et aperçu du booster (nom en haut, image au centre)', /Image du booster/.test(cats) && /class="admin-pack-preview"/.test(cats) && /class="pack-title"/.test(cats) && /Téléverser une image/.test(cats))
+  ok('catégorie : l\'aperçu du booster porte le nom de la catégorie', cats.includes(`>${data.categories[0].name}</text>`))
   ok('plus de champ « Séries (1 à N) » dans le formulaire de catégorie', !/Séries \(1 à N\)/.test(cats) && !/Le nombre de séries \(par défaut/.test(cats))
 }
 
@@ -59,7 +61,7 @@ if (typesTab) {
   ok('types : import de types présent', /Importer des types/.test(typesTab))
   // Tes trois exemples : chaque rareté a SES séries, de 1/1 à N/N, numéros visibles de 1/1 à K/K
   const t1 = data.types.find((t) => t.category_id === first.id && !t.secret)
-  const ex = [{ rarity_id: 'ultra', max_series: 50, numbered_series: 5 }, { rarity_id: 'super', max_series: 100, numbered_series: 1 }, { rarity_id: 'rare', max_series: 200, numbered_series: 20 }]
+  const ex = [{ rarity_id: 'ultra', max_series: 50, numbered_series: 5, card_style: 'fullart' }, { rarity_id: 'super', max_series: 100, numbered_series: 1, card_style: 'simple' }, { rarity_id: 'rare', max_series: 200, numbered_series: 20, card_style: 'fullart' }]
   const dataEx = { ...dataChat, type_rarities: [...data.type_rarities.filter((r) => r.type_id !== t1.id), ...ex.map((r) => ({ type_id: t1.id, ...r }))] }
   const exHtml = show(M.TypesTab, { data: dataEx })
   ok('éditeur : Ultra Rare, 50 séries, 5 numérotées → cartes de 1/1 à 50/50 (1 275 cartes), numéro visible de 1/1 à 5/5', exHtml !== null && /Ultra Rare<\/strong> : cartes de 1\/1 à 50\/50 \(1\D275 cartes\) — numéro visible de 1\/1 à 5\/5 \(séries 1 à 5\), masqué ensuite/.test(exHtml))
@@ -73,6 +75,12 @@ if (typesTab) {
   ok('éditeur : une rareté à 0 série est décrite comme absente du type', /Commune<\/strong> : absente de ce type \(0 série\)/.test(exHtml) && /min="0" max="5000"/.test(exHtml))
   ok('éditeur : explication « 0 série max. = la rareté n\'existe pas pour ce type »', /0 série max\. = la rareté n’existe pas pour ce type/.test(exHtml))
   ok('éditeur : le type secret est expliqué comme une carte mystère dans l\'album', /carte mystère/.test(exHtml))
+  // Style de carte par rareté : Simple ou FullArt, au choix pour chaque rareté d'un type
+  ok('éditeur : un choix « Style de carte » (Simple / FullArt) pour chaque rareté', (exHtml.match(/<select[^>]*>\s*<option value="simple"/g) || []).length >= rangeCount && /<option value="fullart"[^>]*>FullArt<\/option>/.test(exHtml))
+  ok('éditeur : le style enregistré est sélectionné (Ultra Rare et Rare en FullArt, Super Rare en Simple)', (exHtml.match(/<option value="fullart" selected=""/g) || []).length === 2 && !/Super Rare<\/strong> : [^<]*FullArt/.test(exHtml))
+  ok('éditeur : la description d\'une rareté FullArt le dit', /Ultra Rare<\/strong> : [^<]*style FullArt/.test(exHtml) && /Rare<\/strong> : cartes de 1\/1 à 200\/200[^<]*style FullArt/.test(exHtml))
+  ok('éditeur : l\'aperçu montre les deux styles avec l\'image du type', /class="style-previews"/.test(exHtml) && (exHtml.match(/<figure>/g) || []).length === 2 * data.types.filter((t) => t.category_id === first.id).length && /<figcaption>Simple<\/figcaption>/.test(exHtml) && /<figcaption>FullArt<\/figcaption>/.test(exHtml) && /class="card md fullart/.test(exHtml) && /class="card md"/.test(exHtml))
+  ok('éditeur sans réglage propre : style Simple partout, expliqué (et aperçu des deux styles)', /Style de carte : Simple pour toutes les raretés/.test(typesTab) && /style-previews/.test(typesTab))
   const nTypes = data.types.filter((t) => t.category_id === first.id).length
   ok('types : un bouton « Réduire » par type (déplié par défaut), et Tout réduire / Tout déplier', (typesTab.match(/aria-expanded="true"/g) || []).length === nTypes && /Tout réduire/.test(typesTab) && /Tout déplier/.test(typesTab))
   const reduced = show(M.TypesTab, { data: dataChat, initialCollapsed: data.types.map((t) => t.id) })

@@ -120,10 +120,12 @@ create table if not exists public.{{P}}categories (
   color        text not null,   -- couleur principale (fond des cartes et du booster)
   color2       text not null,   -- couleur plus soutenue
   text_color   text not null,
+  image        text not null default '',   -- image au centre du booster (emoji, adresse https ou image intégrée) ; vide = « 1/1 »
   enabled      boolean not null default true,
   closed       boolean not null default false,
   created_at   timestamptz not null default now()
 );
+alter table public.{{P}}categories add column if not exists image text not null default '';
 
 -- Un type de carte : chaque type a sa propre numérotation de 1/1 à N/N.
 -- image : un emoji, une adresse https:// ou une image intégrée (data:image/...)
@@ -172,8 +174,11 @@ create table if not exists public.{{P}}type_rarities (
   rarity_id       text not null references public.{{P}}rarities (id) on delete cascade,
   max_series      int  not null check (max_series between 1 and 5000),
   numbered_series int  not null default 0 check (numbered_series >= 0),
+  card_style      text not null default 'simple' check (card_style in ('simple', 'fullart')),   -- simple : image dans un cadre ; fullart : image sur toute la carte
   primary key (type_id, rarity_id)
 );
+-- Bases créées avant : le style devient « simple » (le dessin actuel de la carte) pour toutes les raretés
+alter table public.{{P}}type_rarities add column if not exists card_style text not null default 'simple' check (card_style in ('simple', 'fullart'));
 
 -- Migration : la rareté ne dépend plus de la catégorie. Sur une base qui avait encore des seuils par catégorie, on convertit
 -- UNE fois chaque type sans raretés propres (chaque rareté garde la fin de sa tranche comme nombre de séries ; TOUS les numéros
@@ -2396,7 +2401,7 @@ begin
   return jsonb_build_object(
     'categories', (select coalesce(jsonb_agg(jsonb_build_object(
         'id', c.id, 'name', c.name, 'position', c.position, 'series_count', c.series_count,
-        'color', c.color, 'color2', c.color2, 'text_color', c.text_color, 'enabled', c.enabled, 'closed', c.closed,
+        'color', c.color, 'color2', c.color2, 'text_color', c.text_color, 'image', c.image, 'enabled', c.enabled, 'closed', c.closed,
         'taken', public.{{P}}category_taken(c.id), 'total', public.{{P}}category_total(c.id)
       ) order by c.position, c.id), '[]'::jsonb) from public.{{P}}categories c),
     'types', (select coalesce(jsonb_agg(jsonb_build_object(
@@ -2405,7 +2410,8 @@ begin
         'taken', coalesce((select sum(s.taken) from public.{{P}}series_taken s where s.type_id = t.id), 0)
       ) order by t.category_id, t.position, t.id), '[]'::jsonb) from public.{{P}}types t),
     'type_rarities', (select coalesce(jsonb_agg(jsonb_build_object(
-        'type_id', tr.type_id, 'rarity_id', tr.rarity_id, 'max_series', tr.max_series, 'numbered_series', tr.numbered_series
+        'type_id', tr.type_id, 'rarity_id', tr.rarity_id, 'max_series', tr.max_series, 'numbered_series', tr.numbered_series,
+        'card_style', tr.card_style
       ) order by tr.type_id, tr.max_series), '[]'::jsonb) from public.{{P}}type_rarities tr),
     'config', (select coalesce(jsonb_agg(jsonb_build_object('key', key, 'value', value, 'description', description) order by key), '[]'::jsonb)
                from public.{{P}}config),
@@ -2432,22 +2438,29 @@ end $$;
 -- Une catégorie : nom, position, nombre de séries par défaut de ses types, couleurs. Les raretés se règlent par type
 -- (admin_save_type_rarities), plus par catégorie.
 drop function if exists public.{{P}}admin_save_category(text, int, text, int, int, text, text, text, boolean, jsonb);
+-- p_image : null = inchangée (aucune à la création), '' = retirer, sinon emoji, adresse https ou image intégrée (comme un type)
+drop function if exists public.{{P}}admin_save_category(text, int, text, int, int, text, text, text, boolean);
 create or replace function public.{{P}}admin_save_category(
   p_password text, p_id int, p_name text, p_position int, p_series_count int,
-  p_color text, p_color2 text, p_text_color text, p_enabled boolean
+  p_color text, p_color2 text, p_text_color text, p_enabled boolean, p_image text default null
 )
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare err text := public.{{P}}admin_guard(p_password); v_id int;
+declare err text := public.{{P}}admin_guard(p_password); v_id int; v_image text := coalesce(p_image, '');
 begin
   if err is not null then return jsonb_build_object('error', err); end if;
+  if char_length(v_image) > 300000 then raise exception 'image_too_large'; end if;
+  if v_image <> '' and char_length(v_image) > 16
+     and v_image !~ '^https://' and v_image !~ '^data:image/(png|jpeg|webp|gif|svg\+xml);base64,' then
+    raise exception 'invalid_image';
+  end if;
   if char_length(trim(coalesce(p_name, ''))) < 1 or char_length(p_name) > 40 then raise exception 'invalid_name'; end if;
   if p_series_count is null or p_series_count < 1 or p_series_count > 5000 then raise exception 'invalid_series'; end if;
   if p_color !~ '^#[0-9a-fA-F]{6}$' or p_color2 !~ '^#[0-9a-fA-F]{6}$' or p_text_color !~ '^#[0-9a-fA-F]{6}$' then
     raise exception 'invalid_color';
   end if;
   if p_id is null then
-    insert into public.{{P}}categories (name, position, series_count, color, color2, text_color, enabled)
-    values (trim(p_name), coalesce(p_position, 1), p_series_count, p_color, p_color2, p_text_color, coalesce(p_enabled, true))
+    insert into public.{{P}}categories (name, position, series_count, color, color2, text_color, enabled, image)
+    values (trim(p_name), coalesce(p_position, 1), p_series_count, p_color, p_color2, p_text_color, coalesce(p_enabled, true), v_image)
     returning id into v_id;
   else
     if exists (select 1 from public.{{P}}categories where id = p_id and series_count <> p_series_count)
@@ -2456,7 +2469,8 @@ begin
     end if;
     update public.{{P}}categories
     set name = trim(p_name), position = coalesce(p_position, position), series_count = p_series_count,
-        color = p_color, color2 = p_color2, text_color = p_text_color, enabled = coalesce(p_enabled, enabled)
+        color = p_color, color2 = p_color2, text_color = p_text_color, enabled = coalesce(p_enabled, enabled),
+        image = case when p_image is null then image else v_image end
     where id = p_id;
     if not found then raise exception 'not_found'; end if;
     v_id := p_id;
@@ -2704,6 +2718,7 @@ begin
         where jsonb_typeof(e) <> 'object' or coalesce(e->>'rarity_id', '') = ''
            or coalesce(e->>'max_series', '') !~ '^[0-9]{1,4}$'
            or coalesce(e->>'numbered_series', '0') !~ '^[0-9]{1,4}$'
+           or coalesce(e->>'card_style', 'simple') not in ('simple', 'fullart')
       ) then raise exception 'invalid_type_rarities'; end if;
       if (select count(distinct e->>'rarity_id') from jsonb_array_elements(p_rarities) e) <> v_n then
         raise exception 'invalid_type_rarities';   -- une même rareté deux fois
@@ -2731,8 +2746,8 @@ begin
       ) then raise exception 'series_locked'; end if;
 
       delete from public.{{P}}type_rarities where type_id = p_type;
-      insert into public.{{P}}type_rarities (type_id, rarity_id, max_series, numbered_series)
-      select p_type, e->>'rarity_id', (e->>'max_series')::int, coalesce((e->>'numbered_series')::int, 0)
+      insert into public.{{P}}type_rarities (type_id, rarity_id, max_series, numbered_series, card_style)
+      select p_type, e->>'rarity_id', (e->>'max_series')::int, coalesce((e->>'numbered_series')::int, 0), coalesce(e->>'card_style', 'simple')
       from jsonb_array_elements(p_rarities) e
       where (e->>'max_series')::int >= 1;   -- une rareté à 0 série n'est pas enregistrée : elle n'existe pas pour ce type
       select max((e->>'max_series')::int) into v_top from jsonb_array_elements(p_rarities) e;
@@ -2819,7 +2834,7 @@ revoke all on function public.{{P}}market_list(text, text, int, int)            
 revoke all on function public.{{P}}market_mine()                                     from public, anon;
 revoke all on function public.{{P}}admin_change_password(text, text)                 from public, anon;
 revoke all on function public.{{P}}admin_data(text)                                  from public, anon;
-revoke all on function public.{{P}}admin_save_category(text, int, text, int, int, text, text, text, boolean)  from public, anon;
+revoke all on function public.{{P}}admin_save_category(text, int, text, int, int, text, text, text, boolean, text)  from public, anon;
 revoke all on function public.{{P}}admin_set_category_closed(text, int, boolean)     from public, anon;
 revoke all on function public.{{P}}admin_delete_category(text, int)                  from public, anon;
 revoke all on function public.{{P}}admin_force_delete_category(text, int, text)      from public, anon;
@@ -2864,7 +2879,7 @@ grant execute on function public.{{P}}market_list(text, text, int, int)         
 grant execute on function public.{{P}}market_mine()                                     to authenticated;
 grant execute on function public.{{P}}admin_change_password(text, text)                 to authenticated;
 grant execute on function public.{{P}}admin_data(text)                                  to authenticated;
-grant execute on function public.{{P}}admin_save_category(text, int, text, int, int, text, text, text, boolean)  to authenticated;
+grant execute on function public.{{P}}admin_save_category(text, int, text, int, int, text, text, text, boolean, text)  to authenticated;
 grant execute on function public.{{P}}admin_set_category_closed(text, int, boolean)     to authenticated;
 grant execute on function public.{{P}}admin_delete_category(text, int)                  to authenticated;
 grant execute on function public.{{P}}admin_force_delete_category(text, int, text)      to authenticated;

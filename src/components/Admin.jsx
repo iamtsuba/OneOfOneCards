@@ -3,8 +3,10 @@ import * as api from '../api'
 import { explain } from '../api'
 import { useGame, fmt, fmtDate } from '../game'
 import TypeArt from './TypeArt'
+import Pack from './Pack'
+import Card from './Card'
 import { parseTypesFile, TEMPLATE_CSV, MAX_ROWS } from '../importTypes'
-import { cardCount, defaultConfig, validateTypeRarities } from '../bands'
+import { CARD_STYLES, cardCount, defaultConfig, validateTypeRarities } from '../bands'
 
 const TABS = [
   ['categories', 'Catégories'],
@@ -200,6 +202,7 @@ function CategoryForm({ cat, nextPos, run, busy }) {
   const [f, setF] = useState({
     name: cat?.name ?? '', position: cat?.position ?? nextPos ?? 1, series_count: cat?.series_count ?? 500,
     color: cat?.color ?? '#ffd9b0', color2: cat?.color2 ?? '#f29a45', text_color: cat?.text_color ?? '#3d1f00', enabled: cat?.enabled ?? true,
+    image: cat?.image ?? '',
   })
   const set = (k) => (v) => setF((cur) => ({ ...cur, [k]: v }))
   const [confirmDelete, setConfirmDelete] = useState('')   // nom retapé pour confirmer la suppression forcée
@@ -223,6 +226,9 @@ function CategoryForm({ cat, nextPos, run, busy }) {
         <Color label="Texte" value={f.text_color} onChange={set('text_color')} />
         <label className="check inline"><input type="checkbox" checked={f.enabled} onChange={(e) => set('enabled')(e.target.checked)} /><span>Activée</span></label>
       </div>
+      <ImageField label="Image du booster (emoji ou adresse https://), au centre ; « 1/1 » si vide" value={f.image} onChange={set('image')} />
+      <p className="fine">Aperçu du booster : le nom de la catégorie en haut, son image au centre.</p>
+      <div className="admin-pack-preview"><Pack category={{ name: f.name || 'Catégorie', color: f.color, color2: f.color2, text_color: f.text_color, image: f.image }} /></div>
 
       <div className="row">
         <button className="btn" disabled={busy || !f.name.trim()} onClick={() => run((pw) => api.adminSaveCategory(pw, { id: cat?.id, ...f }), cat ? 'Catégorie enregistrée.' : 'Catégorie créée.')}>
@@ -301,22 +307,45 @@ export function TypesTab({ data, run, busy, initialCollapsed = [] }) {
   )
 }
 
-function TypeForm({ type, categoryId, nextPos, data, run, busy, collapsed = false, onToggle }) {
-  const [f, setF] = useState({ name: type?.name ?? '', position: type?.position ?? nextPos ?? 1, image: type?.image ?? '' })
+// Champ image : emoji, adresse https:// ou image téléversée (réduite à 256 px)
+function ImageField({ label, value, onChange, placeholder = '📼 ou https://…' }) {
   const [localError, setLocalError] = useState('')
-  const uploaded = f.image.startsWith('data:')
+  const uploaded = value.startsWith('data:')
   const onFile = async (e) => {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
     setLocalError('')
     try {
-      const url = await fileToDataUrl(file)
-      setF((cur) => ({ ...cur, image: url }))
+      onChange(await fileToDataUrl(file))
     } catch {
       setLocalError('Impossible de lire cette image.')
     }
   }
+  return (
+    <>
+      <label>
+        {label}
+        {uploaded ? (
+          <input value="Image téléversée" readOnly />
+        ) : (
+          <input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
+        )}
+      </label>
+      <div className="row">
+        <label className="btn ghost file-btn">
+          Téléverser une image
+          <input type="file" accept="image/*" onChange={onFile} hidden />
+        </label>
+        {value && <button type="button" className="btn ghost" onClick={() => onChange('')}>Retirer l’image</button>}
+      </div>
+      {localError && <p className="msg error">{localError}</p>}
+    </>
+  )
+}
+
+function TypeForm({ type, categoryId, nextPos, data, run, busy, collapsed = false, onToggle }) {
+  const [f, setF] = useState({ name: type?.name ?? '', position: type?.position ?? nextPos ?? 1, image: type?.image ?? '' })
   return (
     <div className={`admin-card${collapsed ? ' collapsed' : ''}`}>
       <div className="admin-card-head">
@@ -338,22 +367,7 @@ function TypeForm({ type, categoryId, nextPos, data, run, busy, collapsed = fals
         <label>Nom<input value={f.name} maxLength={60} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
         <label>Position<input type="number" value={f.position} onChange={(e) => setF({ ...f, position: e.target.value })} /></label>
       </div>
-      <label>
-        Image (emoji ou adresse https://)
-        {uploaded ? (
-          <input value="Image téléversée" readOnly />
-        ) : (
-          <input value={f.image} placeholder="📼 ou https://…" onChange={(e) => setF({ ...f, image: e.target.value })} />
-        )}
-      </label>
-      <div className="row">
-        <label className="btn ghost file-btn">
-          Téléverser une image
-          <input type="file" accept="image/*" onChange={onFile} hidden />
-        </label>
-        {f.image && <button type="button" className="btn ghost" onClick={() => setF({ ...f, image: '' })}>Retirer l’image</button>}
-      </div>
-      {localError && <p className="msg error">{localError}</p>}
+      <ImageField label="Image (emoji ou adresse https://)" value={f.image} onChange={(v) => setF((cur) => ({ ...cur, image: v }))} />
       <div className="row">
         <button className="btn" disabled={busy || !f.name.trim()} onClick={() => run((pw) => api.adminSaveType(pw, { id: type?.id, category_id: categoryId, ...f }), type ? 'Type enregistré.' : 'Type créé.')}>
           {type ? 'Enregistrer' : 'Créer'}
@@ -381,7 +395,7 @@ function TypeRaritiesEditor({ type, data, run, busy }) {
   // Une ligne par rareté (dans l'ordre d'affichage) : celles que le type n'a pas valent 0 série
   const allRows = (existing) => rarityList.map((r) => {
     const o = existing.find((x) => x.rarity_id === r.id)
-    return { rarity_id: r.id, max_series: String(o?.max_series ?? 0), numbered_series: String(o?.numbered_series ?? 0) }
+    return { rarity_id: r.id, max_series: String(o?.max_series ?? 0), numbered_series: String(o?.numbered_series ?? 0), card_style: o?.card_style ?? 'simple' }
   })
   const [custom, setCustom] = useState(own.length > 0)
   const [rows, setRows] = useState(() => allRows(own))
@@ -389,25 +403,28 @@ function TypeRaritiesEditor({ type, data, run, busy }) {
   const defaults = defaultConfig(rarityList, category)
 
   const customize = () => {
-    setRows(allRows(defaults.map((d) => ({ rarity_id: d.rarity_id, max_series: d.max_series, numbered_series: d.max_series }))))
+    setRows(allRows(defaults.map((d) => ({ rarity_id: d.rarity_id, max_series: d.max_series, numbered_series: d.max_series, card_style: 'simple' }))))
     setCustom(true)
   }
   const setRow = (i, k, v) => setRows((cur) => cur.map((r, j) => (j === i ? { ...r, [k]: v } : r)))
   const problem = custom ? validateTypeRarities(rows) : ''
   const payload = rows.filter((r) => Number(r.max_series) >= 1)
-    .map((r) => ({ rarity_id: r.rarity_id, max_series: Number(r.max_series), numbered_series: Number(r.numbered_series || 0) }))
+    .map((r) => ({ rarity_id: r.rarity_id, max_series: Number(r.max_series), numbered_series: Number(r.numbered_series || 0), card_style: r.card_style || 'simple' }))
   const shown = custom
-    ? (problem ? [] : rows.map((r) => ({ rarity_id: r.rarity_id, max_series: Number(r.max_series), numbered_series: Number(r.numbered_series || 0) })))
+    ? (problem ? [] : rows.map((r) => ({ rarity_id: r.rarity_id, max_series: Number(r.max_series), numbered_series: Number(r.numbered_series || 0), card_style: r.card_style || 'simple' })))
     : defaults
   const describe = (r) => {
     const smax = r.max_series
     if (smax < 1) return 'absente de ce type (0 série)'
     const k = Math.min(r.numbered_series, smax)
     const cards = `cartes de 1/1 à ${fmt(smax)}/${fmt(smax)} (${fmt(cardCount(smax))} cartes)`
-    if (k >= smax) return `${cards} — tous les numéros visibles`
-    if (k <= 0) return `${cards} — non numérotée (numéro jamais visible)`
-    return `${cards} — numéro visible de 1/1 à ${fmt(k)}/${fmt(k)} (séries 1 à ${fmt(k)}), masqué ensuite`
+    const fa = r.card_style === 'fullart' ? ' — style FullArt' : ''
+    if (k >= smax) return `${cards} — tous les numéros visibles${fa}`
+    if (k <= 0) return `${cards} — non numérotée (numéro jamais visible)${fa}`
+    return `${cards} — numéro visible de 1/1 à ${fmt(k)}/${fmt(k)} (séries 1 à ${fmt(k)}), masqué ensuite${fa}`
   }
+  // Aperçu des deux styles avec l'image de ce type, dans la première rareté qui a des séries
+  const sampleRarity = data.rarities.find((x) => x.id === (shown.find((b) => b.max_series >= 1)?.rarity_id ?? 'ultra')) ?? rarityList[0]
   const save = () =>
     run(
       (pw) => api.adminSaveTypeRarities(pw, type.id, custom ? payload : own.length ? [] : null, secret),
@@ -432,6 +449,7 @@ function TypeRaritiesEditor({ type, data, run, busy }) {
             50/50, et seules les séries 1 à 5 (1/1 à 5/5) ont leur numéro visible ; les autres sont numérotées en interne mais le numéro est masqué sur
             la carte. 0 série numérotée = rareté non numérotée. <strong>0 série max. = la rareté n’existe pas pour ce type</strong> (une carte peut n’exister
             que dans une seule rareté). Les raretés sont indépendantes : une même série peut exister dans plusieurs raretés (ce sont des cartes différentes).
+            <strong> Style de carte</strong> : Simple (image dans un cadre) ou FullArt (l’image du type couvre toute la carte), au choix pour chaque rareté.
           </p>
           <div className="type-rarity-rows">
             {rows.map((r, i) => (
@@ -439,6 +457,11 @@ function TypeRaritiesEditor({ type, data, run, busy }) {
                 <strong className="type-rarity-name">{nameOf(r.rarity_id)}</strong>
                 <label>Séries max.<input type="number" min="0" max="5000" value={r.max_series} onChange={(e) => setRow(i, 'max_series', e.target.value)} /></label>
                 <label>Séries numérotées<input type="number" min="0" value={r.numbered_series} onChange={(e) => setRow(i, 'numbered_series', e.target.value)} /></label>
+                <label>Style de carte
+                  <select value={r.card_style} onChange={(e) => setRow(i, 'card_style', e.target.value)}>
+                    {CARD_STYLES.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </label>
               </div>
             ))}
           </div>
@@ -460,6 +483,17 @@ function TypeRaritiesEditor({ type, data, run, busy }) {
         </ul>
       )}
       {!custom && <div className="row"><button type="button" className="btn ghost" onClick={customize}>Personnaliser les raretés de ce type</button></div>}
+      {!custom && <p className="fine">Style de carte : Simple pour toutes les raretés. Personnalise les raretés pour choisir FullArt rareté par rareté.</p>}
+      {sampleRarity && (
+        <div className="style-previews" aria-label="Aperçu des deux styles de carte">
+          {CARD_STYLES.map((s) => (
+            <figure key={s.id}>
+              <Card typeId={type.id} type={type} styleName={s.id} rarity={sampleRarity} series={50} number={3} size="md" />
+              <figcaption>{s.name}</figcaption>
+            </figure>
+          ))}
+        </div>
+      )}
       {type.taken > 0 && custom && <p className="fine">Des cartes de ce type ont déjà été tirées : retirer une rareté (0 série) ou réduire ses séries sous une carte existante est refusé.</p>}
 
       <div className="row">

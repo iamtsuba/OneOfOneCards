@@ -5,21 +5,24 @@ import TypeArt from './TypeArt'
 // Carte numérotée : couleur entièrement déterminée par la rareté (pas par la catégorie/le booster).
 // De haut en bas : rareté, numéro n/m en jaune cerné avec zéro devant (07/10 ; masqué selon la rareté), grande
 // illustration du type, nom du type, numéro de checklist du type en bas à gauche (ex. 1/2).
+// Deux styles, réglés par rareté d'un type (catalog.cardStyle) : « simple » (image dans un cadre) et « fullart » (l'image couvre toute
+// la carte, les textes passent par-dessus). Props `type` et `styleName` : pour afficher un aperçu hors du jeu (console admin).
 // tone : 'mine' (fond vert, à moi — le cadre et le bandeau restent à la couleur de la rareté) | 'taken' (tirée par un autre joueur)
-export default function Card({ typeId, base, series, number, rarity, size = 'md', tone, listed = false, favorite = false, isNew = false, count = 0, inAlbum = false, glow = false, shine = false, onClick }) {
+export default function Card({ typeId, base, series, number, rarity, type: typeProp, styleName, size = 'md', tone, listed = false, favorite = false, isNew = false, count = 0, inAlbum = false, glow = false, shine = false, onClick }) {
   const game = useGame()
-  const type = game?.catalog?.typeMap?.[typeId]
+  const type = typeProp ?? game?.catalog?.typeMap?.[typeId]
+  const fullart = (styleName ?? game?.catalog?.cardStyle?.(typeId, base)) === 'fullart'
   const hidden = !!game?.catalog?.numberHidden?.(typeId, base, series)   // numéro n/m masqué pour cette rareté
   const setNo = game?.catalog?.checklist?.(typeId)                // numéro de checklist du type, ex. n° 2/50
 
   const style = {
     '--r1': rarity?.color ?? '#cfc8b8', '--r2': rarity?.color2 ?? '#9a917f', '--rt': rarity?.text_color ?? '#3a3630',
   }
-  const cls = ['card', size, tone || '', hidden ? 'nonum' : '', !tone && isSpecial(rarity) ? 'foil' : '', glow ? 'glow' : '', shine ? 'shine' : '', onClick ? 'clickable' : '']
+  const cls = ['card', size, tone || '', fullart ? 'fullart' : '', hidden ? 'nonum' : '', !tone && isSpecial(rarity) ? 'foil' : '', glow ? 'glow' : '', shine ? 'shine' : '', onClick ? 'clickable' : '']
     .filter(Boolean)
     .join(' ')
   const state = tone === 'mine' ? ', à toi' : tone === 'taken' ? ', déjà tirée par un autre joueur' : ''
-  const label = `${type?.name ?? 'Carte'}, ${rarity?.name ?? ''}${hidden ? '' : ` ${number} sur ${series}`}${setNo ? `, n° ${setNo.no} sur ${setNo.total}` : ''}${state}${listed ? ', en vente' : ''}${favorite ? ', favorite' : ''}${isNew ? ', nouvelle carte' : ''}${count > 1 ? `, pile de ${count} cartes` : ''}${inAlbum ? ', dans ton album' : ''}`
+  const label = `${type?.name ?? 'Carte'}, ${rarity?.name ?? ''}${hidden ? '' : ` ${number} sur ${series}`}${setNo ? `, n° ${setNo.no} sur ${setNo.total}` : ''}${state}${fullart ? ', FullArt' : ''}${listed ? ', en vente' : ''}${favorite ? ', favorite' : ''}${isNew ? ', nouvelle carte' : ''}${count > 1 ? `, pile de ${count} cartes` : ''}${inAlbum ? ', dans ton album' : ''}`
   const Tag = onClick ? 'button' : 'div'
   return (
     <Tag className={cls} style={style} onClick={onClick} aria-label={label} type={onClick ? 'button' : undefined}>

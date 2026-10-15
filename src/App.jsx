@@ -13,7 +13,7 @@ import Profile from './components/Profile'
 import RewardModal from './components/RewardModal'
 import EnvBanner from './components/EnvBanner'
 import NotificationBell from './components/NotificationBell'
-import { numberVisible, typeSeries, checklistNumbers } from './bands'
+import { numberVisible, typeSeries, checklistNumbers, cardStyle } from './bands'
 
 export default function App() {
   const [session, setSession] = useState(undefined)
@@ -86,6 +86,7 @@ function Game({ session }) {
       categoryMap,
       // Raretés par type : nombre de séries du type, numéros masqués, numéro de checklist « [k/N] »
       seriesOf: (typeId) => typeSeries(typeMap[typeId], categoryMap[typeMap[typeId]?.category_id]),
+      cardStyle: (typeId, base) => cardStyle(rowsByType[typeId], base),
       numberHidden: (typeId, base, series) => !numberVisible(rowsByType[typeId], base, series),
       cardRef: (typeId, base, number, series) => (numberVisible(rowsByType[typeId], base, series) ? ` ${number}/${series}` : ''),
       checklist: (typeId) => lists[typeId] ?? null,

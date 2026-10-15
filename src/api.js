@@ -104,7 +104,7 @@ export const adminForceDeleteCategory = (pw, id, confirmName) =>
 export const adminSaveCategory = (pw, c) =>
   rpc('admin_save_category', {
     p_password: pw, p_id: c.id ?? null, p_name: c.name, p_position: Number(c.position), p_series_count: Number(c.series_count),
-    p_color: c.color, p_color2: c.color2, p_text_color: c.text_color, p_enabled: !!c.enabled,
+    p_color: c.color, p_color2: c.color2, p_text_color: c.text_color, p_enabled: !!c.enabled, p_image: c.image ?? '',
   })
 export const adminSetCategoryClosed = (pw, id, closed) => rpc('admin_set_category_closed', { p_password: pw, p_id: id, p_closed: closed })
 export const adminDeleteCategory = (pw, id) => rpc('admin_delete_category', { p_password: pw, p_id: id })
@@ -184,7 +184,7 @@ export function explain(e) {
   if (m.includes('has_bids')) return 'Des offres ont été faites : l’annonce ne peut plus être retirée.'
   if (m.includes('listing_unavailable')) return 'Cette annonce n’est plus disponible.'
   if (m.includes('invalid_price')) return 'Prix invalide : entre un nombre entier de pièces, minimum 1.'
-  if (m.includes('invalid_type_rarities')) return 'Raretés du type invalides : tranches strictement croissantes, une même rareté une seule fois, « numérotées » entre 0 et la taille de la tranche.'
+  if (m.includes('invalid_type_rarities')) return 'Raretés du type invalides : une même rareté une seule fois, séries entre 0 et 5000 (au moins une rareté avec des séries), « numérotées » au plus égal au nombre de séries, style Simple ou FullArt.'
   if (m.includes('id_taken')) return 'Cet identifiant de rareté existe déjà.'
   if (m.includes('invalid_id')) return 'Identifiant invalide : minuscules, chiffres et _ uniquement, 2 à 20 caractères, débute par une lettre.'
   if (m.includes('invalid_max_series')) return 'Taille de série maximale invalide : un nombre entier d’au moins 1 (pas de plafond ouvert pour une nouvelle rareté).'

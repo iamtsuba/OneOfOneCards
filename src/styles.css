@@ -323,6 +323,19 @@ button.slot:hover { border-color: var(--ink-soft); color: var(--ink-soft); }
 /* Numéro masqué : la petite carte récupère la place du numéro */
 .card.sm.nonum .card-art { top: 6cqw; height: 124cqw; }
 .card.sm.nonum .card-listed, .card.sm.nonum .card-favorite { top: 8cqw; }
+
+/* Style FullArt : l'image du type couvre toute la carte (à l'intérieur du cadre de rareté) ; rareté, numéro, nom et numéro de checklist
+   passent par-dessus, sur un voile sombre en haut et en bas pour rester lisibles. Le vert « à moi » devient un anneau intérieur. */
+.card.fullart .card-art, .card.fullart.sm .card-art, .card.fullart.sm.nonum .card-art { z-index: 0; inset: 0; top: 0; left: 0; right: 0; height: auto; border-radius: 0; background: linear-gradient(160deg, var(--r1), var(--r2)); }
+.card.fullart .card-art img.type-art { width: 100%; height: 100%; object-fit: cover; object-position: center 30%; }
+.card.fullart .card-art .type-art, .card.fullart.sm .card-art .type-art { font-size: 78cqw; }
+.card.fullart .card-art span.type-art { filter: drop-shadow(0 2cqw 3cqw rgba(0,0,0,.25)); }
+.card.fullart .card-face::before { content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: linear-gradient(to bottom, rgba(12,14,34,.62), rgba(12,14,34,0) 26%), linear-gradient(to top, rgba(12,14,34,.74), rgba(12,14,34,0) 32%); }
+.card.fullart.mine .card-face::before { box-shadow: inset 0 0 0 1.6cqw #3fcf8e; }
+.card.fullart .card-rarity, .card.fullart .card-num, .card.fullart .card-type, .card.fullart .card-setno, .card.fullart .card-listed, .card.fullart .card-favorite { z-index: 2; }
+.card.fullart .card-rarity, .card.fullart .card-type, .card.fullart .card-setno { color: #fff; text-shadow: 0 .5cqw 1.6cqw rgba(0,0,0,.7); }
+.card.fullart .card-type { top: auto; bottom: 9.5cqw; }
 /* Nouvelle carte (ce type dans cette rareté, pas encore dans la collection) : petite étoile qui scintille au-dessus */
 .card-new-star { position: absolute; left: 50%; top: -6.5cqw; z-index: 3; width: 12cqw; height: 12cqw; margin-left: -6cqw; pointer-events: none;
   filter: drop-shadow(0 0 1.6cqw rgba(255, 214, 10, .95)); animation: star-twinkle 1.7s ease-in-out infinite; }
@@ -440,11 +453,15 @@ textarea { width: 100%; padding: 10px 14px; border: 1.5px solid var(--line); bor
 .type-rarities { margin-top: 4px; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 12px; background: var(--bg); display: grid; gap: 8px; }
 .type-rarities > summary { cursor: pointer; font-weight: 700; }
 .type-rarity-rows { display: grid; gap: 8px; }
-.type-rarity-row { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: end; }
+.type-rarity-row { display: grid; grid-template-columns: minmax(110px, 1fr) repeat(3, minmax(0, 1fr)); gap: 8px; align-items: end; }
 .type-rarity-name { align-self: center; }
 .type-rarity-row > label { display: grid; gap: 4px; font-size: 12px; }
 .type-rarity-bands { display: grid; gap: 4px; padding-left: 18px; list-style: disc; }
-@media (max-width: 560px) { .type-rarity-row { grid-template-columns: 1fr 1fr; } .type-rarity-name { grid-column: 1 / -1; } }
+@media (max-width: 560px) { .type-rarity-row { grid-template-columns: 1fr 1fr; } .type-rarity-name, .type-rarity-row > label:last-child { grid-column: 1 / -1; } }
+.style-previews { display: flex; gap: 14px; flex-wrap: wrap; }
+.style-previews figure { margin: 0; width: 104px; display: grid; gap: 6px; text-align: center; font-size: 12px; }
+.admin-pack-preview { width: 110px; }
+.admin-pack-preview .pack-wrap { width: 100%; filter: none; }
 .color-field input { width: 56px; min-height: 40px; padding: 2px; }
 .badge { padding: 2px 8px; border-radius: 99px; background: #e4e7f4; font-size: 12px; font-weight: 700; }
 .badge.done { background: #cfeedd; color: #0d5a35; }

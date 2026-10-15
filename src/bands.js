@@ -11,6 +11,14 @@ export function numberVisible(rows, base, m) {
   return r ? m <= r.numbered_series : true
 }
 
+// Style d'une carte : « simple » (image dans un cadre, le dessin d'origine) ou « fullart » (l'image couvre toute la carte). Il est réglé
+// par rareté d'un type (colonne card_style de type_rarities) ; sans réglage propre, une carte est « simple ».
+export const CARD_STYLES = [{ id: 'simple', name: 'Simple' }, { id: 'fullart', name: 'FullArt' }]
+export function cardStyle(rows, base) {
+  const r = (rows ?? []).find((x) => x.rarity_id === base)
+  return r?.card_style === 'fullart' ? 'fullart' : 'simple'
+}
+
 // Nombre de séries d'un type : le sien (la plus grande de ses raretés), sinon celui de sa catégorie
 export const typeSeries = (type, category) => type?.series_count ?? category?.series_count ?? 1
 
@@ -49,6 +57,7 @@ export function validateTypeRarities(rows) {
     const max = Number(r.max_series)
     const num = r.numbered_series === '' || r.numbered_series == null ? 0 : Number(r.numbered_series)
     if (!r.rarity_id) return 'Choisis une rareté pour chaque ligne.'
+    if (r.card_style != null && r.card_style !== '' && !CARD_STYLES.some((s) => s.id === r.card_style)) return 'Le style d’une carte est Simple ou FullArt.'
     if (ids.has(r.rarity_id)) return 'Une même rareté ne peut apparaître qu’une fois.'
     ids.add(r.rarity_id)
     if (!Number.isInteger(max) || max < 0 || max > 5000) return 'Le nombre de séries est un entier entre 0 et 5000 (0 = la rareté n’existe pas pour ce type).'
