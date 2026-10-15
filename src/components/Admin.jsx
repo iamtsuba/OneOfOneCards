@@ -185,8 +185,7 @@ export function CategoriesTab({ data, run, busy }) {
     <div className="admin-list">
       <p className="muted">
         Une seule catégorie est ouvrable à la fois : la première (par position) qui est activée et pas terminée. Quand toutes ses cartes sont tirées,
-        la suivante s’ouvre. Le nombre de séries (par défaut pour chaque type) ne peut plus changer une fois des cartes tirées. Les raretés ne se
-        règlent plus par catégorie : elles se règlent par type (onglet « Types »).
+        la suivante s’ouvre. Les raretés et leur nombre de séries ne se règlent plus par catégorie : elles se règlent par type (onglet « Types »).
       </p>
       {data.categories.map((c) => (
         <CategoryForm key={c.id} cat={c} run={run} busy={busy} />
@@ -217,7 +216,6 @@ function CategoryForm({ cat, nextPos, run, busy }) {
       <div className="admin-grid">
         <label>Nom<input value={f.name} maxLength={40} onChange={(e) => set('name')(e.target.value)} /></label>
         <label>Position<input type="number" value={f.position} onChange={(e) => set('position')(e.target.value)} /></label>
-        <label>Séries (1 à N)<input type="number" min="1" max="5000" value={f.series_count} disabled={started} onChange={(e) => set('series_count')(e.target.value)} /></label>
       </div>
       <div className="admin-colors">
         <Color label="Couleur claire" value={f.color} onChange={set('color')} />
@@ -373,35 +371,37 @@ function TypeForm({ type, categoryId, nextPos, data, run, busy, collapsed = fals
   )
 }
 
-// Raretés d'un type (logique « Topps ») : CHAQUE rareté a ses propres séries, de 1/1 à N/N ; numéros visibles ; type secret
+// Raretés d'un type (logique « Topps ») : CHAQUE rareté a ses propres séries, de 1/1 à N/N ; 0 série = la rareté n'existe pas pour
+// ce type ; numéros visibles ; type secret
 function TypeRaritiesEditor({ type, data, run, busy }) {
   const rarityList = data.rarities.filter((r) => r.kind === 'range').sort((a, b) => a.sort_order - b.sort_order)
   const nameOf = (id) => data.rarities.find((r) => r.id === id)?.name ?? id
-  const orderOf = (id) => rarityList.findIndex((r) => r.id === id)
   const category = data.categories.find((c) => c.id === type.category_id)
   const own = (data.type_rarities ?? []).filter((r) => r.type_id === type.id)
-  const toRow = (r) => ({ rarity_id: r.rarity_id, max_series: String(r.max_series), numbered_series: String(r.numbered_series) })
+  // Une ligne par rareté (dans l'ordre d'affichage) : celles que le type n'a pas valent 0 série
+  const allRows = (existing) => rarityList.map((r) => {
+    const o = existing.find((x) => x.rarity_id === r.id)
+    return { rarity_id: r.id, max_series: String(o?.max_series ?? 0), numbered_series: String(o?.numbered_series ?? 0) }
+  })
   const [custom, setCustom] = useState(own.length > 0)
-  const [rows, setRows] = useState(() => own.map(toRow))
+  const [rows, setRows] = useState(() => allRows(own))
   const [secret, setSecret] = useState(!!type.secret)
   const defaults = defaultConfig(rarityList, category)
 
   const customize = () => {
-    setRows(defaults.map((d) => ({ rarity_id: d.rarity_id, max_series: String(d.max_series), numbered_series: String(d.max_series) })))
+    setRows(allRows(defaults.map((d) => ({ rarity_id: d.rarity_id, max_series: d.max_series, numbered_series: d.max_series }))))
     setCustom(true)
   }
   const setRow = (i, k, v) => setRows((cur) => cur.map((r, j) => (j === i ? { ...r, [k]: v } : r)))
-  const addRow = () => {
-    const used = new Set(rows.map((r) => r.rarity_id))
-    const free = rarityList.find((r) => !used.has(r.id))
-    if (!free) return
-    setRows((cur) => [...cur, { rarity_id: free.id, max_series: '100', numbered_series: '0' }])
-  }
   const problem = custom ? validateTypeRarities(rows) : ''
-  const payload = rows.map((r) => ({ rarity_id: r.rarity_id, max_series: Number(r.max_series), numbered_series: Number(r.numbered_series || 0) }))
-  const shown = (custom ? (problem ? [] : payload) : defaults).slice().sort((a, b) => orderOf(a.rarity_id) - orderOf(b.rarity_id))
+  const payload = rows.filter((r) => Number(r.max_series) >= 1)
+    .map((r) => ({ rarity_id: r.rarity_id, max_series: Number(r.max_series), numbered_series: Number(r.numbered_series || 0) }))
+  const shown = custom
+    ? (problem ? [] : rows.map((r) => ({ rarity_id: r.rarity_id, max_series: Number(r.max_series), numbered_series: Number(r.numbered_series || 0) })))
+    : defaults
   const describe = (r) => {
     const smax = r.max_series
+    if (smax < 1) return 'absente de ce type (0 série)'
     const k = Math.min(r.numbered_series, smax)
     const cards = `cartes de 1/1 à ${fmt(smax)}/${fmt(smax)} (${fmt(cardCount(smax))} cartes)`
     if (k >= smax) return `${cards} — tous les numéros visibles`
@@ -422,7 +422,7 @@ function TypeRaritiesEditor({ type, data, run, busy }) {
       </summary>
       <label className="check inline">
         <input type="checkbox" checked={secret} onChange={(e) => setSecret(e.target.checked)} />
-        <span>Type secret : caché des joueurs tant qu’ils n’en possèdent aucune carte, numéroté au-delà de la checklist (ex. [51/50])</span>
+        <span>Type secret : apparaît dans l’album comme une carte mystère tant qu’aucune carte n’est possédée, numéroté au-delà de la checklist (ex. 4/3)</span>
       </label>
 
       {custom && (
@@ -430,24 +430,20 @@ function TypeRaritiesEditor({ type, data, run, busy }) {
           <p className="fine">
             Chaque rareté a ses propres séries, de 1/1 à N/N (N = « séries max. »). Exemple : Ultra Rare, 50 séries, 5 numérotées → cartes de 1/1 à
             50/50, et seules les séries 1 à 5 (1/1 à 5/5) ont leur numéro visible ; les autres sont numérotées en interne mais le numéro est masqué sur
-            la carte. 0 = rareté non numérotée. Les raretés sont indépendantes : une même série peut exister dans plusieurs raretés (ce sont des cartes
-            différentes).
+            la carte. 0 série numérotée = rareté non numérotée. <strong>0 série max. = la rareté n’existe pas pour ce type</strong> (une carte peut n’exister
+            que dans une seule rareté). Les raretés sont indépendantes : une même série peut exister dans plusieurs raretés (ce sont des cartes différentes).
           </p>
           <div className="type-rarity-rows">
             {rows.map((r, i) => (
-              <div className="type-rarity-row" key={i}>
-                <select value={r.rarity_id} onChange={(e) => setRow(i, 'rarity_id', e.target.value)} aria-label="Rareté">
-                  {rarityList.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-                </select>
-                <label>Séries max.<input type="number" min="1" max="5000" value={r.max_series} onChange={(e) => setRow(i, 'max_series', e.target.value)} /></label>
+              <div className="type-rarity-row" key={r.rarity_id}>
+                <strong className="type-rarity-name">{nameOf(r.rarity_id)}</strong>
+                <label>Séries max.<input type="number" min="0" max="5000" value={r.max_series} onChange={(e) => setRow(i, 'max_series', e.target.value)} /></label>
                 <label>Séries numérotées<input type="number" min="0" value={r.numbered_series} onChange={(e) => setRow(i, 'numbered_series', e.target.value)} /></label>
-                <button type="button" className="btn ghost icon" onClick={() => setRows((cur) => cur.filter((_, j) => j !== i))} aria-label="Retirer cette rareté">×</button>
               </div>
             ))}
           </div>
           <div className="row">
-            <button type="button" className="btn ghost" onClick={addRow} disabled={rows.length >= rarityList.length}>Ajouter une rareté</button>
-            <button type="button" className="btn ghost" onClick={() => { setCustom(false); setRows([]) }}>Revenir aux réglages par défaut</button>
+            <button type="button" className="btn ghost" onClick={() => { setCustom(false); setRows(allRows([])) }}>Revenir aux réglages par défaut</button>
           </div>
           {problem && <p className="msg error">{problem}</p>}
         </>
@@ -464,7 +460,7 @@ function TypeRaritiesEditor({ type, data, run, busy }) {
         </ul>
       )}
       {!custom && <div className="row"><button type="button" className="btn ghost" onClick={customize}>Personnaliser les raretés de ce type</button></div>}
-      {type.taken > 0 && custom && <p className="fine">Des cartes de ce type ont déjà été tirées : retirer une rareté ou réduire ses séries sous une carte existante est refusé.</p>}
+      {type.taken > 0 && custom && <p className="fine">Des cartes de ce type ont déjà été tirées : retirer une rareté (0 série) ou réduire ses séries sous une carte existante est refusé.</p>}
 
       <div className="row">
         <button className="btn" disabled={busy || !!problem} onClick={save}>Enregistrer les raretés</button>

@@ -73,15 +73,26 @@ select pg_temp.try(format('select public.{{P}}admin_save_type_rarities(''thomari
 select pg_temp.try(format('select public.{{P}}admin_save_type_rarities(''thomarie'', %s, ''[{"rarity_id":"ultra","max_series":0}]''::jsonb)', :ta));
 select pg_temp.try(format('select public.{{P}}admin_save_type_rarities(''mauvais'', %s, ''[]''::jsonb)', :ta));
 select count(*) as raretes_du_type_a_inchangees from public.{{P}}type_rarities where type_id = :ta;
+\echo '--- 0 série : la rareté n''existe pas pour ce type (une carte peut n''exister que dans une seule rareté)'
+select (public.{{P}}admin_save_type_rarities('thomarie', :tc, '[{"rarity_id":"ultra","max_series":0,"numbered_series":0},{"rarity_id":"super","max_series":40,"numbered_series":0},{"rarity_id":"common","max_series":0}]'::jsonb) ->> 'ok')::bool as zero_serie_accepte;
+select string_agg(rarity_id || ' ' || smax, ', ' order by rarity_id) as type_c_une_seule_rarete, (select series_count from public.{{P}}types where id = :tc) as series_du_type from public.{{P}}type_config(:tc);
+select (select count(*) from public.{{P}}type_rarities where type_id = :tc) as lignes_enregistrees;   -- 1 : les raretés à 0 ne sont pas stockées
+select pg_temp.try(format('select public.{{P}}admin_save_type_rarities(''thomarie'', %s, ''[{"rarity_id":"ultra","max_series":0,"numbered_series":0},{"rarity_id":"super","max_series":0}]''::jsonb)', :tc));       -- tout à 0 : refusé
+select pg_temp.try(format('select public.{{P}}admin_save_type_rarities(''thomarie'', %s, ''[{"rarity_id":"ultra","max_series":0,"numbered_series":3},{"rarity_id":"super","max_series":40}]''::jsonb)', :tc));  -- numérotées sans série : refusé
+select count(*) as type_c_inchange_apres_les_refus from public.{{P}}type_config(:tc) where rarity_id = 'super' and smax = 40;
 \echo '--- aucun ordre à respecter : Super Rare avec MOINS de séries que Ultra Rare est accepté (séries indépendantes)'
 select (public.{{P}}admin_save_type_rarities('thomarie', :tc, '[{"rarity_id":"ultra","max_series":100,"numbered_series":3},{"rarity_id":"super","max_series":40,"numbered_series":0}]'::jsonb) ->> 'ok')::bool as ordre_libre_accepte;
 select string_agg(rarity_id || ' ' || smax, ', ' order by rarity_id) as type_c_apres from public.{{P}}type_config(:tc);
 select (public.{{P}}admin_save_type_rarities('thomarie', :tc, '[]'::jsonb) ->> 'ok')::bool as type_c_revenu_aux_defauts;
 
-\echo '=== le type secret est caché dans l''album tant qu''on n''en possède aucune carte ; un emplacement par rareté de chaque type'
-select type_name, count(*) as emplacements from public.{{P}}album_view(:cat) group by type_name, type_id order by type_id;   -- A 9, C 9 : le secret n'y est pas
+\echo '=== le type secret apparaît dans l''album comme une CARTE MYSTÈRE (sans nom ni visuel) tant qu''on n''en possède aucune carte ; un emplacement par rareté de chaque type'
+select coalesce(type_name, '(carte secrète)') as carte, count(*) as emplacements, bool_and(secret) as secrete, bool_and(revealed) as devoilee
+from public.{{P}}album_view(:cat) group by type_name, type_id order by bool_and(secret), type_id;   -- Chat Eau 9, Chat Peau 9, puis la carte secrète en dernier : 1 ligne mystère
+select type_id = :tb as est_le_secret, type_name is null as nom_cache, type_image is null as visuel_cache, rarity_id is null as aucun_emplacement_revele, secret, revealed
+from public.{{P}}album_view(:cat) where secret;
 insert into public.{{P}}cards (type_id, base_rarity, series, number, owner_id) values (:tb, 'legende', 50, 7, :A);
-select type_name, count(*) as emplacements from public.{{P}}album_view(:cat) group by type_name, type_id order by type_id;   -- le Chat Iny apparaît : Légende + Unique + Alpha + Omega = 4
+select coalesce(type_name, '(carte secrète)') as carte, count(*) as emplacements, bool_and(secret) as secrete, bool_and(revealed) as devoilee
+from public.{{P}}album_view(:cat) group by type_name, type_id order by bool_and(secret), type_id;   -- le Chat Iny est dévoilé : Légende + Unique + Alpha + Omega = 4, toujours en dernier
 delete from public.{{P}}cards where type_id = :tb;
 
 \echo '=== tirage doré par rareté : chaque rareté a SES séries ; hors des séries numérotées, la 1re et la dernière carte sont de la rareté de base'
@@ -117,6 +128,7 @@ delete from public.{{P}}cards where type_id = :ta;
 insert into public.{{P}}cards (type_id, base_rarity, series, number, owner_id) values (:ta, 'super', 150, 5, :A);
 select pg_temp.try(format('select public.{{P}}admin_save_type_rarities(''thomarie'', %s, ''[{"rarity_id":"super","max_series":100}]''::jsonb)', :ta));      -- series_locked : la carte 5/150 Super Rare n'y rentrerait plus
 select pg_temp.try(format('select public.{{P}}admin_save_type_rarities(''thomarie'', %s, ''[{"rarity_id":"ultra","max_series":300}]''::jsonb)', :ta));      -- series_locked : plus de Super Rare
+select pg_temp.try(format('select public.{{P}}admin_save_type_rarities(''thomarie'', %s, ''[{"rarity_id":"ultra","max_series":300},{"rarity_id":"super","max_series":0}]''::jsonb)', :ta));   -- series_locked : 0 série pour une rareté qui a des cartes
 select (public.{{P}}admin_save_type_rarities('thomarie', :ta, '[{"rarity_id":"super","max_series":150},{"rarity_id":"ultra","max_series":10}]'::jsonb) ->> 'ok')::bool as super_garde_150_series_accepte;
 select pg_temp.try(format('select public.{{P}}admin_save_type_rarities(''thomarie'', %s, ''[]''::jsonb)', :ta));   -- series_locked : les défauts n'ont que 100 séries de Super Rare
 delete from public.{{P}}cards where type_id = :ta;

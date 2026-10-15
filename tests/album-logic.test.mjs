@@ -55,5 +55,19 @@ ok('pile : 1 en vente, 1 dans l’album, 2 vendables', si.listed === 1 && si.inA
 ok('pile : première carte vendable fournie pour la mise en vente', si.firstFree !== null && !si.firstFree.listed && !si.firstFree.picked)
 ok('pile vide : rien de vendable', stackInfo([]).free === 0 && stackInfo([]).firstFree === null)
 
+// ---- Cartes secrètes (numérotées au-delà de la checklist, ex. 4/3) : hors full set, comptées à part
+const secretRows = [
+  ...rows,
+  { type_id: 9, rarity_id: null, pick_series: null, pick_number: null, owned_count: 0, secret: true, revealed: false },   // pas encore découverte
+]
+const ss = albumStats(secretRows, rarityMap)
+ok('secrète non découverte : le full set ne change pas (3 sur 8)', ss.base.filled === 3 && ss.base.total === 8)
+ok('secrète : comptée à part, 0 découverte sur 1', ss.secrets.total === 1 && ss.secrets.found === 0)
+ok('secrète non découverte : ni dans les puces par rareté ni parmi les emplacements remplissables', ss.byRarity.every((e) => e.id !== null) && ss.fillable === st.fillable)
+const found = albumStats([...rows, { type_id: 9, rarity_id: 'common', pick_series: null, pick_number: null, owned_count: 2, secret: true, revealed: true }, { type_id: 9, rarity_id: 'unique', pick_series: 1, pick_number: 1, owned_count: 1, secret: true, revealed: true }], rarityMap)
+ok('secrète découverte : 1 trouvée sur 1, toujours hors full set et hors bonus 1/1', found.secrets.found === 1 && found.secrets.total === 1 && found.base.total === 8 && found.bonus.total === 2)
+ok('secrète découverte : ses emplacements remplissables comptent parmi ceux qu’on peut remplir', found.fillable === st.fillable + 1)
+ok('aucune secrète : 0 sur 0', albumStats(rows, rarityMap).secrets.total === 0)
+
 if (bad) { console.error(`\n${bad} contrôle(s) en échec`); process.exit(1) }
 console.log('\nAlbum et piles (logique) : tous les contrôles sont passés.')

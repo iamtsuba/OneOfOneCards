@@ -141,5 +141,22 @@ ok('carte : rond de quantité en haut à droite pour une pile', /card-count" ari
 ok('carte : pas de rond pour une carte seule', !/card-count/.test(renderToStaticMarkup(wrap(React.createElement(Card, { typeId: 1, series: 40, number: 2, rarity: rarityMap.common, size: 'sm', count: 1 })))))
 ok('carte : pastille « Album » quand elle est dans l’album', /card-inalbum">Album</.test(renderToStaticMarkup(wrap(React.createElement(Card, { typeId: 1, series: 7, number: 2, rarity: rarityMap.common, size: 'sm', inAlbum: true })))))
 
+// ---- Carte secrète pas encore découverte : visible dans l'album comme une carte mystère (numéro 4/3, sans nom ni visuel)
+const mysteryRows = [
+  ...rows,
+  { type_id: 7, type_name: null, type_image: null, rarity_id: null, pick_base: null, pick_series: null, pick_number: null, owned_count: 0, secret: true, revealed: false },
+]
+const catalogSecret = { ...catalog, typeMap: { ...catalog.typeMap, 7: { id: 7, name: 'NOM SECRET', image: 'IMAGE-SECRETE', secret: true } },
+  checklist: (id) => (id === 7 ? { no: 4, total: 3, secret: true } : { no: id, total: 3, secret: false }) }
+const my = renderToStaticMarkup(wrap(React.createElement(Album, { rows: mysteryRows, catalog: catalogSecret, rarityMap, onRefresh: () => {} })))
+ok('secrète : une section « Carte secrète » avec son numéro 4/3', /album-mystery/.test(my) && /Carte secrète<\/h3>/.test(my) && /n° 4\/3 · secrète/.test(my))
+ok('secrète : rien ne fuit (ni nom ni visuel du type, aucun emplacement de rareté)', !/NOM SECRET|IMAGE-SECRETE/.test(my) && (my.match(/class="album-type"/g) || []).length === 2 && (my.match(/class="album-slot /g) || []).length === 4)
+ok('secrète : tuile mystère annoncée aux lecteurs d’écran', /aria-label="Carte secrète pas encore découverte"/.test(my) && /À découvrir/.test(my))
+const mst = renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows: mysteryRows, rarityMap })))
+ok('stats : « Cartes secrètes découvertes : 0/1 », full set inchangé (1 sur 4)', /Cartes secrètes découvertes, hors full set : <strong>0\/1<\/strong>/.test(mst) && /<strong>1<\/strong> emplacement rempli sur 4/.test(mst))
+const revealedRows = [...rows, { type_id: 7, type_name: 'Chat Iny', type_image: '🤫', rarity_id: 'common', pick_base: null, pick_series: null, pick_number: null, owned_count: 1, secret: true, revealed: true }]
+const rv = renderToStaticMarkup(wrap(React.createElement(Album, { rows: revealedRows, catalog: catalogSecret, rarityMap, onRefresh: () => {} })))
+ok('secrète découverte : elle apparaît comme une carte normale (nom, n° 4/3 · secrète, emplacements)', /Chat Iny/.test(rv) && /n° 4\/3 · secrète/.test(rv) && !/album-mystery/.test(rv))
+
 if (bad) { console.error(`\n${bad} contrôle(s) en échec`); process.exit(1) }
 console.log('\nAlbum (rendu) : tous les contrôles sont passés.')

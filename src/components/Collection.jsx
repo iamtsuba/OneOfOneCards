@@ -140,6 +140,9 @@ export function AlbumStats({ rows, rarityMap }) {
       {bonus.total > 0 && (
         <p className="fine">Cartes 1/1, hors full set : <strong>{bonus.filled}/{bonus.total}</strong></p>
       )}
+      {st.secrets.total > 0 && (
+        <p className="fine">Cartes secrètes découvertes, hors full set : <strong>{st.secrets.found}/{st.secrets.total}</strong></p>
+      )}
       <p className="fine">
         {st.fillable > 0
           ? `${fmt(st.fillable)} autre${st.fillable > 1 ? 's' : ''} emplacement${st.fillable > 1 ? 's peuvent' : ' peut'} être rempli${st.fillable > 1 ? 's' : ''} avec tes cartes.`
@@ -170,8 +173,8 @@ export function Album({ rows, catalog, rarityMap, onRefresh }) {
   const groups = []
   for (const r of rows) {
     let g = groups[groups.length - 1]
-    if (!g || g.typeId !== r.type_id) { g = { typeId: r.type_id, name: r.type_name, slots: [] }; groups.push(g) }
-    g.slots.push(r)
+    if (!g || g.typeId !== r.type_id) { g = { typeId: r.type_id, name: r.type_name, mystery: r.revealed === false, slots: [] }; groups.push(g) }
+    if (!g.mystery) g.slots.push(r)
   }
   return (
     <>
@@ -182,6 +185,21 @@ export function Album({ rows, catalog, rarityMap, onRefresh }) {
       <div className="album-types">
         {groups.map((g) => {
           const setNo = catalog.checklist(g.typeId)
+          if (g.mystery) {
+            // Carte secrète pas encore découverte : visible dans l'album avec son numéro (ex. 4/3), mais sans nom ni visuel
+            return (
+              <section className="album-type album-mystery" key={g.typeId}>
+                <header className="album-type-head">
+                  <h3>Carte secrète</h3>
+                  {setNo && <span className="muted">n° {setNo.no}/{setNo.total} · secrète</span>}
+                </header>
+                <div className="album-mystery-tile" role="img" aria-label="Carte secrète pas encore découverte">
+                  <span aria-hidden="true">?</span>
+                  <small>À découvrir dans un booster</small>
+                </div>
+              </section>
+            )
+          }
           const base = g.slots.filter((x) => !isBonus(rarityMap[x.rarity_id]))
           const bonus = g.slots.filter((x) => isBonus(rarityMap[x.rarity_id]))
           const done = base.filter((x) => x.pick_series != null).length

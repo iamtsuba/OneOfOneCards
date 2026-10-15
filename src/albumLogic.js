@@ -9,7 +9,14 @@ export function albumStats(rows, rarityMap) {
   const bonus = { filled: 0, total: 0 }
   let fillable = 0
   const byRarity = new Map()
+  const secretTypes = new Map()   // type secret -> dévoilé ? (une carte possédée)
   for (const r of rows ?? []) {
+    if (r.secret) {
+      // Les cartes secrètes (numérotées au-delà de la checklist, ex. 4/3) ne comptent pas dans le full set
+      secretTypes.set(r.type_id, secretTypes.get(r.type_id) || r.revealed !== false)
+      if (r.revealed !== false && r.pick_series == null && Number(r.owned_count) > 0) fillable += 1
+      continue
+    }
     const rarity = rarityMap[r.rarity_id]
     const filled = r.pick_series != null
     const bucket = isBonus(rarity) ? bonus : base
@@ -25,6 +32,7 @@ export function albumStats(rows, rarityMap) {
   return {
     base: { ...base, pct, complete: base.total > 0 && base.filled === base.total },
     bonus,
+    secrets: { total: secretTypes.size, found: [...secretTypes.values()].filter(Boolean).length },
     fillable,
     byRarity: [...byRarity.values()].sort((a, b) => (rarityMap[b.id]?.sort_order ?? 0) - (rarityMap[a.id]?.sort_order ?? 0)),
   }

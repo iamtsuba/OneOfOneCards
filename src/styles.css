@@ -384,6 +384,10 @@ button.slot:hover { border-color: var(--ink-soft); color: var(--ink-soft); }
 .album-rarity-stats li { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 99px; background: var(--surface); font-size: 12px; box-shadow: inset 0 0 0 1.5px var(--line); }
 .admin-card-head .collapse-btn { flex: none; width: 32px; height: 32px; padding: 0; font-size: 14px; line-height: 1; }
 .admin-card.collapsed { padding-block: 10px; }
+.album-mystery { background: repeating-linear-gradient(135deg, var(--surface), var(--surface) 10px, color-mix(in srgb, var(--surface) 92%, var(--ink)) 10px, color-mix(in srgb, var(--surface) 92%, var(--ink)) 20px); }
+.album-mystery-tile { display: grid; place-items: center; align-content: center; gap: 2px; width: 100%; max-width: 100px; aspect-ratio: 5 / 7; border-radius: 12px; border: 2px dashed var(--ink-soft); background: var(--bg); color: var(--ink-soft); text-align: center; }
+.album-mystery-tile span { font-family: var(--font-display); font-size: 40px; font-weight: 800; line-height: 1; }
+.album-mystery-tile small { padding: 0 6px; font-size: 10px; line-height: 1.2; }
 .album-slot.bonus { box-shadow: inset 0 0 0 1.5px var(--line); }
 .album-bonus-tag { margin-left: 4px; padding: 1px 6px; border-radius: 99px; background: var(--ink); color: #fff; font-size: 9px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; vertical-align: 1px; }
 .album-complete { margin: 4px 0 0; font-weight: 800; color: #11613c; }
@@ -425,10 +429,11 @@ textarea { width: 100%; padding: 10px 14px; border: 1.5px solid var(--line); bor
 .type-rarities { margin-top: 4px; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 12px; background: var(--bg); display: grid; gap: 8px; }
 .type-rarities > summary { cursor: pointer; font-weight: 700; }
 .type-rarity-rows { display: grid; gap: 8px; }
-.type-rarity-row { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+.type-rarity-row { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: end; }
+.type-rarity-name { align-self: center; }
 .type-rarity-row > label { display: grid; gap: 4px; font-size: 12px; }
 .type-rarity-bands { display: grid; gap: 4px; padding-left: 18px; list-style: disc; }
-@media (max-width: 560px) { .type-rarity-row { grid-template-columns: 1fr 1fr; } .type-rarity-row select { grid-column: 1 / -1; } }
+@media (max-width: 560px) { .type-rarity-row { grid-template-columns: 1fr 1fr; } .type-rarity-name { grid-column: 1 / -1; } }
 .color-field input { width: 56px; min-height: 40px; padding: 2px; }
 .badge { padding: 2px 8px; border-radius: 99px; background: #e4e7f4; font-size: 12px; font-weight: 700; }
 .badge.done { background: #cfeedd; color: #0d5a35; }

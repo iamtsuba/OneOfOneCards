@@ -55,7 +55,12 @@ ok('validation : tableau vide refusé', validateTypeRarities([]) !== '')
 ok('validation : même rareté deux fois refusée', validateTypeRarities([{ rarity_id: 'ultra', max_series: 50 }, { rarity_id: 'ultra', max_series: 80 }]) !== '')
 ok('validation : numérotées au-delà du nombre de séries refusé (51 > 50)', validateTypeRarities([{ rarity_id: 'ultra', max_series: 50, numbered_series: 51 }]) !== '')
 ok('validation : numérotées = nombre de séries accepté (tous visibles)', validateTypeRarities([{ rarity_id: 'ultra', max_series: 50, numbered_series: 50 }]) === '')
-ok('validation : décimal, zéro et trop grand refusés', validateTypeRarities([{ rarity_id: 'ultra', max_series: '50.5' }]) !== '' && validateTypeRarities([{ rarity_id: 'ultra', max_series: 0 }]) !== '' && validateTypeRarities([{ rarity_id: 'ultra', max_series: 5001 }]) !== '')
+ok('validation : décimal, négatif et trop grand refusés', validateTypeRarities([{ rarity_id: 'ultra', max_series: '50.5' }]) !== '' && validateTypeRarities([{ rarity_id: 'ultra', max_series: -1 }, { rarity_id: 'super', max_series: 10 }]) !== '' && validateTypeRarities([{ rarity_id: 'ultra', max_series: 5001 }]) !== '')
+// 0 série = la rareté n'existe pas pour ce type (une carte peut n'exister que dans une seule rareté)
+ok('validation : 0 série accepté pour une rareté si une autre a des séries', validateTypeRarities([{ rarity_id: 'ultra', max_series: 0, numbered_series: 0 }, { rarity_id: 'super', max_series: 40, numbered_series: 0 }]) === '')
+ok('validation : tout à 0 refusé (un type sans aucune carte)', validateTypeRarities([{ rarity_id: 'ultra', max_series: 0 }, { rarity_id: 'super', max_series: 0 }]) !== '')
+ok('validation : des séries numérotées sans série sont refusées (3 > 0)', validateTypeRarities([{ rarity_id: 'ultra', max_series: 0, numbered_series: 3 }, { rarity_id: 'super', max_series: 40 }]) !== '')
+ok('validation : une seule rareté dans tout le type est possible (ex. carte secrète en Légende seulement)', validateTypeRarities([{ rarity_id: 'legende', max_series: 100, numbered_series: 10 }, { rarity_id: 'ultra', max_series: '0' }, { rarity_id: 'common', max_series: '0' }]) === '')
 ok('validation : une ligne sans rareté refusée', validateTypeRarities([{ rarity_id: '', max_series: 50 }]) !== '')
 
 if (bad) { console.error(`\n${bad} contrôle(s) en échec`); process.exit(1) }

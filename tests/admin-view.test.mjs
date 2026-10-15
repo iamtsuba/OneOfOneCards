@@ -41,7 +41,8 @@ ok('onglet Catégories : s’affiche', cats !== null && clean(cats))
 if (cats) {
   const started = data.categories.filter((c) => c.taken > 0).length
   ok(`zone dangereuse : une par catégorie entamée (${started})`, (cats.match(/danger-zone/g) || []).length === started && /Supprimer la catégorie et tout son contenu/.test(cats))
-  ok('plus de seuils de rareté par catégorie', !/Seuils de rareté de cette catégorie/.test(cats) && /raretés ne se\s+règlent plus par catégorie/.test(cats))
+  ok('plus de seuils de rareté par catégorie', !/Seuils de rareté de cette catégorie/.test(cats) && /raretés et leur nombre de séries ne se règlent plus par catégorie/.test(cats))
+  ok('plus de champ « Séries (1 à N) » dans le formulaire de catégorie', !/Séries \(1 à N\)/.test(cats) && !/Le nombre de séries \(par défaut/.test(cats))
 }
 
 // Types : on met la catégorie « Chattrapez » en premier pour voir un type secret et des raretés propres
@@ -65,6 +66,13 @@ if (typesTab) {
   ok('éditeur : Super Rare, 100 séries, 1 numérotée → 1/1 à 100/100, seule la 1/1 est numérotée (et NON 51 à 150 : séries indépendantes)', /Super Rare<\/strong> : cartes de 1\/1 à 100\/100 \(5\D050 cartes\) — numéro visible de 1\/1 à 1\/1 \(séries 1 à 1\), masqué ensuite/.test(exHtml))
   ok('éditeur : Rare, 200 séries, 20 numérotées → 1/1 à 200/200, numéro visible de 1/1 à 20/20', /Rare<\/strong> : cartes de 1\/1 à 200\/200 \(20\D100 cartes\) — numéro visible de 1\/1 à 20\/20 \(séries 1 à 20\), masqué ensuite/.test(exHtml))
   ok('éditeur : plus aucune trace des tranches qui se suivent (« séries 51 à … »)', !/séries 51 à/.test(exHtml))
+  // 0 série = la rareté n'existe pas pour ce type : toutes les raretés sont listées, celles que le type n'a pas valent 0
+  const rangeCount = data.rarities.filter((r) => r.kind === 'range').length
+  const rowsHtml = exHtml.match(/class="type-rarity-row"/g) || []
+  ok('éditeur : une ligne par rareté (0 série pour celles que le type n\'a pas), sans bouton « Ajouter » ni « × »', rowsHtml.length >= rangeCount && !/Ajouter une rareté/.test(exHtml) && !/Retirer cette rareté/.test(exHtml))
+  ok('éditeur : une rareté à 0 série est décrite comme absente du type', /Commune<\/strong> : absente de ce type \(0 série\)/.test(exHtml) && /min="0" max="5000"/.test(exHtml))
+  ok('éditeur : explication « 0 série max. = la rareté n\'existe pas pour ce type »', /0 série max\. = la rareté n’existe pas pour ce type/.test(exHtml))
+  ok('éditeur : le type secret est expliqué comme une carte mystère dans l\'album', /carte mystère/.test(exHtml))
   const nTypes = data.types.filter((t) => t.category_id === first.id).length
   ok('types : un bouton « Réduire » par type (déplié par défaut), et Tout réduire / Tout déplier', (typesTab.match(/aria-expanded="true"/g) || []).length === nTypes && /Tout réduire/.test(typesTab) && /Tout déplier/.test(typesTab))
   const reduced = show(M.TypesTab, { data: dataChat, initialCollapsed: data.types.map((t) => t.id) })

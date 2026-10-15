@@ -2056,46 +2056,58 @@ returns table (
   pick_base   text,
   pick_series int,
   pick_number int,
-  owned_count bigint
+  owned_count bigint,
+  secret      boolean,
+  revealed    boolean
 )
 language plpgsql security definer set search_path = public as $$
 declare uid uuid := auth.uid();
 begin
   if uid is null then raise exception 'not_authenticated'; end if;
   return query
-  with ts as (
-    select t.id, t.name, t.image, t.position
-    from public.o1ocards_types t
-    where t.category_id = p_category
-      and (not t.secret or exists (select 1 from public.o1ocards_cards k where k.type_id = t.id and k.owner_id = uid))
-  ),
-  slots as (
-    -- une rareté de base a des cartes de SA rareté si une série a des cartes « du milieu » (3 séries ou plus) ou une série à
-    -- numéro masqué de 2 cartes ou plus (dont toutes les cartes gardent la rareté de base)
-    select ts.id as type_id, c.rarity_id
-    from ts cross join lateral public.o1ocards_type_config(ts.id) c
-    where c.smax >= 3 or (c.smax = 2 and c.numbered < 2)
-    union
-    select ts.id, r.id from ts join public.o1ocards_rarities r on r.kind = 'unique'
-    union
-    -- Alpha et Omega n'existent que sur les séries à numéro visible (au moins une série visible de 2 cartes ou plus)
-    select ts.id, r.id from ts join public.o1ocards_rarities r on r.kind in ('alpha', 'omega')
-    where exists (select 1 from public.o1ocards_type_config(ts.id) c where least(c.numbered::bigint, c.smax) >= 2)
-  ),
-  mine as (
-    select c.type_id, public.o1ocards_rarity_id(c.number, c.series, c.type_id, c.base_rarity) as rid
-    from public.o1ocards_cards c
-    where c.owner_id = uid and c.type_id in (select id from ts)
-  )
-  select ts.id, ts.name, ts.image, s.rarity_id, p.base_rarity, p.series, p.number,
-         (select count(*) from mine m where m.type_id = ts.id and m.rid = s.rarity_id)
-  from ts
-  join slots s on s.type_id = ts.id
-  join public.o1ocards_rarities r on r.id = s.rarity_id
-  left join public.o1ocards_album_picks p
-         on p.user_id = uid and p.type_id = ts.id and p.rarity_id = s.rarity_id
-        and public.o1ocards_rarity_id(p.number, p.series, p.type_id, p.base_rarity) = p.rarity_id   -- choix périmé si la carte a changé de rareté
-  order by ts.position, ts.id, r.sort_order desc;
+  select y.type_id, y.type_name, y.type_image, y.rarity_id, y.pick_base, y.pick_series, y.pick_number, y.owned_count, y.secret, y.revealed
+  from (
+    with ts as (
+      -- un type secret est dévoilé dès qu'on en possède une carte ; avant, il apparaît dans l'album comme une carte mystère
+      select t.id, t.name, t.image, t.position, t.secret,
+             (not t.secret or exists (select 1 from public.o1ocards_cards k where k.type_id = t.id and k.owner_id = uid)) as revealed
+      from public.o1ocards_types t
+      where t.category_id = p_category
+    ),
+    slots as (
+      -- une rareté de base a des cartes de SA rareté si une série a des cartes « du milieu » (3 séries ou plus) ou une série à
+      -- numéro masqué de 2 cartes ou plus (dont toutes les cartes gardent la rareté de base)
+      select ts.id as type_id, c.rarity_id
+      from ts cross join lateral public.o1ocards_type_config(ts.id) c
+      where ts.revealed and (c.smax >= 3 or (c.smax = 2 and c.numbered < 2))
+      union
+      select ts.id, r.id from ts join public.o1ocards_rarities r on r.kind = 'unique' where ts.revealed
+      union
+      -- Alpha et Omega n'existent que sur les séries à numéro visible (au moins une série visible de 2 cartes ou plus)
+      select ts.id, r.id from ts join public.o1ocards_rarities r on r.kind in ('alpha', 'omega')
+      where ts.revealed and exists (select 1 from public.o1ocards_type_config(ts.id) c where least(c.numbered::bigint, c.smax) >= 2)
+    ),
+    mine as (
+      select c.type_id, public.o1ocards_rarity_id(c.number, c.series, c.type_id, c.base_rarity) as rid
+      from public.o1ocards_cards c
+      where c.owner_id = uid and c.type_id in (select t2.id from ts t2 where t2.revealed)
+    )
+    select ts.id as type_id, ts.name as type_name, ts.image as type_image, s.rarity_id, p.base_rarity as pick_base,
+           p.series as pick_series, p.number as pick_number,
+           (select count(*) from mine m where m.type_id = ts.id and m.rid = s.rarity_id) as owned_count,
+           ts.secret, true as revealed, ts.position as o_pos, r.sort_order as o_ord
+    from ts
+    join slots s on s.type_id = ts.id
+    join public.o1ocards_rarities r on r.id = s.rarity_id
+    left join public.o1ocards_album_picks p
+           on p.user_id = uid and p.type_id = ts.id and p.rarity_id = s.rarity_id
+          and public.o1ocards_rarity_id(p.number, p.series, p.type_id, p.base_rarity) = p.rarity_id   -- choix périmé si la carte a changé de rareté
+    union all
+    -- carte secrète pas encore découverte : une seule ligne, sans nom ni visuel (rien ne fuit par cette fonction)
+    select ts.id, null::text, null::text, null::text, null::text, null::int, null::int, 0::bigint, true, false, ts.position, 0
+    from ts where not ts.revealed
+  ) y
+  order by y.secret, y.o_pos, y.type_id, y.o_ord desc;
 end $$;
 
 -- Mes exemplaires d'un type, éventuellement d'une seule rareté (pour choisir lequel mettre dans l'emplacement).
@@ -2651,7 +2663,8 @@ begin
 end $$;
 
 -- Raretés d'un type (logique « Topps ») : p_rarities = [{"rarity_id":"ultra","max_series":50,"numbered_series":5}, ...].
--- CHAQUE rareté a ses propres séries : max_series = nombre de séries (cartes 1/1 à max/max) ; numbered_series : de 0 (rareté non
+-- CHAQUE rareté a ses propres séries : max_series = nombre de séries (cartes 1/1 à max/max) ; 0 = la rareté n'existe pas pour ce type
+-- (une carte peut n'exister que dans une seule rareté) ; numbered_series : de 0 (rareté non
 -- numérotée : numéro jamais visible) à max_series (tous les numéros visibles) = nombre de séries, en partant de la 1re, dont le
 -- numéro est visible ; les suivantes sont numérotées en interne, numéro masqué. Une rareté n'apparaît qu'une fois ; les nombres
 -- de séries des raretés sont indépendants (pas d'ordre à respecter).
@@ -2688,22 +2701,27 @@ begin
       ) then raise exception 'invalid_type_rarities'; end if;
       if exists (
         select 1 from jsonb_array_elements(p_rarities) e
-        where (e->>'max_series')::int < 1 or (e->>'max_series')::int > 5000
+        where (e->>'max_series')::int > 5000
            or coalesce((e->>'numbered_series')::int, 0) > (e->>'max_series')::int
       ) then raise exception 'invalid_type_rarities'; end if;
+      -- au moins une rareté doit avoir des séries (tout à 0 = un type sans aucune carte)
+      if not exists (select 1 from jsonb_array_elements(p_rarities) e where (e->>'max_series')::int >= 1) then
+        raise exception 'invalid_type_rarities';
+      end if;
 
       -- les cartes déjà tirées doivent rentrer dans les nouveaux réglages
       if exists (
         select 1 from public.o1ocards_cards c
         where c.type_id = p_type
           and not exists (select 1 from jsonb_array_elements(p_rarities) e
-                          where e->>'rarity_id' = c.base_rarity and (e->>'max_series')::int >= c.series)
+                          where e->>'rarity_id' = c.base_rarity and (e->>'max_series')::int >= c.series and (e->>'max_series')::int >= 1)
       ) then raise exception 'series_locked'; end if;
 
       delete from public.o1ocards_type_rarities where type_id = p_type;
       insert into public.o1ocards_type_rarities (type_id, rarity_id, max_series, numbered_series)
       select p_type, e->>'rarity_id', (e->>'max_series')::int, coalesce((e->>'numbered_series')::int, 0)
-      from jsonb_array_elements(p_rarities) e;
+      from jsonb_array_elements(p_rarities) e
+      where (e->>'max_series')::int >= 1;   -- une rareté à 0 série n'est pas enregistrée : elle n'existe pas pour ce type
       select max((e->>'max_series')::int) into v_top from jsonb_array_elements(p_rarities) e;
       update public.o1ocards_types set series_count = v_top where id = p_type;
     else

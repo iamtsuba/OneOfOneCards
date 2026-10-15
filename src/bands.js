@@ -40,7 +40,8 @@ export function defaultConfig(globalRarities, category) {
 }
 
 // Validation d'un tableau de raretés en cours d'édition ({rarity_id, max_series, numbered_series} en texte ou nombres), mêmes
-// règles que admin_save_type_rarities. Les raretés sont indépendantes : aucun ordre à respecter. Renvoie '' si valide.
+// règles que admin_save_type_rarities. Les raretés sont indépendantes : aucun ordre à respecter ; 0 série = la rareté n'existe pas
+// pour ce type. Renvoie '' si valide.
 export function validateTypeRarities(rows) {
   if (!rows || rows.length === 0) return 'Ajoute au moins une rareté.'
   const ids = new Set()
@@ -50,9 +51,10 @@ export function validateTypeRarities(rows) {
     if (!r.rarity_id) return 'Choisis une rareté pour chaque ligne.'
     if (ids.has(r.rarity_id)) return 'Une même rareté ne peut apparaître qu’une fois.'
     ids.add(r.rarity_id)
-    if (!Number.isInteger(max) || max < 1 || max > 5000) return 'Le nombre de séries est un entier entre 1 et 5000.'
+    if (!Number.isInteger(max) || max < 0 || max > 5000) return 'Le nombre de séries est un entier entre 0 et 5000 (0 = la rareté n’existe pas pour ce type).'
     if (!Number.isInteger(num) || num < 0) return 'Le nombre de séries numérotées est un entier, 0 si la rareté n’est pas numérotée.'
     if (num > max) return `Les séries numérotées (${num}) ne peuvent pas dépasser le nombre de séries (${max}).`
   }
+  if (!rows.some((r) => Number(r.max_series) >= 1)) return 'Au moins une rareté doit avoir des séries (tout à 0 = un type sans aucune carte).'
   return ''
 }
