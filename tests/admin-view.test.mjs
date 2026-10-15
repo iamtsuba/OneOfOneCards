@@ -56,6 +56,12 @@ if (typesTab) {
   ok('types : un type sans réglage propre indique les seuils par défaut', /seuils par défaut \(onglet Raretés\)/.test(typesTab))
   ok('types : case « type secret » cochée pour le secret', /checked=""/.test(typesTab))
   ok('types : import de types présent', /Importer des types/.test(typesTab))
+  const nTypes = data.types.filter((t) => t.category_id === first.id).length
+  ok('types : un bouton « Réduire » par type (déplié par défaut), et Tout réduire / Tout déplier', (typesTab.match(/aria-expanded="true"/g) || []).length === nTypes && /Tout réduire/.test(typesTab) && /Tout déplier/.test(typesTab))
+  const reduced = show(M.TypesTab, { data: dataChat, initialCollapsed: data.types.map((t) => t.id) })
+  ok('types réduits : seul l’en-tête reste (nom, badges), plus aucun formulaire ni éditeur de raretés', reduced !== null && (reduced.match(/aria-expanded="false"/g) || []).length === nTypes
+    && !/type-rarities/.test(reduced) && !/Enregistrer les raretés/.test(reduced) && /Chat Iny/.test(reduced) && /badge">secret</.test(reduced) && /500 séries/.test(reduced))
+  ok('types réduits : le bouton propose de les déplier, le formulaire « Nouveau type » reste utilisable', /aria-label="Déplier Chat va \?"/.test(reduced) && /Nouveau type/.test(reduced) && />Créer</.test(reduced))
 }
 
 // Raretés, réglages, mentions légales, 1/1, sécurité

@@ -267,8 +267,10 @@ function CategoryForm({ cat, nextPos, run, busy }) {
 }
 
 // ---------- Types ----------
-export function TypesTab({ data, run, busy }) {
+export function TypesTab({ data, run, busy, initialCollapsed = [] }) {
   const [catId, setCatId] = useState(data.categories[0]?.id ?? null)
+  const [collapsed, setCollapsed] = useState(() => new Set(initialCollapsed))   // types réduits (seul leur en-tête reste visible)
+  const toggle = (id) => setCollapsed((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const types = data.types.filter((t) => t.category_id === catId)
   const nextPos = Math.max(0, ...types.map((t) => t.position)) + 1
   if (!data.categories.length) return <p className="muted">Crée d’abord une catégorie.</p>
@@ -284,7 +286,15 @@ export function TypesTab({ data, run, busy }) {
         L’image est un emoji, une adresse https:// ou une image téléversée (réduite à 256 px). Les raretés, le nombre de séries et les numéros visibles
         se règlent <strong>par type</strong> (bloc « Raretés de ce type » de chaque fiche). Attention aux droits des images que tu utilises.
       </p>
-      {types.map((t) => <TypeForm key={t.id} type={t} categoryId={catId} data={data} run={run} busy={busy} />)}
+      {types.length > 1 && (
+        <div className="row">
+          <button type="button" className="btn ghost" onClick={() => setCollapsed(new Set(types.map((t) => t.id)))}>Tout réduire</button>
+          <button type="button" className="btn ghost" onClick={() => setCollapsed(new Set())}>Tout déplier</button>
+        </div>
+      )}
+      {types.map((t) => (
+        <TypeForm key={t.id} type={t} categoryId={catId} data={data} run={run} busy={busy} collapsed={collapsed.has(t.id)} onToggle={() => toggle(t.id)} />
+      ))}
       <h3>Nouveau type</h3>
       <TypeForm key={`new-${catId}-${types.length}`} type={null} categoryId={catId} nextPos={nextPos} run={run} busy={busy} />
       <h3>Importer des types</h3>
@@ -293,7 +303,7 @@ export function TypesTab({ data, run, busy }) {
   )
 }
 
-function TypeForm({ type, categoryId, nextPos, data, run, busy }) {
+function TypeForm({ type, categoryId, nextPos, data, run, busy, collapsed = false, onToggle }) {
   const [f, setF] = useState({ name: type?.name ?? '', position: type?.position ?? nextPos ?? 1, image: type?.image ?? '' })
   const [localError, setLocalError] = useState('')
   const uploaded = f.image.startsWith('data:')
@@ -310,14 +320,22 @@ function TypeForm({ type, categoryId, nextPos, data, run, busy }) {
     }
   }
   return (
-    <div className="admin-card">
+    <div className={`admin-card${collapsed ? ' collapsed' : ''}`}>
       <div className="admin-card-head">
+        {type && onToggle && (
+          <button type="button" className="btn ghost icon collapse-btn" aria-expanded={!collapsed}
+            aria-label={`${collapsed ? 'Déplier' : 'Réduire'} ${type.name}`} title={collapsed ? 'Déplier' : 'Réduire'} onClick={onToggle}>
+            {collapsed ? '▸' : '▾'}
+          </button>
+        )}
         <span className="admin-type-art"><TypeArt type={{ image: f.image }} /></span>
         <strong>{type ? type.name : 'Nouveau type'}</strong>
         {type && type.taken > 0 && <span className="badge">{fmt(type.taken)} tirées</span>}
         {type?.series_count && <span className="badge">{fmt(type.series_count)} séries</span>}
         {type?.secret && <span className="badge">secret</span>}
       </div>
+      {!collapsed && (
+      <>
       <div className="admin-grid">
         <label>Nom<input value={f.name} maxLength={60} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
         <label>Position<input type="number" value={f.position} onChange={(e) => setF({ ...f, position: e.target.value })} /></label>
@@ -349,6 +367,8 @@ function TypeForm({ type, categoryId, nextPos, data, run, busy }) {
         )}
       </div>
       {type && data && <TypeRaritiesEditor key={`${type.id}-${type.series_count}-${type.secret}`} type={type} data={data} run={run} busy={busy} />}
+      </>
+      )}
     </div>
   )
 }
