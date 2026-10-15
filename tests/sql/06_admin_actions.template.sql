@@ -56,13 +56,13 @@ select (public.{{P}}admin_save_category('thomarie', null, 'Test Suppression', 95
 select (public.{{P}}admin_save_type('thomarie', null, :cat_del, 'Objet à supprimer', '🗑️', 1) ->> 'id')::int as type_del \gset
 select (public.{{P}}admin_save_type_rarities('thomarie', :type_del, '[{"rarity_id":"ultra","max_series":50,"numbered_series":3}]'::jsonb) ->> 'ok')::bool as raretes_du_type_a_supprimer;
 insert into public.{{P}}cards (type_id, series, number, owner_id) values (:type_del, 5, 2, :A), (:type_del, 5, 3, :A);
-select public.{{P}}list_card(:type_del, 5, 2, 'auction') ->> 'listing_id' as listing_id \gset
+select public.{{P}}list_card(:type_del, public.{{P}}default_base_rarity(:type_del, 5), 5, 2, 'auction') ->> 'listing_id' as listing_id \gset
 set request.jwt.claim.sub = :B;
 select (coins) as coins_b_avant_enchere from public.{{P}}profiles where id = :B \gset
 select public.{{P}}place_bid(:listing_id, 10) ->> 'ends_at' is not null as a_enchere;
 select coins from public.{{P}}profiles where id = :B;  -- doit avoir baissé de 10 (mise bloquée)
-select public.{{P}}make_offer(:type_del, 5, 3, 4) ->> 'offer_id' is not null as offre_envoyee;
-select public.{{P}}toggle_favorite(:type_del, 5, 4) ->> 'favorited' as favori_pose;  -- carte encore libre
+select public.{{P}}make_offer(:type_del, public.{{P}}default_base_rarity(:type_del, 5), 5, 3, 4) ->> 'offer_id' is not null as offre_envoyee;
+select public.{{P}}toggle_favorite(:type_del, public.{{P}}default_base_rarity(:type_del, 5), 5, 4) ->> 'favorited' as favori_pose;  -- carte encore libre
 set request.jwt.claim.sub = :A;
 
 select pg_temp.try('select public.{{P}}admin_force_delete_category(''thomarie'', ' || :cat_del || ', ''mauvais nom'')');  -- refusée

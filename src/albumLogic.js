@@ -42,7 +42,7 @@ export function pickerEntries(cards) {
     entries.push({ kind: 'stack', key: 'stack', count: hidden.length, card: picked ?? hidden[0], picked: !!picked })
   }
   for (const c of open.filter((x) => x.visible)) {
-    entries.push({ kind: 'card', key: `${c.series}-${c.number}`, count: 1, card: c, picked: !!c.picked })
+    entries.push({ kind: 'card', key: `${c.base_rarity}-${c.series}-${c.number}`, count: 1, card: c, picked: !!c.picked })
   }
   return { entries, listedCount: (cards ?? []).length - open.length }
 }

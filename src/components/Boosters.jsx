@@ -245,12 +245,12 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
         <ul className="summary-grid">
           {cards.map((c) => (
             <li key={`${c.type_id}-${c.series}-${c.number}`}>
-              <Card typeId={c.type_id} series={c.series} number={c.number} rarity={rarityMap[c.rarity_id]} size="sm" isNew={!!c.is_new} glow shine={revealAll} />
+              <Card typeId={c.type_id} base={c.base_rarity} series={c.series} number={c.number} rarity={rarityMap[c.rarity_id]} size="sm" isNew={!!c.is_new} glow shine={revealAll} />
             </li>
           ))}
         </ul>
         <p className="overlay-hint">
-          {cards.length} carte{cards.length > 1 ? 's' : ''} ajoutée{cards.length > 1 ? 's' : ''} à ta collection. Meilleure carte : {rarityMap[rarest.rarity_id]?.name}, {catalog?.typeMap?.[rarest.type_id]?.name}{catalog?.cardRef?.(rarest.type_id, rarest.number, rarest.series)}.
+          {cards.length} carte{cards.length > 1 ? 's' : ''} ajoutée{cards.length > 1 ? 's' : ''} à ta collection. Meilleure carte : {rarityMap[rarest.rarity_id]?.name}, {catalog?.typeMap?.[rarest.type_id]?.name}{catalog?.cardRef?.(rarest.type_id, rarest.base_rarity, rarest.number, rarest.series)}.
         </p>
         <div className="overlay-actions">
           {boosters > 0 && <button className="btn accent" onClick={onAgain}>Ouvrir un autre booster</button>}
@@ -290,13 +290,13 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
           aria-label={last ? 'Voir le résumé' : 'Carte suivante'}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); advance() } }}
         >
-          <Card typeId={c.type_id} series={c.series} number={c.number} rarity={rarity} size="lg" isNew={!!c.is_new} glow shine />
+          <Card typeId={c.type_id} base={c.base_rarity} series={c.series} number={c.number} rarity={rarity} size="lg" isNew={!!c.is_new} glow shine />
         </div>
 
         {isSpecial(rarity) && <Fireworks rarity={rarity} />}
 
         <p className="reveal-line" aria-live="polite">
-          <strong>{rarity?.name}</strong> : « {catalog?.typeMap?.[c.type_id]?.name} »{catalog?.cardRef?.(c.type_id, c.number, c.series)} n’existe qu’en un exemplaire, et c’est le tien.
+          <strong>{rarity?.name}</strong> : « {catalog?.typeMap?.[c.type_id]?.name} »{catalog?.cardRef?.(c.type_id, c.base_rarity, c.number, c.series)} n’existe qu’en un exemplaire, et c’est le tien.
         </p>
         <p className="overlay-hint">{last ? 'Touche la carte pour voir le résumé.' : 'Touche la carte pour passer à la suivante.'}</p>
       </div>

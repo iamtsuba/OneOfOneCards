@@ -14,7 +14,7 @@ const KIND_ICON = {
 function describe(n, catalog) {
   const name = catalog?.typeMap?.[n.card_type]?.name ?? 'une carte'
   const who = n.actor_name || 'Un joueur'
-  const ref = catalog?.cardRef?.(n.card_type, n.card_number, n.card_series)?.trim()
+  const ref = catalog?.cardRef?.(n.card_type, n.card_base, n.card_number, n.card_series)?.trim()
   const card = `${name}${ref ? ` (${ref})` : ''}`
   switch (n.kind) {
     case 'favorite_listed':

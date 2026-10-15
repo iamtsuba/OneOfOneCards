@@ -52,10 +52,19 @@ ok('onglet Types : s’affiche', typesTab !== null && clean(typesTab))
 if (typesTab) {
   ok('types : un éditeur « Raretés de ce type » par type', (typesTab.match(/class="type-rarities"/g) || []).length === data.types.filter((t) => t.category_id === first.id).length)
   ok('types : badge « secret » et nombre de séries propres', /badge">secret</.test(typesTab) && /500 séries/.test(typesTab) && /100 séries/.test(typesTab))
-  ok('types : raretés propres décrites (numéros visibles puis masqués)', /Légende<\/strong> : séries 1 à 20/.test(typesTab) && /numéro visible sur les 10 premières séries/.test(typesTab) && /non numérotée/.test(typesTab))
-  ok('types : un type sans réglage propre indique les seuils par défaut', /seuils par défaut \(onglet Raretés\)/.test(typesTab))
+  ok('types : raretés propres décrites (numéros visibles puis masqués)', /Légende<\/strong> : cartes de 1\/1 à 20\/20/.test(typesTab) && /numéro visible de 1\/1 à 10\/10/.test(typesTab) && /non numérotée/.test(typesTab))
+  ok('types : un type sans réglage propre indique les seuils par défaut', /réglages par défaut \(onglet Raretés\)/.test(typesTab))
   ok('types : case « type secret » cochée pour le secret', /checked=""/.test(typesTab))
   ok('types : import de types présent', /Importer des types/.test(typesTab))
+  // Tes trois exemples : chaque rareté a SES séries, de 1/1 à N/N, numéros visibles de 1/1 à K/K
+  const t1 = data.types.find((t) => t.category_id === first.id && !t.secret)
+  const ex = [{ rarity_id: 'ultra', max_series: 50, numbered_series: 5 }, { rarity_id: 'super', max_series: 100, numbered_series: 1 }, { rarity_id: 'rare', max_series: 200, numbered_series: 20 }]
+  const dataEx = { ...dataChat, type_rarities: [...data.type_rarities.filter((r) => r.type_id !== t1.id), ...ex.map((r) => ({ type_id: t1.id, ...r }))] }
+  const exHtml = show(M.TypesTab, { data: dataEx })
+  ok('éditeur : Ultra Rare, 50 séries, 5 numérotées → cartes de 1/1 à 50/50 (1 275 cartes), numéro visible de 1/1 à 5/5', exHtml !== null && /Ultra Rare<\/strong> : cartes de 1\/1 à 50\/50 \(1\D275 cartes\) — numéro visible de 1\/1 à 5\/5 \(séries 1 à 5\), masqué ensuite/.test(exHtml))
+  ok('éditeur : Super Rare, 100 séries, 1 numérotée → 1/1 à 100/100, seule la 1/1 est numérotée (et NON 51 à 150 : séries indépendantes)', /Super Rare<\/strong> : cartes de 1\/1 à 100\/100 \(5\D050 cartes\) — numéro visible de 1\/1 à 1\/1 \(séries 1 à 1\), masqué ensuite/.test(exHtml))
+  ok('éditeur : Rare, 200 séries, 20 numérotées → 1/1 à 200/200, numéro visible de 1/1 à 20/20', /Rare<\/strong> : cartes de 1\/1 à 200\/200 \(20\D100 cartes\) — numéro visible de 1\/1 à 20\/20 \(séries 1 à 20\), masqué ensuite/.test(exHtml))
+  ok('éditeur : plus aucune trace des tranches qui se suivent (« séries 51 à … »)', !/séries 51 à/.test(exHtml))
   const nTypes = data.types.filter((t) => t.category_id === first.id).length
   ok('types : un bouton « Réduire » par type (déplié par défaut), et Tout réduire / Tout déplier', (typesTab.match(/aria-expanded="true"/g) || []).length === nTypes && /Tout réduire/.test(typesTab) && /Tout déplier/.test(typesTab))
   const reduced = show(M.TypesTab, { data: dataChat, initialCollapsed: data.types.map((t) => t.id) })

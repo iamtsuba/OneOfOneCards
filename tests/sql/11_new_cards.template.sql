@@ -10,11 +10,11 @@ set request.jwt.claim.sub = :A; select public.{{P}}status() is not null as profi
 
 \echo '=== owns_card_rarity : possède déjà ce type dans cette rareté ?'
 insert into public.{{P}}cards (type_id, series, number, owner_id) values (1, 10, 3, :A);   -- type 1, série 10 : Ultra Rare
-select public.{{P}}rarity_id(3, 10, 1) as rarete_de_la_carte,
-       public.{{P}}owns_card_rarity(:A, 1, public.{{P}}rarity_id(3, 10, 1)) as meme_type_meme_rarete,
+select public.{{P}}rarity_id(3, 10, 1, public.{{P}}default_base_rarity(1, 10)) as rarete_de_la_carte,
+       public.{{P}}owns_card_rarity(:A, 1, public.{{P}}rarity_id(3, 10, 1, public.{{P}}default_base_rarity(1, 10))) as meme_type_meme_rarete,
        public.{{P}}owns_card_rarity(:A, 1, 'common') as meme_type_autre_rarete,
-       public.{{P}}owns_card_rarity(:A, 2, public.{{P}}rarity_id(3, 10, 1)) as autre_type_meme_rarete,
-       public.{{P}}owns_card_rarity('22222222-2222-2222-2222-222222222222', 1, public.{{P}}rarity_id(3, 10, 1)) as autre_joueur;
+       public.{{P}}owns_card_rarity(:A, 2, public.{{P}}rarity_id(3, 10, 1, public.{{P}}default_base_rarity(1, 10))) as autre_type_meme_rarete,
+       public.{{P}}owns_card_rarity('22222222-2222-2222-2222-222222222222', 1, public.{{P}}rarity_id(3, 10, 1, public.{{P}}default_base_rarity(1, 10))) as autre_joueur;
 delete from public.{{P}}cards;
 
 \echo '=== boosters normaux : is_new = pas déjà ce type dans cette rareté, y compris avec les cartes du même booster'
@@ -25,7 +25,7 @@ declare r jsonb; c record; v_total int := 0; v_new int := 0; v_bad int := 0; v_m
 begin
   for i in 1 .. 40 loop
     truncate seen;
-    insert into seen select c2.type_id, public.{{P}}rarity_id(c2.number, c2.series, c2.type_id)
+    insert into seen select c2.type_id, public.{{P}}rarity_id(c2.number, c2.series, c2.type_id, public.{{P}}default_base_rarity(c2.type_id, c2.series))
       from public.{{P}}cards c2 where c2.owner_id = '11111111-1111-1111-1111-111111111111';
     r := public.{{P}}open_booster();
     for c in select (e->>'type_id')::int as t, e->>'rarity_id' as rid, (e->>'is_new')::boolean as nw
@@ -52,7 +52,7 @@ declare r jsonb; c record; v_total int := 0; v_new int := 0; v_bad int := 0; v_m
 begin
   for i in 1 .. 6 loop
     truncate seen;
-    insert into seen select c2.type_id, public.{{P}}rarity_id(c2.number, c2.series, c2.type_id)
+    insert into seen select c2.type_id, public.{{P}}rarity_id(c2.number, c2.series, c2.type_id, public.{{P}}default_base_rarity(c2.type_id, c2.series))
       from public.{{P}}cards c2 where c2.owner_id = '11111111-1111-1111-1111-111111111111';
     r := public.{{P}}open_booster();
     if not (r->>'golden')::boolean then v_bad := v_bad + 1; end if;

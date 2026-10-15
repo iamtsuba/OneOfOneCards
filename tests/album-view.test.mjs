@@ -34,7 +34,7 @@ const rarityMap = {
 const types = [{ id: 1, category_id: 1, name: 'Chat va ?', image: '🐱', position: 1, secret: false }, { id: 2, category_id: 1, name: 'Chat va pas ?', image: '😾', position: 2, secret: false }]
 const catalog = {
   typeMap: Object.fromEntries(types.map((t) => [t.id, t])), categoryMap: {}, types, rarities: Object.values(rarityMap),
-  numberHidden: (typeId, series) => typeId === 2 && series === 50,   // les séries 50 du type 2 ont leur numéro masqué
+  numberHidden: (typeId, base, series) => typeId === 2 && series === 50,   // les séries 50 du type 2 ont leur numéro masqué
   cardRef: () => '', seriesOf: () => 100, checklist: (id) => ({ no: id, total: 2, secret: false }),
 }
 const wrap = (el) => React.createElement(GameContext.Provider, { value: { catalog, rarityMap, rarities: Object.values(rarityMap) } }, el)
@@ -105,7 +105,7 @@ ok('album : emplacement Unique marqué « 1/1 » (étiquette), les autres non, e
 ok('album : les Unique restent visibles (8 emplacements au total)', (bAlbum.match(/class="album-slot /g) || []).length === 8)
 
 // ---- Sélecteur de l'album : 200 cartes masquées = 1 proposition, + 3 numérotées = 4
-const mk = (series, number, visible, extra2 = {}) => ({ series, number, rarity_id: 'common', listed: false, picked: false, visible, ...extra2 })
+const mk = (series, number, visible, extra2 = {}) => ({ base_rarity: 'common', series, number, rarity_id: 'common', listed: false, picked: false, visible, ...extra2 })
 const pickCards = [...Array.from({ length: 200 }, (_, i) => mk(40 + (i % 30), 2 + Math.floor(i / 30), false)), mk(7, 2, true), mk(50, 30, true), mk(26, 25, true)]
 const picker = (cards2, extraProps = {}) => renderToStaticMarkup(wrap(React.createElement(AlbumPicker, { typeId: 1, typeName: 'Chat va ?', rarityId: 'common', rarityName: 'Commune', rarityMap, hasPick: false, onClose: () => {}, onChanged: () => {}, initialCards: cards2, ...extraProps })))
 const ph = picker(pickCards)

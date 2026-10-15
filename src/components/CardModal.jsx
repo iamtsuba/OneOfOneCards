@@ -35,15 +35,15 @@ export default function CardModal({ sel, rarity, onClose, onChanged, onRefresh, 
     }
   }
 
-  const sell = () => run(() => api.sellDirect(sel.typeId, sel.series, sel.number))
+  const sell = () => run(() => api.sellDirect(sel.typeId, sel.base, sel.series, sel.number))
   const list = () =>
-    run(() => api.listCard({ type: sel.typeId, series: sel.series, number: sel.number, kind: mode, price: mode === 'buy_now' ? Number(price) : null }))
+    run(() => api.listCard({ type: sel.typeId, base: sel.base, series: sel.series, number: sel.number, kind: mode, price: mode === 'buy_now' ? Number(price) : null }))
 
   async function toggleFav() {
     setFavBusy(true)
     setError('')
     try {
-      const res = await api.toggleFavorite(sel.typeId, sel.series, sel.number)
+      const res = await api.toggleFavorite(sel.typeId, sel.base, sel.series, sel.number)
       setFavorited(!!res.favorited)
       onRefresh?.()
     } catch (e) {
@@ -57,7 +57,7 @@ export default function CardModal({ sel, rarity, onClose, onChanged, onRefresh, 
     setBusy(true)
     setError('')
     try {
-      await api.makeOffer(sel.typeId, sel.series, sel.number, Number(offerAmount))
+      await api.makeOffer(sel.typeId, sel.base, sel.series, sel.number, Number(offerAmount))
       setOfferSent(true)
       onRefresh?.()
     } catch (e) {
@@ -79,10 +79,10 @@ export default function CardModal({ sel, rarity, onClose, onChanged, onRefresh, 
     <div className="overlay" role="dialog" aria-modal="true" aria-label="Détail de la carte" onClick={onClose}>
       <div className="detail" onClick={(e) => e.stopPropagation()}>
         <div className="detail-card">
-          <Card typeId={sel.typeId} series={sel.series} number={sel.number} rarity={rarity} size="lg" glow shine />
+          <Card typeId={sel.typeId} base={sel.base} series={sel.series} number={sel.number} rarity={rarity} size="lg" glow shine />
         </div>
         <p className="reveal-line">
-          <strong>{rarity?.name}</strong> : {type?.name}{catalog.numberHidden(sel.typeId, sel.series) ? '' : `, carte ${sel.number} de la série de ${sel.series}`}
+          <strong>{rarity?.name}</strong> : {type?.name}{catalog.numberHidden(sel.typeId, sel.base, sel.series) ? '' : `, carte ${sel.number} de la série de ${sel.series}`}
           {category ? ` (${category.name})` : ''}.
         </p>
 

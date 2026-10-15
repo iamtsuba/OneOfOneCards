@@ -113,7 +113,7 @@ export default function Collection({ goMarket }) {
           rarityMap={rarityMap}
           onClose={() => setStack(null)}
           onChanged={() => { setStack(null); refresh() }}
-          onListOne={(card) => { setStack(null); setSelected({ typeId: stack.typeId, series: card.series, number: card.number, rarityId: stack.rarityId, state: 'mine' }) }}
+          onListOne={(card) => { setStack(null); setSelected({ typeId: stack.typeId, base: card.base_rarity, series: card.series, number: card.number, rarityId: stack.rarityId, state: 'mine' }) }}
         />
       )}
 
@@ -212,7 +212,7 @@ export function Album({ rows, catalog, rarityMap, onRefresh }) {
                       >
                         <span className="album-card-slot">
                           {picked ? (
-                            <Card typeId={g.typeId} series={slot.pick_series} number={slot.pick_number} rarity={rarity} size="sm" />
+                            <Card typeId={g.typeId} base={slot.pick_base} series={slot.pick_series} number={slot.pick_number} rarity={rarity} size="sm" />
                           ) : (
                             <span className="album-empty"><TypeArt type={catalog.typeMap[g.typeId]} /></span>
                           )}
@@ -267,7 +267,7 @@ export function AlbumPicker({ typeId, typeName, rarityId, rarityName, rarityMap,
     setBusy(true)
     setError('')
     try {
-      await api.setAlbumPick(typeId, entry.card.series, entry.card.number)
+      await api.setAlbumPick(typeId, entry.card.base_rarity, entry.card.series, entry.card.number)
       onChanged()
     } catch (e) {
       setError(explain(e))
@@ -299,7 +299,7 @@ export function AlbumPicker({ typeId, typeName, rarityId, rarityName, rarityMap,
           <ul className="grid picker-grid">
             {entries.map((e) => (
               <li key={e.key} className={e.picked ? 'picked' : ''}>
-                <Card typeId={typeId} series={e.card.series} number={e.card.number} rarity={rarityMap[rarityId]} size="sm"
+                <Card typeId={typeId} base={e.card.base_rarity} series={e.card.series} number={e.card.number} rarity={rarityMap[rarityId]} size="sm"
                   count={e.kind === 'stack' ? e.count : 0} onClick={() => !busy && choose(e)} />
                 {e.picked && <span className="picker-mark">Dans l’album</span>}
               </li>
@@ -363,7 +363,7 @@ export function StackModal({ stack, catalog, rarityMap, onClose, onChanged, onLi
     <div className="overlay" role="dialog" aria-modal="true" aria-label={`Pile de cartes ${type?.name}, ${rarity?.name}`} onClick={onClose}>
       <div className="detail" onClick={(e) => e.stopPropagation()}>
         <div className="detail-card">
-          <Card typeId={stack.typeId} series={stack.series} number={stack.number} rarity={rarity} size="lg" count={info.total} glow shine />
+          <Card typeId={stack.typeId} base={stack.base} series={stack.series} number={stack.number} rarity={rarity} size="lg" count={info.total} glow shine />
         </div>
         <p className="reveal-line">
           <strong>{rarity?.name}</strong> : {type?.name}
@@ -511,6 +511,7 @@ function MyCards({ catId, catTypes, rarities, rarityMap, stats, version, onSelec
             <li key={c.is_stack ? `stack-${c.card_type}-${c.rarity_id}` : `${c.card_type}-${c.card_series}-${c.card_number}`}>
               <Card
                 typeId={c.card_type}
+                base={c.card_base}
                 series={c.card_series}
                 number={c.card_number}
                 rarity={rarityMap[c.rarity_id]}
@@ -519,8 +520,8 @@ function MyCards({ catId, catTypes, rarities, rarityMap, stats, version, onSelec
                 count={c.is_stack ? c.stack_qty : 0}
                 size="sm"
                 onClick={() => (c.is_stack
-                  ? onStack({ typeId: c.card_type, rarityId: c.rarity_id, series: c.card_series, number: c.card_number })
-                  : onSelect({ typeId: c.card_type, series: c.card_series, number: c.card_number, rarityId: c.rarity_id, state: 'mine', listingId: c.listing_id, inAlbum: !!c.in_album }))}
+                  ? onStack({ typeId: c.card_type, base: c.card_base, rarityId: c.rarity_id, series: c.card_series, number: c.card_number })
+                  : onSelect({ typeId: c.card_type, base: c.card_base, series: c.card_series, number: c.card_number, rarityId: c.rarity_id, state: 'mine', listingId: c.listing_id, inAlbum: !!c.in_album }))}
               />
             </li>
           ))}

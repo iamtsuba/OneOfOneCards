@@ -24,9 +24,9 @@ export const listCollection = ({ category = null, type = null, rarity = null, so
 
 // Vente rapide de plusieurs cartes d'une pile (cartes à numéro masqué d'un type et d'une rareté), tout ou rien
 export const sellDirectMany = (type, rarity, count) => rpc('sell_direct_many', { p_type: type, p_rarity: rarity, p_count: count })
-export const sellDirect = (type, series, number) => rpc('sell_direct', { p_type: type, p_series: series, p_number: number })
-export const listCard = ({ type, series, number, kind, price = null }) =>
-  rpc('list_card', { p_type: type, p_series: series, p_number: number, p_kind: kind, p_price: price })
+export const sellDirect = (type, base, series, number) => rpc('sell_direct', { p_type: type, p_base: base, p_series: series, p_number: number })
+export const listCard = ({ type, base, series, number, kind, price = null }) =>
+  rpc('list_card', { p_type: type, p_base: base, p_series: series, p_number: number, p_kind: kind, p_price: price })
 export const cancelListing = (id) => rpc('cancel_listing', { p_id: id })
 export const buyNow = (id) => rpc('buy_now', { p_id: id })
 export const placeBid = (id, amount) => rpc('place_bid', { p_id: id, p_amount: amount })
@@ -37,16 +37,16 @@ export const marketMine = () => rpc('market_mine')
 // Album : un exemplaire numéroté choisi par carte (type) et par rareté
 export const albumView = (category) => rpc('album_view', { p_category: category })
 export const myTypeCards = (type, rarity = null) => rpc('my_type_cards', { p_type: type, p_rarity: rarity })
-export const setAlbumPick = (type, series, number) => rpc('set_album_pick', { p_type: type, p_series: series, p_number: number })
+export const setAlbumPick = (type, base, series, number) => rpc('set_album_pick', { p_type: type, p_base: base, p_series: series, p_number: number })
 export const clearAlbumPick = (type, rarity) => rpc('clear_album_pick', { p_type: type, p_rarity: rarity })
 
 // Favoris
-export const toggleFavorite = (type, series, number) => rpc('toggle_favorite', { p_type: type, p_series: series, p_number: number })
+export const toggleFavorite = (type, base, series, number) => rpc('toggle_favorite', { p_type: type, p_base: base, p_series: series, p_number: number })
 export const listFavorites = () => rpc('list_favorites')
 
 // Offres directes
-export const makeOffer = (type, series, number, amount) =>
-  rpc('make_offer', { p_type: type, p_series: series, p_number: number, p_amount: amount })
+export const makeOffer = (type, base, series, number, amount) =>
+  rpc('make_offer', { p_type: type, p_base: base, p_series: series, p_number: number, p_amount: amount })
 export const cancelOffer = (id) => rpc('cancel_offer', { p_id: id })
 export const respondOffer = (id, accept) => rpc('respond_offer', { p_id: id, p_accept: accept })
 export const myOffers = () => rpc('my_offers')

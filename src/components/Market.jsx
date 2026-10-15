@@ -124,7 +124,7 @@ export default function Market({ initialView = 'browse', initialListingId = null
                 return (
                   <li key={r.listing_id}>
                     <button className="tile" onClick={() => setSelectedId(r.listing_id)}>
-                      <Card typeId={r.card_type} series={r.card_series} number={r.card_number} rarity={rarityMap[r.rarity_id]} size="sm" />
+                      <Card typeId={r.card_type} base={r.card_base} series={r.card_series} number={r.card_number} rarity={rarityMap[r.rarity_id]} size="sm" />
                       <span className="tile-name">{catalog.typeMap[r.card_type]?.name}</span>
                       <span className="tile-kind">{r.kind === 'auction' ? 'Enchère' : 'Achat direct'}</span>
                       <span className="tile-price">{fmtCoins(r.price)}</span>
@@ -156,9 +156,9 @@ export default function Market({ initialView = 'browse', initialListingId = null
                 return (
                   <li key={r.listing_id}>
                     <button className="mine-row" onClick={() => active && setSelectedId(r.listing_id)} disabled={!active}>
-                      <div className="mine-card"><Card typeId={r.card_type} series={r.card_series} number={r.card_number} rarity={rarityMap[r.rarity_id]} size="sm" /></div>
+                      <div className="mine-card"><Card typeId={r.card_type} base={r.card_base} series={r.card_series} number={r.card_number} rarity={rarityMap[r.rarity_id]} size="sm" /></div>
                       <div className="mine-text">
-                        <strong>{catalog.typeMap[r.card_type]?.name}{catalog.cardRef(r.card_type, r.card_number, r.card_series)}</strong>
+                        <strong>{catalog.typeMap[r.card_type]?.name}{catalog.cardRef(r.card_type, r.card_base, r.card_number, r.card_series)}</strong>
                         <span>{describe(r, left(r))}</span>
                       </div>
                     </button>
@@ -251,9 +251,9 @@ function OffersPanel({ rows, loading, rarityMap, catalog, status, setStatus, rel
         {rows.map((r) => (
           <li key={r.offer_id}>
             <div className="mine-row offer-row">
-              <div className="mine-card"><Card typeId={r.card_type} series={r.card_series} number={r.card_number} rarity={rarityMap[r.rarity_id]} size="sm" /></div>
+              <div className="mine-card"><Card typeId={r.card_type} base={r.card_base} series={r.card_series} number={r.card_number} rarity={rarityMap[r.rarity_id]} size="sm" /></div>
               <div className="mine-text">
-                <strong>{catalog.typeMap[r.card_type]?.name}{catalog.cardRef(r.card_type, r.card_number, r.card_series)}</strong>
+                <strong>{catalog.typeMap[r.card_type]?.name}{catalog.cardRef(r.card_type, r.card_base, r.card_number, r.card_series)}</strong>
                 <span>
                   {r.role === 'buyer' ? `Ton offre à ${r.counterpart_name} : ` : `Offre de ${r.counterpart_name} : `}
                   {fmtCoins(r.amount)} · {OFFER_STATUS_LABEL[r.status] ?? r.status} · {fmtAgo(r.created_at)}
@@ -287,7 +287,7 @@ function FavoritesPanel({ rows, loading, rarityMap, catalog, reload, onOpenListi
     setBusyKey(key)
     setError('')
     try {
-      await api.toggleFavorite(r.card_type, r.card_series, r.card_number)
+      await api.toggleFavorite(r.card_type, r.card_base, r.card_series, r.card_number)
       await reload()
     } catch (e) {
       setError(explain(e))
@@ -314,9 +314,9 @@ function FavoritesPanel({ rows, loading, rarityMap, catalog, reload, onOpenListi
           return (
             <li key={key}>
               <div className="mine-row offer-row">
-                <div className="mine-card"><Card typeId={r.card_type} series={r.card_series} number={r.card_number} rarity={rarityMap[r.rarity_id]} size="sm" /></div>
+                <div className="mine-card"><Card typeId={r.card_type} base={r.card_base} series={r.card_series} number={r.card_number} rarity={rarityMap[r.rarity_id]} size="sm" /></div>
                 <div className="mine-text">
-                  <strong>{catalog.typeMap[r.card_type]?.name}{catalog.cardRef(r.card_type, r.card_number, r.card_series)}</strong>
+                  <strong>{catalog.typeMap[r.card_type]?.name}{catalog.cardRef(r.card_type, r.card_base, r.card_number, r.card_series)}</strong>
                   {r.listing_id ? (
                     <span>En vente à {fmtCoins(r.listing_price)} ({r.listing_kind === 'auction' ? 'enchère' : 'achat direct'}).</span>
                   ) : r.owner_name ? (
@@ -381,9 +381,9 @@ function ListingModal({ row, ms, rarity, coins, onClose, onStatus, reload }) {
     <div className="overlay" role="dialog" aria-modal="true" aria-label="Détail de l’annonce" onClick={onClose}>
       <div className="detail" onClick={(e) => e.stopPropagation()}>
         <div className="detail-card">
-          <Card typeId={row.card_type} series={row.card_series} number={row.card_number} rarity={rarity} size="lg" glow shine />
+          <Card typeId={row.card_type} base={row.card_base} series={row.card_series} number={row.card_number} rarity={rarity} size="lg" glow shine />
         </div>
-        <p className="reveal-line"><strong>{rarity?.name}</strong>{catalog.numberHidden(row.card_type, row.card_series) ? ' : numéro masqué' : ` : carte ${row.card_number} de la série de ${row.card_series}`}.</p>
+        <p className="reveal-line"><strong>{rarity?.name}</strong>{catalog.numberHidden(row.card_type, row.card_base, row.card_series) ? ' : numéro masqué' : ` : carte ${row.card_number} de la série de ${row.card_series}`}.</p>
 
         <div className="sheet">
           {isAuction ? (

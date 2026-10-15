@@ -44,7 +44,7 @@ select count(*) as filtre_autre_type from pg_temp.cv(:cat, 2, null);
 
 \echo '=== cohérence : chaque tuile porte la rareté que donne rarity_id() ; totaux de tuiles et de cartes'
 select count(*) as ecarts_de_rarete from public.{{P}}list_collection(:cat, null, null, 'series', 200, 0) t
-where t.rarity_id is distinct from public.{{P}}rarity_id(t.card_number, t.card_series, t.card_type);
+where t.rarity_id is distinct from public.{{P}}rarity_id(t.card_number, t.card_series, t.card_type, t.card_base);
 select max(total) as tuiles, max(cards_total) as cartes, (select count(*) from public.{{P}}cards where owner_id = :A) as cartes_en_base
 from public.{{P}}list_collection(:cat, null, null, 'series', 200, 0);
 
@@ -68,12 +68,12 @@ select kind, count(*) from pg_temp.cv(:cat, 2, null) group by kind;
 delete from public.{{P}}cards where type_id = 2;
 
 \echo '=== une carte de la pile placée dans l''album : elle n''est plus vendable, la pile le signale'
-select public.{{P}}set_album_pick(1, 30, 2) ->> 'rarity_id' as commune_choisie;
-select public.{{P}}set_album_pick(1, 3, 2) ->> 'rarity_id' as ultra_visible_choisie;
+select public.{{P}}set_album_pick(1, public.{{P}}default_base_rarity(1, 30), 30, 2) ->> 'rarity_id' as commune_choisie;
+select public.{{P}}set_album_pick(1, public.{{P}}default_base_rarity(1, 3), 3, 2) ->> 'rarity_id' as ultra_visible_choisie;
 select kind, rarity_id, qty, sellable, in_album from pg_temp.cv(:cat) where type_id = 1 and rarity_id in ('common', 'ultra') order by rarity_id, kind desc;
-select pg_temp.try('select public.{{P}}sell_direct(1, 30, 2)');                       -- card_in_album
-select pg_temp.try('select public.{{P}}sell_direct(1, 3, 2)');                        -- card_in_album
-select pg_temp.try('select public.{{P}}list_card(1, 30, 2, ''buy_now'', 3)');         -- card_in_album
+select pg_temp.try('select public.{{P}}sell_direct(1, public.{{P}}default_base_rarity(1, 30), 30, 2)');                       -- card_in_album
+select pg_temp.try('select public.{{P}}sell_direct(1, public.{{P}}default_base_rarity(1, 3), 3, 2)');                        -- card_in_album
+select pg_temp.try('select public.{{P}}list_card(1, public.{{P}}default_base_rarity(1, 30), 30, 2, ''buy_now'', 3)');         -- card_in_album
 
 \echo '=== vente rapide de plusieurs cartes : tout ou rien, jamais la carte de l''album'
 select pg_temp.try('select public.{{P}}sell_direct_many(1, ''common'', 10)');         -- not_enough_cards : 9 vendables seulement
@@ -107,7 +107,7 @@ select pg_temp.try('select public.{{P}}list_stack_card(1, ''alpha'', ''buy_now''
 \echo '=== accepter une offre = vendre : refusé pour une carte de l''album (le refus reste possible)'
 set request.jwt.claim.sub = :B;
 select public.{{P}}status() is not null as b;
-select (public.{{P}}make_offer(1, 30, 2, 3) ->> 'offer_id')::bigint as oid \gset
+select (public.{{P}}make_offer(1, public.{{P}}default_base_rarity(1, 30), 30, 2, 3) ->> 'offer_id')::bigint as oid \gset
 set request.jwt.claim.sub = :A;
 select pg_temp.try(format('select public.{{P}}respond_offer(%s, true)', :oid));         -- card_in_album
 select (public.{{P}}respond_offer(:oid, false) ->> 'status') is not null as offre_refusee_sans_probleme;
@@ -115,7 +115,7 @@ select count(*) as carte_toujours_a_a from public.{{P}}cards where type_id = 1 a
 
 \echo '=== exemplaires d''un type : en vente / dans l''album signalés'
 select count(*) filter (where picked) as dans_l_album, count(*) filter (where listed) as en_vente, count(*) as total from public.{{P}}my_type_cards(1);
-select count(*) filter (where not visible) as numeros_masques, count(*) filter (where visible) as numeros_visibles, count(*) filter (where visible) = (select count(*) from public.{{P}}cards where owner_id = :A and type_id = 1 and public.{{P}}number_visible(series, type_id)) as indicateur_coherent_avec_number_visible from public.{{P}}my_type_cards(1);
+select count(*) filter (where not visible) as numeros_masques, count(*) filter (where visible) as numeros_visibles, count(*) filter (where visible) = (select count(*) from public.{{P}}cards where owner_id = :A and type_id = 1 and public.{{P}}number_visible(type_id, base_rarity, series)) as indicateur_coherent_avec_number_visible from public.{{P}}my_type_cards(1);
 
 \echo '=== un autre joueur ne voit rien de ma collection'
 set request.jwt.claim.sub = :B;

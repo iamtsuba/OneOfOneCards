@@ -21,19 +21,19 @@ select string_agg(rarity_id, ' > ' order by ord) as emplacements_du_type_1 from 
 select rarity_id, owned_count, pick_series is null as vide from public.{{P}}album_view(:cat) where type_id = 1 order by owned_count desc, rarity_id;
 
 \echo '=== choisir une carte la place dans SA rareté ; impossible de choisir une carte qui ne m''appartient pas'
-select public.{{P}}set_album_pick(1, 10, 3) ->> 'rarity_id' as rarete_de_la_carte_choisie;
+select public.{{P}}set_album_pick(1, public.{{P}}default_base_rarity(1, 10), 10, 3) ->> 'rarity_id' as rarete_de_la_carte_choisie;
 set request.jwt.claim.sub = :B;
-select pg_temp.try('select public.{{P}}set_album_pick(1, 10, 3)');  -- refusée : appartient à A
+select pg_temp.try('select public.{{P}}set_album_pick(1, public.{{P}}default_base_rarity(1, 10), 10, 3)');  -- refusée : appartient à A
 set request.jwt.claim.sub = :A;
 
 \echo '=== une même carte dans plusieurs raretés : toutes visibles en même temps dans l''album'
-select public.{{P}}set_album_pick(1, 10, 1) ->> 'rarity_id' as alpha_choisie;
-select public.{{P}}set_album_pick(1, 10, 10) ->> 'rarity_id' as omega_choisie;
-select public.{{P}}set_album_pick(1, 1, 1) ->> 'rarity_id' as unique_choisie;
+select public.{{P}}set_album_pick(1, public.{{P}}default_base_rarity(1, 10), 10, 1) ->> 'rarity_id' as alpha_choisie;
+select public.{{P}}set_album_pick(1, public.{{P}}default_base_rarity(1, 10), 10, 10) ->> 'rarity_id' as omega_choisie;
+select public.{{P}}set_album_pick(1, public.{{P}}default_base_rarity(1, 1), 1, 1) ->> 'rarity_id' as unique_choisie;
 select rarity_id, pick_series, pick_number from public.{{P}}album_view(:cat) where type_id = 1 and pick_series is not null order by rarity_id;
 
 \echo '=== changer librement l''exemplaire d''un emplacement, sans toucher aux autres'
-select public.{{P}}set_album_pick(1, 10, 7) ->> 'rarity_id' as changee;
+select public.{{P}}set_album_pick(1, public.{{P}}default_base_rarity(1, 10), 10, 7) ->> 'rarity_id' as changee;
 select rarity_id, pick_number from public.{{P}}album_view(:cat) where type_id = 1 and pick_series is not null order by rarity_id;
 
 \echo '=== mes exemplaires par rareté (pour le sélecteur)'
@@ -41,19 +41,19 @@ select (select count(*) from public.{{P}}my_type_cards(1)) as tous, (select coun
        (select count(*) from public.{{P}}my_type_cards(1, 'alpha')) as alpha, (select count(*) from public.{{P}}my_type_cards(1, 'rare')) as rare_aucune;
 
 \echo '=== une carte placée dans l''album ne peut pas être vendue (banque, marché) ; elle reste dans l''album'
-select pg_temp.try('select public.{{P}}sell_direct(1, 10, 7)');                       -- carte_in_album
-select pg_temp.try('select public.{{P}}list_card(1, 10, 7, ''buy_now'', 5)');         -- card_in_album
+select pg_temp.try('select public.{{P}}sell_direct(1, public.{{P}}default_base_rarity(1, 10), 10, 7)');                       -- carte_in_album
+select pg_temp.try('select public.{{P}}list_card(1, public.{{P}}default_base_rarity(1, 10), 10, 7, ''buy_now'', 5)');         -- card_in_album
 select rarity_id, pick_number from public.{{P}}album_view(:cat) where type_id = 1 and pick_series is not null order by rarity_id;
 select count(*) as cartes_toujours_possedees from public.{{P}}cards where type_id = 1 and owner_id = :A;
 
 \echo '=== vider l''emplacement libère la carte : elle peut alors être revendue'
 select public.{{P}}clear_album_pick(1, 'ultra') ->> 'ok' as ultra_videe;
-select public.{{P}}sell_direct(1, 10, 7) ->> 'status' is not null as revendue_une_fois_libre;
+select public.{{P}}sell_direct(1, public.{{P}}default_base_rarity(1, 10), 10, 7) ->> 'status' is not null as revendue_une_fois_libre;
 select rarity_id, pick_number from public.{{P}}album_view(:cat) where type_id = 1 and pick_series is not null order by rarity_id;
 
 \echo '=== une carte en vente ne peut pas entrer dans l''album'
-select (public.{{P}}list_card(1, 10, 3, 'buy_now', 1)->>'listing_id')::bigint as lid \gset
-select pg_temp.try('select public.{{P}}set_album_pick(1, 10, 3)');                    -- card_listed
+select (public.{{P}}list_card(1, public.{{P}}default_base_rarity(1, 10), 10, 3, 'buy_now', 1)->>'listing_id')::bigint as lid \gset
+select pg_temp.try('select public.{{P}}set_album_pick(1, public.{{P}}default_base_rarity(1, 10), 10, 3)');                    -- card_listed
 select (select listed from public.{{P}}my_type_cards(1, 'ultra') where number = 3) as carte_signalee_en_vente;
 
 \echo '=== filet de sécurité : si un choix existait malgré tout sur une carte vendue, il est retiré (insertion directe)'

@@ -76,11 +76,11 @@ export default function Profile({ session }) {
       {rarest && (
         <div className="panel rarest">
           <div className="rarest-card">
-            <Card typeId={rarest.type_id} series={rarest.series} number={rarest.number} rarity={rarityMap[rarest.rarity_id]} size="sm" glow />
+            <Card typeId={rarest.type_id} base={rarest.base_rarity} series={rarest.series} number={rarest.number} rarity={rarityMap[rarest.rarity_id]} size="sm" glow />
           </div>
           <div>
             <p className="identity-name">Ta carte la plus rare</p>
-            <p className="muted">{rarityMap[rarest.rarity_id]?.name}, {catalog.typeMap[rarest.type_id]?.name}{catalog.numberHidden(rarest.type_id, rarest.series) ? '' : ` ${rarest.number} sur ${rarest.series}`}.</p>
+            <p className="muted">{rarityMap[rarest.rarity_id]?.name}, {catalog.typeMap[rarest.type_id]?.name}{catalog.numberHidden(rarest.type_id, rarest.base_rarity, rarest.series) ? '' : ` ${rarest.number} sur ${rarest.series}`}.</p>
           </div>
         </div>
       )}

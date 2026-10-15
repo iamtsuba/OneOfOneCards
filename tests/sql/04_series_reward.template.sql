@@ -49,13 +49,13 @@ select 'B après type 2 série 3', pg_temp.packs();
 \echo '=== 5. complétion par ACHAT sur le marché (A a 2/3 du type 3, B vend la dernière)'
 insert into public.{{P}}cards (type_id, series, number, owner_id) values (3, 3, 1, :A), (3, 3, 2, :A), (3, 3, 3, :B);
 select 'avant achat', pg_temp.packs();
-set request.jwt.claim.sub = :B; select public.{{P}}list_card(3, 3, 3, 'buy_now', 5)->>'listing_id' as lid \gset
+set request.jwt.claim.sub = :B; select public.{{P}}list_card(3, public.{{P}}default_base_rarity(3, 3), 3, 3, 'buy_now', 5)->>'listing_id' as lid \gset
 set request.jwt.claim.sub = :A; select pg_temp.try('select public.{{P}}buy_now(' || :lid || ')');
 select 'après achat : A reçoit le pack', pg_temp.packs();
 
 \echo '=== 6. complétion par ENCHÈRE (C a 2/4 du type 4, A vend la dernière en enchère, C gagne)'
 insert into public.{{P}}cards (type_id, series, number, owner_id) values (4, 4, 1, :C), (4, 4, 2, :C), (4, 4, 3, :C), (4, 4, 4, :A);
-set request.jwt.claim.sub = :A; select public.{{P}}list_card(4, 4, 4, 'auction')->>'listing_id' as lid2 \gset
+set request.jwt.claim.sub = :A; select public.{{P}}list_card(4, public.{{P}}default_base_rarity(4, 4), 4, 4, 'auction')->>'listing_id' as lid2 \gset
 set request.jwt.claim.sub = :C; select pg_temp.try('select public.{{P}}place_bid(' || :lid2 || ', 3)');
 update public.{{P}}listings set ends_at = now() - interval '1 second' where id = :lid2;
 select public.{{P}}status()->>'golden_packs' as packs_de_C_apres_cloture, pg_temp.packs();
@@ -65,9 +65,10 @@ set request.jwt.claim.sub = :A;
 select public.{{P}}status()->>'golden_packs' as packs, public.{{P}}status()->'unseen_rewards' as annonces;
 select public.{{P}}ack_rewards()->'unseen_rewards' as apres_ack, public.{{P}}ack_rewards()->>'golden_packs' as packs_gardes;
 
-\echo '=== 8. état d une série (album)'
-select public.{{P}}type_state(1, 3)->>'reward' as vu_par_B_ou_A, public.{{P}}type_state(1, 3)->>'reward_eligible' as eligible;
-set request.jwt.claim.sub = :C; select public.{{P}}type_state(1, 3)->>'reward' as vu_par_C, public.{{P}}type_state(1, 4)->>'reward' as serie_sans_recompense, public.{{P}}type_state(1, 1)->>'reward_eligible' as serie1_eligible;
+\echo '=== 8. récompenses de série enregistrées (par type, rareté de base et série)'
+select (select count(*) from public.{{P}}series_rewards where type_id = 1 and series = 3) as recompense_serie_3,
+       (select count(*) from public.{{P}}series_rewards where type_id = 1 and series = 4) as serie_sans_recompense,
+       (select count(*) from public.{{P}}series_rewards where type_id = 1 and series = 3 and base_rarity = public.{{P}}default_base_rarity(1, 3)) as rareté_de_base_enregistrée;
 
 \echo '=== 9. ouverture d un pack doré'
 set request.jwt.claim.sub = :A;

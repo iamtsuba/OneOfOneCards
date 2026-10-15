@@ -6,10 +6,10 @@ import TypeArt from './TypeArt'
 // De haut en bas : rareté, numéro n/m en jaune cerné avec zéro devant (07/10 ; masqué selon la rareté), grande
 // illustration du type, nom du type, numéro de checklist du type en bas à gauche (ex. 1/2).
 // tone : 'mine' (fond vert, à moi — le cadre et le bandeau restent à la couleur de la rareté) | 'taken' (tirée par un autre joueur)
-export default function Card({ typeId, series, number, rarity, size = 'md', tone, listed = false, favorite = false, isNew = false, count = 0, inAlbum = false, glow = false, shine = false, onClick }) {
+export default function Card({ typeId, base, series, number, rarity, size = 'md', tone, listed = false, favorite = false, isNew = false, count = 0, inAlbum = false, glow = false, shine = false, onClick }) {
   const game = useGame()
   const type = game?.catalog?.typeMap?.[typeId]
-  const hidden = !!game?.catalog?.numberHidden?.(typeId, series)   // numéro n/m masqué pour cette rareté
+  const hidden = !!game?.catalog?.numberHidden?.(typeId, base, series)   // numéro n/m masqué pour cette rareté
   const setNo = game?.catalog?.checklist?.(typeId)                // numéro de checklist du type, ex. n° 2/50
 
   const style = {

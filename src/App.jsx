@@ -86,8 +86,8 @@ function Game({ session }) {
       categoryMap,
       // Raretés par type : nombre de séries du type, numéros masqués, numéro de checklist « [k/N] »
       seriesOf: (typeId) => typeSeries(typeMap[typeId], categoryMap[typeMap[typeId]?.category_id]),
-      numberHidden: (typeId, series) => !numberVisible(rowsByType[typeId], series),
-      cardRef: (typeId, number, series) => (numberVisible(rowsByType[typeId], series) ? ` ${number}/${series}` : ''),
+      numberHidden: (typeId, base, series) => !numberVisible(rowsByType[typeId], base, series),
+      cardRef: (typeId, base, number, series) => (numberVisible(rowsByType[typeId], base, series) ? ` ${number}/${series}` : ''),
       checklist: (typeId) => lists[typeId] ?? null,
     }
   }, [catalogRaw])

@@ -44,11 +44,11 @@ do $$ declare r jsonb; begin r := public.{{P}}open_booster();
   raise notice 'catégorie %, types %', r->>'category_id', (select string_agg(distinct (c->>'type_id'), ',' order by c->>'type_id') from jsonb_array_elements(r->'cards') c); end $$;
 
 \echo '=== 4. revente à la banque : refusée dans une catégorie terminée, acceptée dans la catégorie en cours'
-create temp table c1 as select type_id, series, number from public.{{P}}cards where type_id <= 8 limit 1;
-create temp table c2 as select type_id, series, number from public.{{P}}cards where type_id >= 9 limit 1;
-select pg_temp.try(format('select public.{{P}}sell_direct(%s,%s,%s)', type_id, series, number)) from c1;
+create temp table c1 as select type_id, base_rarity, series, number from public.{{P}}cards where type_id <= 8 limit 1;
+create temp table c2 as select type_id, base_rarity, series, number from public.{{P}}cards where type_id >= 9 limit 1;
+select pg_temp.try(format('select public.{{P}}sell_direct(%1$s, %2$L, %3$s, %4$s)', type_id, base_rarity, series, number)) from c1;
 select (select taken from public.{{P}}series_taken s where s.type_id = c2.type_id and s.series = c2.series) as taken_avant from c2;
-select public.{{P}}sell_direct(type_id, series, number)->'status'->>'coins' as coins_apres from c2;
+select public.{{P}}sell_direct(type_id, base_rarity, series, number)->'status'->>'coins' as coins_apres from c2;
 select (select taken from public.{{P}}series_taken s where s.type_id = c2.type_id and s.series = c2.series) as taken_apres, exists (select 1 from public.{{P}}cards c where c.type_id=c2.type_id and c.series=c2.series and c.number=c2.number) as encore_possedee from c2;
 select 'la carte vendue peut être retirée de nouveau (retour dans le pool)', true;
 
