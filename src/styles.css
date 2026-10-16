@@ -708,3 +708,10 @@ textarea { width: 100%; padding: 10px 14px; border: 1.5px solid var(--line); bor
   .holder-name { font-size: 12px; }
   .holder-count { padding: 2px 8px; font-size: 11px; }
 }
+
+/* Chances de tirage : composition du booster et paliers de la carte Premium */
+.odds-slots { margin: 0 0 8px; }
+.odds-premium { margin-bottom: 10px; }
+.odds-premium .fine { margin: 0 0 4px; }
+/* Révélation : une carte nouvelle est déjà dans l'album */
+.reveal-new { margin: 2px 0 0; color: #ffe27a; font-weight: 700; }

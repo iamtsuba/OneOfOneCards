@@ -19,6 +19,13 @@ create table if not exists public.o1ocards_config (
 
 insert into public.o1ocards_config (key, value, description) values
   ('cards_per_booster',      5,    'Nombre de cartes par booster'),
+  ('booster_common_slots',   3,    'Composition d''un booster : nombre de cartes Communes (les premières cartes tirées)'),
+  ('booster_uncommon_slots', 1,    'Composition d''un booster : nombre de cartes Peu communes (juste après les Communes). Toutes les autres cartes du booster sont des cartes Premium'),
+  ('premium_weight_rare',    84,   'Carte Premium : poids des Rare. Probabilité = poids / somme des poids des paliers qui ont encore des cartes'),
+  ('premium_weight_super',   13,   'Carte Premium : poids des Super Rare'),
+  ('premium_weight_ultra',   2.7,  'Carte Premium : poids des Ultra Rare'),
+  ('premium_weight_other',   1,    'Carte Premium : poids des autres raretés (ex. Légende), hors Full Art'),
+  ('premium_weight_fullart', 0.3,  'Carte Premium : poids des cartes Full Art (style FullArt d''une rareté Premium). À garder plus bas que les Ultra Rare'),
   ('start_boosters',         10,   'Boosters offerts à la création du profil'),
   ('start_coins',            0,    'Pièces offertes à la création du profil'),
   ('regen_minutes',          10,   'Délai entre deux recharges (minutes)'),
@@ -1088,6 +1095,7 @@ begin
         on conflict (type_id, base_rarity, series, number) do nothing;
         get diagnostics rows = row_count;
         if rows = 1 then
+          if v_new then perform public.o1ocards_auto_place_album(p_uid, tid, v_base, m, num); end if;
           res := res || jsonb_build_array(jsonb_build_object(
             'type_id', tid, 'base_rarity', v_base, 'series', m, 'number', num, 'rarity_id', public.o1ocards_rarity_id(num, m, tid, v_base), 'is_new', v_new
           ));
@@ -1110,6 +1118,7 @@ begin
       on conflict (type_id, base_rarity, series, number) do nothing;
       get diagnostics rows = row_count;
       if rows = 1 then
+        if v_new then perform public.o1ocards_auto_place_album(p_uid, tid, v_base, m, num); end if;
         res := res || jsonb_build_array(jsonb_build_object(
           'type_id', tid, 'base_rarity', v_base, 'series', m, 'number', num, 'rarity_id', public.o1ocards_rarity_id(num, m, tid, v_base), 'is_new', v_new
         ));
@@ -1124,6 +1133,109 @@ end $$;
 -- Ouvre un booster de la catégorie en cours. Chaque carte tirée n'existait pas encore : elle devient
 -- la seule de son espèce, et elle est à toi. Quand la catégorie est épuisée, la suivante prend le relais.
 -- (jit = off : le plan de ces requêtes est jugé coûteux par PostgreSQL, qui le compilerait à chaque appel pour ~35 ms de plus)
+-- ---------- Composition d'un booster : emplacements et paliers de rareté ----------
+-- Un booster est tiré carte après carte, dans l'ordre : les booster_common_slots premières cartes sont de rareté de base Commune
+-- (id « common »), les booster_uncommon_slots suivantes Peu commune (id « peu_commune »), toutes les autres sont des cartes PREMIUM.
+-- Pour une carte Premium on tire d'abord un PALIER selon les poids premium_weight_* (Rare, Super Rare, Ultra Rare, autres raretés, Full Art :
+-- une rareté Premium dont le style de carte est FullArt), parmi les paliers qui ont encore des cartes, puis une carte au hasard parmi les
+-- cartes restantes de ce palier (poids d'une série = cartes restantes x taille^exposant, comme avant). Si un emplacement n'a plus de carte
+-- dans son palier (ou si la rareté n'existe pas dans la catégorie), la carte est tirée parmi toutes les cartes encore disponibles.
+create or replace function public.o1ocards_booster_tier(p_base text, p_style text)
+returns text language sql immutable as $$
+  select case
+    when p_base = 'common'      then 'common'
+    when p_base = 'peu_commune' then 'uncommon'
+    when p_style = 'fullart'    then 'fullart'
+    when p_base in ('rare', 'super', 'ultra') then p_base
+    else 'other'
+  end
+$$;
+
+create or replace function public.o1ocards_premium_weight(p_tier text)
+returns double precision language sql stable set search_path = public as $$
+  select case when p_tier in ('common', 'uncommon') then 0
+              else greatest(coalesce(public.o1ocards_cfg('premium_weight_' || p_tier), 0), 0)::double precision end
+$$;
+
+-- Type d'emplacement de la carte numéro p_slot (1, 2, 3…) d'un booster : common, uncommon ou premium
+create or replace function public.o1ocards_slot_class(p_slot int)
+returns text language sql stable set search_path = public as $$
+  select case
+    when p_slot <= coalesce(public.o1ocards_cfg('booster_common_slots'), 3)::int then 'common'
+    when p_slot <= coalesce(public.o1ocards_cfg('booster_common_slots'), 3)::int + coalesce(public.o1ocards_cfg('booster_uncommon_slots'), 1)::int then 'uncommon'
+    else 'premium'
+  end
+$$;
+
+-- Toutes les séries d'une catégorie qui ont encore des cartes : (type, rareté de base, série), cartes restantes, palier et poids de tirage
+create or replace function public.o1ocards_series_pool(p_cat int, p_e double precision)
+returns table (type_id int, base text, g int, remaining int, tier text, w double precision)
+language sql stable security definer set search_path = public as $$
+  select ty.id, cf.rarity_id, g, (g - coalesce(t.taken, 0))::int,
+         public.o1ocards_booster_tier(cf.rarity_id, coalesce(tr.card_style, 'simple')),
+         (g - coalesce(t.taken, 0)) * power(g::double precision, p_e)
+  from public.o1ocards_types ty
+  cross join lateral public.o1ocards_type_config(ty.id) cf
+  left join public.o1ocards_type_rarities tr on tr.type_id = ty.id and tr.rarity_id = cf.rarity_id
+  cross join lateral generate_series(1, cf.smax) g
+  left join public.o1ocards_series_taken t on t.type_id = ty.id and t.base_rarity = cf.rarity_id and t.series = g
+  where ty.category_id = p_cat and g > coalesce(t.taken, 0)
+$$;
+
+-- Tire une série (type, rareté de base, numéro de série) pour un emplacement : p_class = common, uncommon, premium ou any (toutes les cartes).
+-- Ne renvoie aucune ligne si l'emplacement n'a plus de carte.
+create or replace function public.o1ocards_pick_series(p_cat int, p_class text, p_e double precision)
+returns table (type_id int, base text, g int)
+language plpgsql volatile security definer set search_path = public set jit = off as $$
+declare v_tier text;
+begin
+  if p_class = 'premium' then
+    with pool as (
+      select sp.tier, sum(sp.remaining) as rem
+      from public.o1ocards_series_pool(p_cat, p_e) sp
+      where sp.tier not in ('common', 'uncommon')
+      group by sp.tier
+    ),
+    wts as (select pool.tier, public.o1ocards_premium_weight(pool.tier) as wt from pool where pool.rem > 0),
+    pos as (select wts.tier, wts.wt, sum(wts.wt) over (order by wts.tier) as cs from wts where wts.wt > 0),
+    tot as (select sum(pos.wt) as tw, random() as rr from pos)
+    select pos.tier into v_tier
+    from pos cross join tot
+    where tot.tw > 0 and pos.cs > tot.rr * tot.tw
+    order by pos.cs limit 1;
+    if v_tier is null then return; end if;
+  end if;
+
+  return query
+  with s as materialized (
+    select sp.type_id, sp.base, sp.g, sp.w
+    from public.o1ocards_series_pool(p_cat, p_e) sp
+    where case p_class when 'any' then true when 'premium' then sp.tier = v_tier else sp.tier = p_class end
+  ),
+  t as (select sum(s.w) as tw, random() as rr from s)
+  select z.type_id, z.base, z.g
+  from (select s.*, sum(s.w) over (order by s.type_id, s.base, s.g) as cs from s) z
+  cross join t
+  where t.tw > 0 and z.cs > t.rr * t.tw
+  order by z.cs, z.type_id, z.base, z.g
+  limit 1;
+end $$;
+
+-- Une carte nouvelle (le joueur n'avait rien dans cet emplacement de l'album) est placée d'office dans l'album, à son emplacement
+create or replace function public.o1ocards_auto_place_album(p_uid uuid, p_type int, p_base text, p_series int, p_number int)
+returns void language sql security definer set search_path = public as $$
+  insert into public.o1ocards_album_picks (user_id, type_id, rarity_id, base_rarity, series, number)
+  values (p_uid, p_type, public.o1ocards_rarity_id(p_number, p_series, p_type, p_base), p_base, p_series, p_number)
+  on conflict (user_id, type_id, rarity_id) do nothing
+$$;
+
+revoke all on function public.o1ocards_booster_tier(text, text) from public, anon, authenticated;
+revoke all on function public.o1ocards_premium_weight(text) from public, anon, authenticated;
+revoke all on function public.o1ocards_slot_class(int) from public, anon, authenticated;
+revoke all on function public.o1ocards_series_pool(int, double precision) from public, anon, authenticated;
+revoke all on function public.o1ocards_pick_series(int, text, double precision) from public, anon, authenticated;
+revoke all on function public.o1ocards_auto_place_album(uuid, int, text, int, int) from public, anon, authenticated;
+
 create or replace function public.o1ocards_open_booster()
 returns jsonb language plpgsql security definer set search_path = public set jit = off as $$
 declare
@@ -1135,8 +1247,7 @@ declare
   v_cat     int;
   n_cards   int;
   e         double precision;
-  w         double precision;
-  r         double precision;
+  v_class   text;
   tid       int;
   m         int;
   avail     int;
@@ -1183,31 +1294,14 @@ begin
     while not v_golden and got < n_cards and tries < n_cards * 25 loop
       tries := tries + 1;
 
-      -- Poids d'une série (d'un type, d'une rareté) = cartes encore disponibles x poids d'une carte (taille ^ exposant).
-      -- Chaque rareté d'un type a ses propres séries, de 1 à son nombre de séries.
-      select sum((g - coalesce(t.taken, 0)) * power(g::double precision, e)) into w
-      from public.o1ocards_types ty
-      cross join lateral public.o1ocards_type_config(ty.id) cf
-      cross join lateral generate_series(1, cf.smax) g
-      left join public.o1ocards_series_taken t on t.type_id = ty.id and t.base_rarity = cf.rarity_id and t.series = g
-      where ty.category_id = v_cat;
-      if w is null or w <= 0 then exhausted := true; exit; end if;
-
-      r := random() * w;
-      select z.type_id, z.base, z.g into tid, v_base, m
-      from (
-        select ty.id as type_id, cf.rarity_id as base, g,
-               sum((g - coalesce(t.taken, 0)) * power(g::double precision, e)) over (order by ty.id, cf.rarity_id, g) as cs
-        from public.o1ocards_types ty
-        cross join lateral public.o1ocards_type_config(ty.id) cf
-        cross join lateral generate_series(1, cf.smax) g
-        left join public.o1ocards_series_taken t on t.type_id = ty.id and t.base_rarity = cf.rarity_id and t.series = g
-        where ty.category_id = v_cat
-      ) z
-      where z.cs > r
-      order by z.cs, z.type_id, z.base, z.g
-      limit 1;
-      continue when tid is null;
+      -- Emplacement de cette carte : les premières sont Communes, puis Peu communes, les suivantes Premium (voir pick_series)
+      v_class := public.o1ocards_slot_class(got + 1);
+      tid := null; v_base := null; m := null;
+      select ps.type_id, ps.base, ps.g into tid, v_base, m from public.o1ocards_pick_series(v_cat, v_class, e) ps;
+      if tid is null then   -- plus de carte dans ce palier : on tire parmi toutes les cartes encore disponibles
+        select ps.type_id, ps.base, ps.g into tid, v_base, m from public.o1ocards_pick_series(v_cat, 'any', e) ps;
+        if tid is null then exhausted := true; exit; end if;
+      end if;
 
       select m - coalesce((select taken from public.o1ocards_series_taken where type_id = tid and base_rarity = v_base and series = m), 0) into avail;
       continue when avail <= 0;
@@ -1226,6 +1320,7 @@ begin
       on conflict (type_id, base_rarity, series, number) do nothing;
       get diagnostics rows = row_count;
       continue when rows = 0;               -- quelqu'un d'autre vient de la tirer : on retente
+      if v_new then perform public.o1ocards_auto_place_album(uid, tid, v_base, m, num); end if;   -- nouvelle carte : directement dans l'album
 
       got := got + 1;
       res := res || jsonb_build_array(jsonb_build_object(
@@ -1491,10 +1586,13 @@ declare
   v_cat     int := coalesce(p_category, public.o1ocards_active_category());
   e         double precision := public.o1ocards_cfg('rarity_exponent')::double precision;
   n_cards   int := public.o1ocards_cfg('cards_per_booster')::int;
+  n_com     int;
+  n_unc     int;
+  n_pre     int;
   v_unique  text;
   v_alpha   text;
   v_omega   text;
-  v_rows    jsonb;
+  v_res     jsonb;
   v_golden  jsonb;
 begin
   if v_cat is null or not exists (select 1 from public.o1ocards_categories where id = v_cat) then
@@ -1504,16 +1602,23 @@ begin
   select id into v_alpha  from public.o1ocards_rarities where kind = 'alpha'  limit 1;
   select id into v_omega  from public.o1ocards_rarities where kind = 'omega'  limit 1;
 
+  -- Composition d'un booster : Communes, puis Peu communes, le reste est Premium (mêmes règles que open_booster)
+  n_com := least(greatest(coalesce(public.o1ocards_cfg('booster_common_slots'), 3)::int, 0), n_cards);
+  n_unc := least(greatest(coalesce(public.o1ocards_cfg('booster_uncommon_slots'), 1)::int, 0), n_cards - n_com);
+  n_pre := n_cards - n_com - n_unc;
+
   -- Chaque rareté de base d'un type a ses séries 1..smax. s = une ligne par (type, rareté de base, série) avec le nombre de
-  -- cartes restantes ; vis = numéro visible (séries 1..numbered) : Alpha (1/m) et Omega (m/m) existent seulement alors.
+  -- cartes restantes et son palier ; vis = numéro visible (séries 1..numbered) : Alpha (1/m) et Omega (m/m) existent seulement alors.
   with cf as materialized (
-    select ty.id as type_id, c.rarity_id as base, c.smax, c.numbered
+    select ty.id as type_id, c.rarity_id as base, c.smax, c.numbered,
+           public.o1ocards_booster_tier(c.rarity_id, coalesce(tr.card_style, 'simple')) as tier
     from public.o1ocards_types ty
     cross join lateral public.o1ocards_type_config(ty.id) c
+    left join public.o1ocards_type_rarities tr on tr.type_id = ty.id and tr.rarity_id = c.rarity_id
     where ty.category_id = v_cat
   ),
   s as (
-    select cf.type_id, cf.base as rid, g as m, (g <= cf.numbered) as vis, (g - coalesce(t.taken, 0)) as avail,
+    select cf.type_id, cf.base as rid, cf.tier, g as m, (g <= cf.numbered) as vis, (g - coalesce(t.taken, 0)) as avail,
            (case when a.type_id is not null then 1 else 0 end) as a_taken,
            (case when o.type_id is not null then 1 else 0 end) as o_taken
     from cf
@@ -1523,36 +1628,71 @@ begin
     left join public.o1ocards_cards o on g > 1 and o.type_id = cf.type_id and o.base_rarity = cf.base and o.series = g and o.number = g
   ),
   parts as (
-    select v_unique as id, greatest(avail, 0)::bigint as remaining, 1::bigint as total, greatest(avail, 0)::double precision as w
+    select v_unique as id, tier, greatest(avail, 0)::bigint as remaining, 1::bigint as total, greatest(avail, 0)::double precision as w
       from s where m = 1 and v_unique is not null
     union all
-    select v_alpha, (1 - a_taken)::bigint, 1::bigint, (1 - a_taken) * power(m::double precision, e)
+    select v_alpha, tier, (1 - a_taken)::bigint, 1::bigint, (1 - a_taken) * power(m::double precision, e)
       from s where m > 1 and vis and v_alpha is not null
     union all
-    select v_omega, (1 - o_taken)::bigint, 1::bigint, (1 - o_taken) * power(m::double precision, e)
+    select v_omega, tier, (1 - o_taken)::bigint, 1::bigint, (1 - o_taken) * power(m::double precision, e)
       from s where m > 1 and vis and v_omega is not null
     union all
-    select rid,
+    select rid, tier,
            (case when vis then greatest(avail - 2 + a_taken + o_taken, 0) else greatest(avail, 0) end)::bigint,
            (case when vis then m - 2 else m end)::bigint,
            (case when vis then greatest(avail - 2 + a_taken + o_taken, 0) else greatest(avail, 0) end) * power(m::double precision, e)
       from s where m > 1
   ),
-  agg as (
-    select id, sum(remaining)::bigint as remaining, sum(total)::bigint as total, sum(w) as w from parts group by id
+  -- poids de chaque palier (seuls ceux qui ont encore des cartes comptent)
+  tier_w as (select tier, sum(w) as tw from parts group by tier having sum(w) > 0),
+  ptot as (select coalesce(sum(tw), 0) as w from tier_w),
+  pw as (select tier, public.o1ocards_premium_weight(tier) as wt from tier_w where tier not in ('common', 'uncommon')),
+  pwt as (select coalesce(sum(wt), 0) as w from pw),
+  cls(class, n) as (values ('common', n_com), ('uncommon', n_unc), ('premium', n_pre)),
+  -- pour chaque type d'emplacement, probabilité de chaque palier (avec le repli sur toutes les cartes si le palier est épuisé)
+  dist as (
+    select c.class, c.n, t.tier,
+           case c.class
+             when 'common'   then case when exists (select 1 from tier_w where tier = 'common')
+                                       then (t.tier = 'common')::int::double precision else t.tw / ptot.w end
+             when 'uncommon' then case when exists (select 1 from tier_w where tier = 'uncommon')
+                                       then (t.tier = 'uncommon')::int::double precision else t.tw / ptot.w end
+             else case when pwt.w > 0 then coalesce((select pw.wt from pw where pw.tier = t.tier), 0) / pwt.w else t.tw / ptot.w end
+           end as p
+    from cls c cross join tier_w t cross join ptot cross join pwt
   ),
-  tot as (select sum(w) as w, sum(remaining) as remaining from agg)
-  select coalesce(jsonb_agg(jsonb_build_object(
-           'id', r.id,
-           'remaining', coalesce(a.remaining, 0),
-           'total', coalesce(a.total, 0),
-           'share', case when tot.w > 0 then coalesce(a.w, 0) / tot.w else 0 end,
-           'per_booster', case when tot.w > 0 then 1 - power(1 - coalesce(a.w, 0) / tot.w, n_cards) else 0 end
-         ) order by r.sort_order), '[]'::jsonb)
-  into v_rows
-  from public.o1ocards_rarities r
-  left join agg a on a.id = r.id
-  cross join tot;
+  rid_t as (
+    select id, tier, sum(w) as w, sum(remaining)::bigint as remaining, sum(total)::bigint as total from parts group by id, tier
+  ),
+  -- chance qu'UNE carte d'un emplacement de ce type soit de cette rareté affichée
+  mix as (
+    select rt.id, d.class, d.n, sum(case when tw.tw > 0 then d.p * rt.w / tw.tw else 0 end) as p
+    from rid_t rt
+    join tier_w tw on tw.tier = rt.tier
+    join dist d on d.tier = rt.tier
+    group by rt.id, d.class, d.n
+  ),
+  expd as (
+    select id, sum(n * p) as expected, 1 - exp(sum(n * ln(greatest(1 - least(p, 1), 1e-12)))) as at_least
+    from mix group by id
+  ),
+  agg as (select id, sum(remaining)::bigint as remaining, sum(total)::bigint as total from rid_t group by id)
+  select jsonb_build_object(
+    'by_rarity', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'id', r.id,
+               'remaining', coalesce(a.remaining, 0),
+               'total', coalesce(a.total, 0),
+               'share', case when n_cards > 0 then coalesce(x.expected, 0) / n_cards else 0 end,
+               'per_booster', coalesce(x.at_least, 0)
+             ) order by r.sort_order)
+      from public.o1ocards_rarities r
+      left join agg a on a.id = r.id
+      left join expd x on x.id = r.id), '[]'::jsonb),
+    'premium', coalesce((
+      select jsonb_agg(jsonb_build_object('tier', d.tier, 'p', d.p) order by d.p desc, d.tier)
+      from dist d where d.class = 'premium' and d.p > 0), '[]'::jsonb))
+  into v_res;
 
   select jsonb_build_object(
            'chance', coalesce(public.o1ocards_cfg('golden_booster_chance'), 0),
@@ -1566,7 +1706,9 @@ begin
     'exponent',          e,
     'cards_per_booster', n_cards,
     'pool_left',         public.o1ocards_category_total(v_cat) - public.o1ocards_category_taken(v_cat),
-    'by_rarity',         v_rows,
+    'slots',             jsonb_build_object('common', n_com, 'uncommon', n_unc, 'premium', n_pre),
+    'by_rarity',         v_res -> 'by_rarity',
+    'premium',           v_res -> 'premium',
     'golden',            v_golden
   );
 end $$;

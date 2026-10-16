@@ -158,7 +158,7 @@ const revealedRows = [...rows, { type_id: 7, type_name: 'Chat Iny', type_image: 
 const rv = renderToStaticMarkup(wrap(React.createElement(Album, { rows: revealedRows, catalog: catalogSecret, rarityMap, onRefresh: () => {} })))
 ok('secrète découverte : elle apparaît comme une carte normale (nom, n° 4/3 · secrète, emplacements)', /Chat Iny/.test(rv) && /n° 4\/3 · secrète/.test(rv) && !/album-mystery/.test(rv))
 
-// ---- « Voir la collection » : bouton dans l'album, puis fenêtre des cartes avec leur nombre de détenteurs
+// ---- « Voir la collection » : bouton dans l'album, puis fenêtre des cartes avec leur nombre de détenteurs (👤)
 {
   const albumRowsMin = [{ type_id: 1, type_name: 'Chat va ?', type_image: '🐱', rarity_id: 'common', pick_base: null, pick_series: null, pick_number: null, owned_count: 1, secret: false, revealed: true }]
   const withBtn = renderToStaticMarkup(wrap(React.createElement(Album, { rows: albumRowsMin, catalog, rarityMap, onRefresh: () => {}, categoryId: 1 })))
@@ -173,7 +173,7 @@ ok('secrète découverte : elle apparaît comme une carte normale (nom, n° 4/3 
     { id: 4, category_id: 1, name: 'Chat caché', image: '🤫', secret: true },
   ]
   const list = (id) => (id === 4 ? { no: 4, total: 3, secret: true } : { no: id, total: 3, secret: false })
-  // 20 exemplaires chez moi + 3 chez un ami = 2 détenteurs ; un seul détenteur ; personne ; le secret a 2 détenteurs
+  // 20 exemplaires chez moi + 3 chez un ami = 2 détenteurs ; un seul détenteur ; personne ; le type secret a 5 détenteurs
   const holders = [{ type_id: 1, holders: 2 }, { type_id: 2, holders: 1 }, { type_id: 3, holders: 0 }, { type_id: 4, holders: 5 }]
   const view = (props = {}) => renderToStaticMarkup(React.createElement(CollectionHoldersView, { categoryName: 'Chattrapez les tous !', types: ts, checklist: list, holders, onClose: () => {}, ...props }))
   const v = view()
@@ -181,14 +181,17 @@ ok('secrète découverte : elle apparaît comme une carte normale (nom, n° 4/3 
   const tile = (name) => tiles.find((x) => x.includes(`>${name}</strong>`))
   ok('collection : une fenêtre avec le nom de la catégorie et un bouton Fermer', /role="dialog"[^>]*aria-label="Collection Chattrapez les tous !"/.test(v) && /Collection « Chattrapez les tous ! »/.test(v) && />Fermer</.test(v))
   ok('collection : une tuile par type de la catégorie, dans l’ordre de la checklist (secret en dernier)', tiles.length === 4 && v.indexOf('n° 1/3') < v.indexOf('n° 2/3') && v.indexOf('n° 2/3') < v.indexOf('n° 3/3') && v.indexOf('n° 3/3') < v.indexOf('n° 4/3'))
-  ok('collection : chaque tuile montre son numéro de checklist (n° 1/3 …) et le nombre de détenteurs dessous', /n° 1\/3/.test(v) && /n° 3\/3/.test(v) && /2 détenteurs/.test(tile('Chat va ?')) && /1 détenteur</.test(v) && /0 détenteur</.test(v))
-  ok('collection : « 20 chez moi + 3 chez un ami » donne 2 détenteurs (pluriel) ; 1 et 0 au singulier', /2 détenteurs/.test(tile('Chat va ?')) && !/1 détenteurs/.test(v) && !/0 détenteurs/.test(v))
-  ok('collection : une carte à plus d’un détenteur est visible (image et nom)', /🐱/.test(tile('Chat va ?')) && /role="img" aria-label="Chat va \?"/.test(tile('Chat va ?')) && !/\bhidden\b/.test(tile('Chat va ?').split('>')[0]))
-  ok('collection : une carte à UN seul détenteur est cachée par un « ? » (ni image ni nom)', (() => { const h = tiles.find((x) => /holder-tile hidden/.test(x) && /1 détenteur</.test(x)); return !!h && /<span aria-hidden="true">\?<\/span>/.test(h) && !/😾|Chat va pas/.test(h) && /aria-label="Carte cachée"/.test(h) && />\?\?\?</.test(h) })())
-  ok('collection : une carte que personne ne possède est cachée aussi, son numéro reste visible', (() => { const h = tiles.find((x) => /holder-tile hidden/.test(x) && /0 détenteur</.test(x)); return !!h && /n° 3\/3/.test(h) && !/exemple\.test|Le Pa Chat/.test(h) })())
-  ok('collection : le type secret n’apparaît qu’avec plus d’un détenteur, numéroté au-delà de la checklist (4/3)', /n° 4\/3 · secrète/.test(v) && /🤫/.test(tile('Chat caché')) && !/🤫/.test(view({ holders: [{ type_id: 4, holders: 1 }] })) && /n° 4\/3 · secrète/.test(view({ holders: [{ type_id: 4, holders: 1 }] })))
-  ok('collection : un résumé compte les cartes dévoilées (2 sur 4) et explique la règle', /<strong>2<\/strong> cartes dévoilées sur 4/.test(v) && /plus d’un détenteur/.test(v) && /toi compris/.test(v))
+  ok('collection : sous chaque carte, 👤 et le nombre de détenteurs (au lieu du mot « détenteurs »)', /👤 2/.test(tile('Chat va ?')) && /👤 1/.test(tile('Chat va pas ?')) && /👤 5/.test(tile('Chat caché')) && /👤 0/.test(v) && !/>\d+ détenteurs?</.test(v))
+  ok('collection : le nombre reste annoncé aux lecteurs d’écran (« 2 détenteurs », « 1 détenteur »)', /aria-label="2 détenteurs"/.test(tile('Chat va ?')) && /aria-label="1 détenteur"/.test(tile('Chat va pas ?')) && /aria-label="0 détenteur"/.test(v))
+  ok('collection : « 20 chez moi + 3 chez un ami » donne 2 détenteurs (👤 2), pas 23', /👤 2/.test(tile('Chat va ?')) && !/👤 23/.test(v))
+  ok('collection : une carte avec 2 détenteurs est visible (image et nom)', /🐱/.test(tile('Chat va ?')) && /role="img" aria-label="Chat va \?"/.test(tile('Chat va ?')) && !/holder-tile hidden/.test(tile('Chat va ?').split('>')[0]))
+  ok('collection : une carte avec UN seul détenteur est visible aussi (image et nom)', /😾/.test(tile('Chat va pas ?')) && /role="img" aria-label="Chat va pas \?"/.test(tile('Chat va pas ?')) && !/holder-tile hidden/.test(tile('Chat va pas ?').split('>')[0]) && !/\?<\/span>/.test(tile('Chat va pas ?')))
+  ok('collection : une carte que personne ne possède est cachée par un « ? » (ni image ni nom), son numéro reste visible', (() => { const h = tiles.find((x) => /holder-tile hidden/.test(x)); return !!h && /<span aria-hidden="true">\?<\/span>/.test(h) && /aria-label="Carte cachée"/.test(h) && />\?\?\?</.test(h) && /n° 3\/3/.test(h) && !/exemple\.test|Le Pa Chat/.test(h) && /👤 0/.test(h) })())
+  ok('collection : une seule carte cachée dans l’exemple (celle à 0 détenteur)', (v.match(/holder-tile hidden/g) || []).length === 1)
+  ok('collection : le type secret est visible dès qu’il a un détenteur, numéroté au-delà de la checklist (4/3)', /n° 4\/3 · secrète/.test(v) && /🤫/.test(tile('Chat caché')) && /🤫/.test(view({ holders: [{ type_id: 4, holders: 1 }] })) && !/🤫/.test(view({ holders: [{ type_id: 4, holders: 0 }] })))
+  ok('collection : un résumé compte les cartes dévoilées (3 sur 4) et explique la règle avec 👤', /<strong>3<\/strong> cartes dévoilées sur 4/.test(v) && /dès qu’un joueur la possède/.test(v) && /toi compris/.test(v) && /👤 indique le nombre de joueurs/.test(v))
   ok('collection : sans aucun détenteur, toutes les cartes sont cachées', (() => { const h = view({ holders: [] }); return (h.match(/holder-tile hidden/g) || []).length === 4 && /<strong>0<\/strong> carte dévoilée sur 4/.test(h) })())
+  ok('collection : les nombres arrivent bien du serveur en texte comme en nombre', (() => { const h = view({ holders: [{ type_id: 1, holders: '3' }, { type_id: 2, holders: 2 }] }); return /👤 3/.test(h) && /😾/.test(h) })())
   ok('collection : chargement et erreur sont annoncés', /Chargement…/.test(view({ holders: null, loading: true })) && !/holder-grid/.test(view({ holders: null, loading: true })) && /role="alert"[^>]*>Réseau coupé/.test(view({ holders: null, error: 'Réseau coupé' })))
   ok('collection : aucune donnée parasite (undefined, NaN) et aucun nom de joueur', !/undefined|NaN|null/.test(v))
 }

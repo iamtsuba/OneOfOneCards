@@ -32,6 +32,16 @@ create temp table obs as select public.{{P}}rarity_id(number, series, type_id, b
 select s.id, coalesce(o.n,0) as observees, round((s.p * 3000)::numeric, 1) as attendues,
        round(((coalesce(o.n,0) - s.p * 3000) / nullif(sqrt(3000 * s.p * (1 - s.p)), 0))::numeric, 2) as ecart_en_sigmas
 from shares s left join obs o using (id) order by s.p;
+-- vérification automatique : chaque rareté observée reste dans un écart raisonnable des chances calculées (6 sigmas + 3 cartes de marge)
+do $$ declare bad text; begin
+  select string_agg(s.id || ' observées ' || coalesce(o.n, 0) || ' attendues ' || round((s.p * 3000)::numeric, 1), ' ; ') into bad
+  from shares s left join obs o using (id)
+  where abs(coalesce(o.n, 0) - s.p * 3000) > 6 * sqrt(3000 * s.p * (1 - s.p)) + 3;
+  if bad is not null then raise exception 'ATTENDU : fréquences observées conformes aux chances du serveur ; écart sur : %', bad; end if;
+end $$;
+select 'les 600 boosters ont tiré exactement 3 000 cartes', (select count(*) from public.{{P}}cards) = 3000 as ok;
+-- composition d'un booster : les chances du serveur annoncent 3 Communes, 1 Peu commune, 1 Premium
+select 'composition annoncée', public.{{P}}draw_odds()->'slots' as emplacements, jsonb_array_length(public.{{P}}draw_odds()->'premium') as paliers_premium;
 
 \echo '=== 3. après les tirages : le pool restant et les chances évoluent'
 select r->>'id' as rarete, r->>'remaining' as restantes, round((r->>'share')::numeric * 100, 4) as pct_par_carte

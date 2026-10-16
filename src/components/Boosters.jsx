@@ -250,7 +250,7 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
           ))}
         </ul>
         <p className="overlay-hint">
-          {cards.length} carte{cards.length > 1 ? 's' : ''} ajoutée{cards.length > 1 ? 's' : ''} à ta collection. Meilleure carte : {rarityMap[rarest.rarity_id]?.name}, {catalog?.typeMap?.[rarest.type_id]?.name}{catalog?.cardRef?.(rarest.type_id, rarest.base_rarity, rarest.number, rarest.series)}.
+          {cards.length} carte{cards.length > 1 ? 's' : ''} ajoutée{cards.length > 1 ? 's' : ''} à ta collection{cards.filter((x) => x.is_new).length > 0 ? ` (dont ${cards.filter((x) => x.is_new).length} nouvelle${cards.filter((x) => x.is_new).length > 1 ? 's, placées' : ', placée'} dans ton album)` : ''}. Meilleure carte : {rarityMap[rarest.rarity_id]?.name}, {catalog?.typeMap?.[rarest.type_id]?.name}{catalog?.cardRef?.(rarest.type_id, rarest.base_rarity, rarest.number, rarest.series)}.
         </p>
         <div className="overlay-actions">
           {boosters > 0 && <button className="btn accent" onClick={onAgain}>Ouvrir un autre booster</button>}
@@ -298,6 +298,7 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
         <p className="reveal-line" aria-live="polite">
           <strong>{rarity?.name}</strong> : « {catalog?.typeMap?.[c.type_id]?.name} »{catalog?.cardRef?.(c.type_id, c.base_rarity, c.number, c.series)} n’existe qu’en un exemplaire, et c’est le tien.
         </p>
+        {c.is_new && <p className="reveal-new">⭐ Nouvelle carte : elle est déjà dans ton album.</p>}
         <p className="overlay-hint">{last ? 'Touche la carte pour voir le résumé.' : 'Touche la carte pour passer à la suivante.'}</p>
       </div>
     </div>

@@ -272,15 +272,15 @@ export function Album({ rows, catalog, rarityMap, onRefresh, categoryId = null }
 
 // Choix de la carte d'un emplacement : une seule proposition pour toutes les cartes à numéro masqué (elles sont
 // indiscernables), une par carte à numéro visible. Une fois placée dans l'album, une carte ne peut plus être vendue.
-// « Voir la collection » : toutes les cartes de la catégorie avec leur numéro et, dessous, le nombre de détenteurs (joueurs qui en possèdent
-// au moins un exemplaire, toi compris : 20 exemplaires chez toi et 3 chez un ami = 2 détenteurs). Une carte n'est dévoilée que si elle a
-// PLUS D'UN détenteur ; les autres restent cachées derrière un « ? » (leur numéro et leur nombre de détenteurs restent visibles).
+// « Voir la collection » : toutes les cartes de la catégorie avec leur numéro et, dessous, 👤 + le nombre de détenteurs (joueurs qui en
+// possèdent au moins un exemplaire, toi compris : 20 exemplaires chez toi et 3 chez un ami = 2 détenteurs). Une carte est visible dès
+// qu'elle a au moins un détenteur ; celles que personne ne possède restent cachées derrière un « ? » (leur numéro reste visible).
 export function CollectionHoldersView({ categoryName, types, checklist, holders, loading = false, error = '', onClose }) {
   const counts = new Map((holders ?? []).map((h) => [h.type_id, Number(h.holders)]))
   const items = types
     .map((t) => ({ t, n: counts.get(t.id) ?? 0, list: checklist(t.id) }))
     .sort((a, b) => (a.list?.no ?? 1e9) - (b.list?.no ?? 1e9) || a.t.id - b.t.id)
-  const revealed = items.filter((x) => x.n > 1).length
+  const revealed = items.filter((x) => x.n > 0).length
   const s = (n) => (n > 1 ? 's' : '')
   return (
     <div className="legal-overlay" role="dialog" aria-modal="true" aria-label={`Collection ${categoryName}`} onClick={onClose}>
@@ -290,8 +290,8 @@ export function CollectionHoldersView({ categoryName, types, checklist, holders,
           <button type="button" className="btn ghost" onClick={onClose}>Fermer</button>
         </div>
         <p className="fine">
-          Toutes les cartes de la collection, avec leur numéro. Sous chacune : le nombre de joueurs qui en possèdent au moins un exemplaire (toi compris).
-          Une carte n’est dévoilée que lorsqu’elle a <strong>plus d’un détenteur</strong> ; les autres restent cachées (?).
+          Toutes les cartes de la collection, avec leur numéro. Sous chacune, 👤 indique le nombre de joueurs qui en possèdent au moins un exemplaire
+          (toi compris). Une carte est visible <strong>dès qu’un joueur la possède</strong> ; celles que personne n’a encore tirées restent cachées (?).
         </p>
         {error && <p className="msg error" role="alert">{error}</p>}
         {loading ? (
@@ -301,7 +301,7 @@ export function CollectionHoldersView({ categoryName, types, checklist, holders,
             <p className="holders-sum"><strong>{revealed}</strong> carte{s(revealed)} dévoilée{s(revealed)} sur {items.length}</p>
             <ul className="holder-grid">
               {items.map(({ t, n, list }) => {
-                const open = n > 1
+                const open = n > 0
                 return (
                   <li key={t.id} className={`holder-tile${open ? '' : ' hidden'}`}>
                     <div className="holder-art" role="img" aria-label={open ? t.name : 'Carte cachée'}>
@@ -309,7 +309,7 @@ export function CollectionHoldersView({ categoryName, types, checklist, holders,
                     </div>
                     <span className="holder-no">{list ? `n° ${list.no}/${list.total}${list.secret ? ' · secrète' : ''}` : ''}</span>
                     <strong className="holder-name">{open ? t.name : '???'}</strong>
-                    <span className="holder-count">{fmt(n)} détenteur{s(n)}</span>
+                    <span className="holder-count" aria-label={`${fmt(n)} détenteur${s(n)}`}><span aria-hidden="true">👤 {fmt(n)}</span></span>
                   </li>
                 )
               })}
