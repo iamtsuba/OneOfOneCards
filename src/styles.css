@@ -671,3 +671,8 @@ textarea { width: 100%; padding: 10px 14px; border: 1.5px solid var(--line); bor
   .segmented button { font-size: 13px; padding: 0 2px; }
   .topbar { padding-left: 10px; padding-right: 10px; }
 }
+
+/* Console de préproduction : copie d'une catégorie vers la production */
+.copy-prod { display: grid; gap: 8px; padding: 12px 14px; border: 1.5px dashed var(--line); border-radius: 14px; background: #f7f8fd; }
+.copy-prod h4 { margin: 0; font-size: 15px; }
+.copy-prod > label:not(.check) { display: grid; gap: 4px; font-size: 12px; font-weight: 600; max-width: 360px; }

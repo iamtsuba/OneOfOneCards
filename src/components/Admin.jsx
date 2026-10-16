@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import * as api from '../api'
 import { explain } from '../api'
 import { useGame, fmt, fmtDate } from '../game'
+import { IS_PREPROD } from '../env'
 import TypeArt from './TypeArt'
 import Pack from './Pack'
 import Card from './Card'
@@ -233,7 +234,7 @@ export function CategoriesTab({ data, run, busy, wide = false }) {
         la suivante s’ouvre. Les raretés et leur nombre de séries ne se règlent plus par catégorie : elles se règlent par type (onglet « Types »).
       </p>
       {data.categories.map((c) => (
-        <CategoryForm key={c.id} cat={c} run={run} busy={busy} />
+        <CategoryForm key={c.id} cat={c} run={run} busy={busy} typeCount={data.types.filter((t) => t.category_id === c.id).length} />
       ))}
       <h3>Nouvelle catégorie</h3>
       <CategoryForm key={`new-${data.categories.length}`} cat={null} nextPos={nextPos} run={run} busy={busy} />
@@ -273,14 +274,53 @@ function CategoriesWide({ data, run, busy }) {
       </aside>
       <section className="md-detail">
         {cat
-          ? <CategoryForm key={cat.id} cat={cat} run={run} busy={busy} />
+          ? <CategoryForm key={cat.id} cat={cat} run={run} busy={busy} typeCount={data.types.filter((t) => t.category_id === cat.id).length} />
           : <CategoryForm key={`new-${data.categories.length}`} cat={null} nextPos={nextPos} run={run} busy={busy} />}
       </section>
     </div>
   )
 }
 
-function CategoryForm({ cat, nextPos, run, busy }) {
+// Préproduction uniquement : copie la catégorie (types, images, raretés) vers la production. La fonction serveur n'existe qu'en préproduction.
+function CopyToProd({ cat, typeCount, run, busy }) {
+  const [prodPw, setProdPw] = useState('')
+  const [createMissing, setCreateMissing] = useState(false)
+  const s = (n, one = '', many = 's') => (n > 1 ? many : one)
+  const copy = () => {
+    if (!window.confirm(`Copier « ${cat.name} » (${typeCount} type${s(typeCount)}) vers la PRODUCTION ?`)) return
+    run(
+      (pw) => api.adminCopyCategoryToProd(pw, cat.id, prodPw, createMissing),
+      (res) => {
+        setProdPw('')
+        const made = res.created_rarities?.length ? ` Raretés créées en production : ${res.created_rarities.join(', ')}.` : ''
+        return `« ${res.name} » copiée en production : ${res.types} type${s(res.types)}, ${res.rarities} réglage${s(res.rarities)} de raretés.${made} Elle y est désactivée : active-la dans la console de la production.`
+      },
+    )
+  }
+  return (
+    <section className="copy-prod" aria-label="Copie vers la production">
+      <h4>Copier vers la production</h4>
+      <p className="fine">
+        Crée dans la <strong>production</strong> une copie de cette catégorie : nom, couleurs, image du booster, ses {typeCount} type{s(typeCount)} (images, secret) et les
+        raretés de chaque type (séries, numérotées, style). Les cartes, les joueurs et les annonces ne sont pas copiés. La copie arrive <strong>désactivée</strong>, à la fin
+        de la liste : tu l’actives ensuite dans la console de la production. Refusée si une catégorie du même nom y existe déjà.
+      </p>
+      <label>
+        Mot de passe administrateur de la production
+        <input type="password" autoComplete="off" value={prodPw} onChange={(e) => setProdPw(e.target.value)} />
+      </label>
+      <label className="check inline">
+        <input type="checkbox" checked={createMissing} onChange={(e) => setCreateMissing(e.target.checked)} />
+        <span>Créer en production les raretés qui lui manquent (sinon la copie est refusée, avec la liste des raretés manquantes)</span>
+      </label>
+      <div className="row">
+        <button type="button" className="btn" disabled={busy || !prodPw} onClick={copy}>Copier « {cat.name} » vers la production</button>
+      </div>
+    </section>
+  )
+}
+
+function CategoryForm({ cat, nextPos, run, busy, typeCount = 0 }) {
   const [f, setF] = useState({
     name: cat?.name ?? '', position: cat?.position ?? nextPos ?? 1, series_count: cat?.series_count ?? 500,
     color: cat?.color ?? '#ffd9b0', color2: cat?.color2 ?? '#f29a45', text_color: cat?.text_color ?? '#3d1f00', enabled: cat?.enabled ?? true,
@@ -333,6 +373,8 @@ function CategoryForm({ cat, nextPos, run, busy }) {
           </button>
         )}
       </div>
+
+      {IS_PREPROD && cat && <CopyToProd cat={cat} typeCount={typeCount} run={run} busy={busy} />}
 
       {cat && started && (
         <div className="danger-zone">

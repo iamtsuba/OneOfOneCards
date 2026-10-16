@@ -8,7 +8,8 @@ import path from 'node:path'
 export const ENVS = { prod: 'o1ocards_', preprod: 'pp_o1ocards_' }
 // Valeurs par défaut propres à chaque environnement (graines de la base, jamais écrasées si la ligne existe déjà) :
 // la boutique est visible d'emblée en préproduction pour pouvoir tester les achats, masquée en production tant que Stripe n'est pas prêt.
-const VARS = { prod: { SHOP_ENABLED: '0' }, preprod: { SHOP_ENABLED: '1' } }
+// PROD : préfixe de la production, utilisable UNIQUEMENT dans schema.preprod-only.template.sql (la copie de catégorie vers la production).
+const VARS = { prod: { SHOP_ENABLED: '0' }, preprod: { SHOP_ENABLED: '1', PROD: 'o1ocards_' } }
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const sqlDir = path.join(root, 'supabase')
 const outDir = path.join(sqlDir, 'generated')
@@ -30,9 +31,12 @@ function render(template, env, prefix, source) {
   return out
 }
 
+// Fonctions réservées à la préproduction : ajoutées au schéma de préproduction, jamais à celui de la production
+const preprodOnly = path.join(sqlDir, 'schema.preprod-only.template.sql')
 const jobs = []
 for (const [env, prefix] of Object.entries(ENVS)) {
-  jobs.push([path.join(outDir, `schema.${env}.sql`), render(fs.readFileSync(path.join(sqlDir, 'schema.template.sql'), 'utf8'), env, prefix, 'supabase/schema.template.sql')])
+  const extra = env === 'preprod' && fs.existsSync(preprodOnly) ? fs.readFileSync(preprodOnly, 'utf8') : ''
+  jobs.push([path.join(outDir, `schema.${env}.sql`), render(fs.readFileSync(path.join(sqlDir, 'schema.template.sql'), 'utf8') + extra, env, prefix, 'supabase/schema.template.sql' + (extra ? ' + supabase/schema.preprod-only.template.sql' : ''))])
   const migDir = path.join(sqlDir, 'migrations')
   if (fs.existsSync(migDir)) {
     for (const f of fs.readdirSync(migDir).filter((n) => n.endsWith('.template.sql')).sort()) {

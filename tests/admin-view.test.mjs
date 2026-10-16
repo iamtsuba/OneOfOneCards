@@ -12,16 +12,24 @@ const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const out = mkdtempSync(path.join(root, 'tests', '.out-admin-'))
 await build({
   stdin: {
-    contents: "export { AdminShell, CategoriesTab, TypesTab, ConfigTab, RaritiesTab, UniqueWinsTab, LegalTab, SecurityTab } from './src/components/Admin.jsx'; export { GameContext } from './src/game.js'",
+    contents: "export { AdminShell, CategoriesTab, TypesTab, ConfigTab, RaritiesTab, UniqueWinsTab, LegalTab, SecurityTab } from './src/components/Admin.jsx'; export { GameContext } from './src/game.js'; export { explain } from './src/api.js'",
     resolveDir: root, loader: 'js',
   },
   bundle: true, format: 'esm', platform: 'node', jsx: 'automatic', outfile: path.join(out, 'bundle.mjs'),
   external: ['react', 'react-dom', 'react/jsx-runtime', '@supabase/supabase-js'],
   define: { 'import.meta.env': JSON.stringify({ MODE: 'preprod', VITE_APP_ENV: 'preprod' }) }, logLevel: 'silent',
 })
+// Le même code compilé POUR LA PRODUCTION : la copie vers la production n'y existe pas
+await build({
+  stdin: { contents: "export { CategoriesTab } from './src/components/Admin.jsx'; export { GameContext } from './src/game.js'", resolveDir: root, loader: 'js' },
+  bundle: true, format: 'esm', platform: 'node', jsx: 'automatic', outfile: path.join(out, 'bundle-prod.mjs'), minify: true,
+  external: ['react', 'react-dom', 'react/jsx-runtime', '@supabase/supabase-js'],
+  define: { 'import.meta.env': JSON.stringify({ MODE: 'prod', VITE_APP_ENV: 'prod' }) }, logLevel: 'silent',
+})
 const React = require('react')
 const { renderToStaticMarkup } = require('react-dom/server')
 const M = await import(pathToFileURL(path.join(out, 'bundle.mjs')).href)
+const MProd = await import(pathToFileURL(path.join(out, 'bundle-prod.mjs')).href)
 rmSync(out, { recursive: true, force: true })
 
 let bad = 0
@@ -149,6 +157,27 @@ ok('onglet Sécurité : s’affiche', clean(show(M.SecurityTab, { onChange: asyn
     ok(`PC : l’écran « ${tab} » s’affiche sans erreur`, h !== null && clean(h) && /legal-panel admin wide/.test(h))
   }
   ok('PC : les écrans de liste passent en grille à plusieurs colonnes (cols-2), la sécurité reste étroite', /admin-list cols-2/.test(shell({ wide: true, tab: 'config' })) && /admin-list cols-2/.test(shell({ wide: true, tab: 'rarities' })) && /admin-list narrow/.test(shell({ wide: true, tab: 'security' })))
+}
+
+// ---------- Copie d'une catégorie vers la production : préproduction uniquement ----------
+{
+  const firstCat = data.categories[0]
+  const nTypes = data.types.filter((t) => t.category_id === firstCat.id).length
+  const wideCat = show(M.CategoriesTab, { data, wide: true })
+  const narrowCat = show(M.CategoriesTab, { data, wide: false })
+  ok('copie vers la production (PC) : le panneau est affiché pour la catégorie ouverte, dans le site de préproduction', /class="copy-prod"[^>]*aria-label="Copie vers la production"/.test(wideCat) && /<h4>Copier vers la production<\/h4>/.test(wideCat))
+  ok('copie vers la production (mobile) : le panneau est affiché pour chaque catégorie existante', (narrowCat.match(/class="copy-prod"/g) || []).length === data.categories.length)
+  ok('copie vers la production : le texte annonce le nombre de types, la copie désactivée et le refus des doublons', new RegExp(`ses ${nTypes} type`).test(wideCat) && /désactivée/.test(wideCat) && /même nom y existe déjà/.test(wideCat) && /ne sont pas copiés/.test(wideCat))
+  ok('copie vers la production : le mot de passe de la production est demandé (champ masqué) et le bouton est désactivé tant qu\'il est vide', /type="password"[^>]*autoComplete="off"/.test(wideCat) && new RegExp(`<button type="button" class="btn" disabled="">Copier « ${firstCat.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} » vers la production</button>`).test(wideCat))
+  ok('copie vers la production : option « Créer en production les raretés qui lui manquent » décochée par défaut', /Créer en production les raretés qui lui manquent/.test(wideCat) && !/checked=""[^>]*\/><span>Créer en production/.test(wideCat))
+  ok('copie vers la production : pas de panneau pour une catégorie en cours de création', (() => { const h = show(M.CategoriesTab, { data: { ...data, categories: [] }, wide: false }); return h !== null && !/copy-prod/.test(h) })())
+  const prodCat = show(MProd.CategoriesTab, { data, wide: true })
+  const prodCatNarrow = show(MProd.CategoriesTab, { data, wide: false })
+  ok('copie vers la production : AUCUN panneau, bouton ni texte dans la console compilée pour la production (PC et mobile)', prodCat !== null && prodCatNarrow !== null && !/copy-prod|Copier vers la production|Mot de passe administrateur de la production/.test(prodCat + prodCatNarrow))
+  ok('copie vers la production : la console de production reste complète (fiche, enregistrer, aperçu du booster)', /class="admin-pack-preview"/.test(prodCat) && />Enregistrer</.test(prodCat))
+  const ex = M.explain
+  ok('erreurs de la copie : mot de passe de la production faux (distinct du mot de passe de préproduction)', ex(new Error('prod_admin_denied')) === 'Mot de passe administrateur de la PRODUCTION incorrect.' && ex(new Error('admin_denied')) === 'Mot de passe incorrect.')
+  ok('erreurs de la copie : raretés manquantes listées, catégorie déjà en production, accès verrouillé', /legende, platine/.test(ex(new Error('prod_missing_rarities:legende,platine'))) && /Créer en production les raretés manquantes/.test(ex(new Error('prod_missing_rarities:platine'))) && /existe déjà en production/.test(ex(new Error('prod_category_exists'))) && /verrouillé/.test(ex(new Error('prod_admin_locked'))))
 }
 
 if (bad) { console.error(`\n${bad} contrôle(s) en échec`); process.exit(1) }

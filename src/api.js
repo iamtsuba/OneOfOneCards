@@ -101,6 +101,10 @@ export async function getCatalog() {
 export const adminData = (pw) => rpc('admin_data', { p_password: pw })
 export const adminForceDeleteCategory = (pw, id, confirmName) =>
   rpc('admin_force_delete_category', { p_password: pw, p_id: id, p_confirm_name: confirmName })
+// Copie une catégorie (types, images, raretés) de la préproduction vers la production. Réservée à la console de PRÉPRODUCTION : la fonction
+// n'existe pas dans le schéma de production. Exige aussi le mot de passe administrateur de la production.
+export const adminCopyCategoryToProd = (pw, categoryId, prodPassword, createMissingRarities = false) =>
+  rpc('admin_copy_category_to_prod', { p_password: pw, p_category: categoryId, p_prod_password: prodPassword, p_create_missing_rarities: !!createMissingRarities })
 export const adminSaveCategory = (pw, c) =>
   rpc('admin_save_category', {
     p_password: pw, p_id: c.id ?? null, p_name: c.name, p_position: Number(c.position), p_series_count: Number(c.series_count),
@@ -149,6 +153,17 @@ export function explain(e) {
   if (m.includes('checkout:legal_incomplete')) return 'Les informations légales du vendeur ne sont pas encore renseignées : le paiement est indisponible.'
   if (m.startsWith('checkout:'))
     return `Le paiement n’est pas disponible pour le moment. Réessaie plus tard. (code : ${m.slice(9)})`
+  // Copie vers la production : ces codes contiennent « admin_denied » etc., ils doivent être reconnus AVANT les messages admin génériques
+  const missingRar = m.match(/prod_missing_rarities:([a-z0-9_,]+)/)
+  if (missingRar) return `La production n’a pas ces raretés : ${missingRar[1].split(',').join(', ')}. Coche « Créer en production les raretés manquantes » puis réessaie.`
+  const prodMessages = {
+    prod_admin_denied: 'Mot de passe administrateur de la PRODUCTION incorrect.',
+    prod_admin_locked: 'Trop d’essais sur la production : son accès admin est verrouillé pendant 15 minutes.',
+    prod_admin_not_set: 'Aucun mot de passe administrateur n’est défini en production.',
+    prod_not_authenticated: 'Tu n’es pas connecté.',
+    prod_category_exists: 'Une catégorie de ce nom existe déjà en production : elle n’est pas écrasée. Renomme-la ici ou supprime l’ancienne en production.',
+  }
+  for (const [code, text] of Object.entries(prodMessages)) if (m.includes(code)) return text
   const badRow = m.match(/invalid_import_row:(\d+)/)
   if (badRow) return `Import refusé : la ligne ${badRow[1]} du fichier est invalide (rien n’a été importé).`
   const adminMessages = {

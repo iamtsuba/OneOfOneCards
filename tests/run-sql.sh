@@ -3,7 +3,7 @@
 #   tests/run-sql.sh [prod|preprod|both]      (défaut : both)
 # Prérequis : PostgreSQL installé (apt-get install -y postgresql). Le script démarre son propre serveur temporaire.
 #   KEEP=1 conserve la base temporaire ; PORT=5599 change le port.
-# Chaque scénario de tests/sql/*.template.sql est rejoué pour chaque environnement ; il échoue à la première erreur SQL.
+# Chaque scénario de tests/sql/*.template.sql est rejoué pour chaque environnement (sauf ceux nommés *.preprod.template.sql : préproduction seulement) ; il échoue à la première erreur SQL.
 # Contrôles ajoutés : le schéma s'applique deux fois sans erreur, et la prod et la préprod restent isolées.
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -84,6 +84,7 @@ for e in $ENVLIST; do
   before="$(snapshot "$other")"
   for f in tests/sql/*.template.sql; do
     name="$(basename "$f" .template.sql)"
+    case "$name" in *.preprod) [ "$e" = "preprod" ] || continue ;; esac   # test réservé à la préproduction (ex. copie vers la production)
     rendered="$DIR/$e-$name.sql"; sed "s/{{P}}/$p/g" "$f" > "$rendered"; chmod 644 "$rendered"
     step "[$e] $name"; out="$(sqlf o1o_test "$rendered")"; rc=$?
     mkdir -p tests/.out; echo "$out" > "tests/.out/$e-$name.txt"

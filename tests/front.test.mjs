@@ -13,6 +13,9 @@ const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: 'https://1o
 globalThis.window = dom.window
 globalThis.document = dom.window.document
 Object.defineProperty(globalThis, 'navigator', { value: dom.window.navigator, configurable: true })
+// Ce test simule un navigateur (jsdom) puis fait un rendu serveur : React signale alors « useLayoutEffect … on the server », sans objet ici
+const realError = console.error
+console.error = (...a) => { if (String(a[0]).includes('useLayoutEffect does nothing on the server')) return; realError(...a) }
 
 const calls = []
 globalThis.fetch = async (url) => {
@@ -71,6 +74,10 @@ for (const c of CASES) {
   ok(`[dist/${c.mode}] titre « ${c.title} » et référencement ${c.banner ? 'bloqué (noindex)' : 'autorisé'}`, html.includes(`<title>${c.title}</title>`) && html.includes(c.banner ? 'noindex' : 'index,follow'))
   ok(`[dist/${c.mode}] aucune trace de « opennumber » ni « OneOfOne » dans le site compilé`, !/opennumber|OneOfOne/i.test(html + bundle))
   ok(`[dist/${c.mode}] contient son préfixe ${c.prefix}`, bundle.includes(`"${c.prefix}"`))
+  // La copie d'une catégorie vers la production n'existe QUE dans le site de préproduction (ni bouton, ni appel serveur dans celui de production)
+  const copyTraces = ['Copier vers la production', 'admin_copy_category_to_prod', 'Mot de passe administrateur de la production']
+  ok(`[dist/${c.mode}] copie de catégorie vers la production : ${c.banner ? 'présente' : 'AUCUNE trace'} dans le site compilé`,
+    c.banner ? copyTraces.every((t) => bundle.includes(t)) : copyTraces.every((t) => !bundle.includes(t)))
 }
 
 console.log(bad ? `\n${bad} ÉCHEC(S)` : '\nFront : tous les contrôles sont passés.')
