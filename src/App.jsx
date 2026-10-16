@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from './supabase'
 import * as api from './api'
 import { explain } from './api'
-import { GameContext, fmtCoins } from './game'
+import { GameContext, fmt, fmtCoins } from './game'
 import Auth from './components/Auth'
 import Brand from './components/Brand'
 import TabBar from './components/TabBar'
@@ -118,7 +118,7 @@ function Game({ session }) {
         <div className="topbar-actions">
           <button className="coin-pill" onClick={() => { setMarketView('browse'); setMarketListingId(null); setTab('market') }} aria-label={`${fmtCoins(status.coins)}, ouvrir le marché`}>
             <i className="coin" aria-hidden="true">1</i>
-            {fmtCoins(status.coins)}
+            <span className="coin-num">{fmt(status.coins)}</span><span className="coin-unit"> {Math.abs(Number(status.coins)) > 1 ? 'pièces' : 'pièce'}</span>
           </button>
           <NotificationBell
             onOpenListing={(id) => { setMarketView('browse'); setMarketListingId(id); setTab('market') }}

@@ -247,7 +247,7 @@ function CategoriesWide({ data, run, busy }) {
   const cat = typeof sel === 'number' ? data.categories.find((c) => c.id === sel) ?? null : null
   const nextPos = Math.max(0, ...data.categories.map((c) => c.position)) + 1
   return (
-    <div className="md cats-wide">
+    <div className="admin-md cats-wide">
       <aside className="md-list" aria-label="Catégories">
         <button type="button" className={`btn ${!cat ? '' : 'ghost'}`} onClick={() => setSel('new')}>+ Nouvelle catégorie</button>
         <ul className="md-items">
@@ -795,7 +795,7 @@ function TypesWide({ data, run, busy, initialSelection = null }) {
   if (!data.categories.length) return <p className="muted">Crée d’abord une catégorie.</p>
   const mode = sel === 'new' ? 'new' : sel === 'import' ? 'import' : type ? 'edit' : 'none'
   return (
-    <div className="md types-wide">
+    <div className="admin-md types-wide">
       <aside className="md-list" aria-label="Types">
         <label>
           Catégorie

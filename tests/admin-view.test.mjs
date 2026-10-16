@@ -107,7 +107,7 @@ ok('onglet Sécurité : s’affiche', clean(show(M.SecurityTab, { onChange: asyn
   ok('PC : le panneau passe en mise en page large avec une navigation verticale (un onglet par module)', wideHtml !== null && /legal-panel admin wide/.test(wideHtml) && /<nav class="admin-nav"[^>]*aria-orientation="vertical"/.test(wideHtml) && (wideHtml.match(/class="admin-nav-item/g) || []).length === 7)
   ok('PC : l’onglet actif est marqué et les compteurs (catégories, types) sont affichés', /admin-nav-item on"[^>]*>Types<span class="nav-count">\d+<\/span>/.test(wideHtml) && /aria-selected="true"/.test(wideHtml) && /Catégories<span class="nav-count">/.test(wideHtml))
   ok('PC : les écrans à deux colonnes gèrent eux-mêmes leur défilement (admin-main fill) ; les autres défilent d’un bloc', /admin-main fill/.test(wideHtml) && !/admin-main fill/.test(shell({ wide: true, tab: 'config' })))
-  ok('mobile : inchangé (pastilles horizontales, pas de navigation verticale ni de panneau large)', /class="chips admin-tabs"/.test(narrowHtml) && !/admin-nav/.test(narrowHtml) && !/legal-panel admin wide/.test(narrowHtml) && !/class="md /.test(narrowHtml))
+  ok('mobile : inchangé (pastilles horizontales, pas de navigation verticale ni de panneau large)', /class="chips admin-tabs"/.test(narrowHtml) && !/admin-nav/.test(narrowHtml) && !/legal-panel admin wide/.test(narrowHtml) && !/class="admin-md /.test(narrowHtml))
   ok('PC : le nombre de joueurs est dans l’en-tête (pas sous le titre)', /admin-players/.test(wideHtml) && !/admin-players/.test(narrowHtml))
 
   const cat0 = data.categories[0]
@@ -117,7 +117,7 @@ ok('onglet Sécurité : s’affiche', clean(show(M.SecurityTab, { onChange: asyn
   const without = list.find((t) => !data.type_rarities.some((r) => r.type_id === t.id))
   const wt = (props) => show(M.TypesTab, { data, wide: true, ...props })
   const empty = wt({})
-  ok('types PC : à gauche, la liste de TOUS les types de la catégorie (nom, position), avec recherche, « Nouveau » et « Importer »', /class="md types-wide"/.test(empty) && /aria-label="Types"/.test(empty) && list.every((t) => empty.includes(`>${t.name}</strong>`)) && /type="search"/.test(empty) && />\+ Nouveau</.test(empty) && />Importer</.test(empty))
+  ok('types PC : à gauche, la liste de TOUS les types de la catégorie (nom, position), avec recherche, « Nouveau » et « Importer »', /class="admin-md types-wide"/.test(empty) && /aria-label="Types"/.test(empty) && list.every((t) => empty.includes(`>${t.name}</strong>`)) && /type="search"/.test(empty) && />\+ Nouveau</.test(empty) && />Importer</.test(empty))
   ok('types PC : sans sélection, un message invite à choisir un type', /md-empty/.test(empty) && !/ted-detail/.test(empty))
   const ed = wt({ initialSelection: withRows.id })
   ok('types PC : le type choisi est marqué dans la liste', new RegExp(`md-item on"[^>]*aria-current="true"`).test(ed) && (ed.match(/md-item on/g) || []).length === 1)
@@ -142,7 +142,7 @@ ok('onglet Sécurité : s’affiche', clean(show(M.SecurityTab, { onChange: asyn
   ok('types PC : la liste signale les types secrets et le nombre de cartes tirées', /· secret/.test(wt({ initialSelection: secretType.id })) && /tirées/.test(ed))
 
   const cw = show(M.CategoriesTab, { data, wide: true })
-  ok('catégories PC : liste à gauche (avec statut et avancement), fiche à droite avec l’aperçu du booster', /class="md cats-wide"/.test(cw) && /aria-label="Catégories"/.test(cw) && data.categories.every((c) => cw.includes(`>${c.name}</strong>`)) && /\+ Nouvelle catégorie/.test(cw) && /class="cat-cols"/.test(cw) && /class="admin-pack-preview"/.test(cw) && clean(cw))
+  ok('catégories PC : liste à gauche (avec statut et avancement), fiche à droite avec l’aperçu du booster', /class="admin-md cats-wide"/.test(cw) && /aria-label="Catégories"/.test(cw) && data.categories.every((c) => cw.includes(`>${c.name}</strong>`)) && /\+ Nouvelle catégorie/.test(cw) && /class="cat-cols"/.test(cw) && /class="admin-pack-preview"/.test(cw) && clean(cw))
   ok('catégories PC : la première catégorie est ouverte et marquée dans la liste', /md-item on"/.test(cw) && (cw.match(/md-item on/g) || []).length === 1)
   for (const tab of ['config', 'rarities', 'uniques', 'legal', 'security']) {
     const h = shell({ wide: true, tab })

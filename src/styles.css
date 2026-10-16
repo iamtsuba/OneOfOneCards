@@ -31,7 +31,7 @@ ul { padding: 0; list-style: none; }
 /* ---------- Marque ---------- */
 .brand { display: inline-flex; align-items: center; gap: 10px; font-family: var(--font-display); font-weight: 700; }
 .brand-mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: var(--ink); color: #fff; font-size: 15px; font-weight: 800; letter-spacing: -0.03em; }
-.brand-name { font-size: 20px; letter-spacing: -0.01em; }
+.brand-name { font-size: 20px; letter-spacing: -0.01em; white-space: nowrap; }
 .brand.lg .brand-mark { width: 52px; height: 52px; border-radius: 14px; font-size: 22px; }
 .brand.lg .brand-name { font-size: 30px; }
 
@@ -73,8 +73,8 @@ input:focus-visible, select:focus-visible { outline: 3px solid color-mix(in srgb
 .msg.info { background: #e2f0e8; color: #17543a; }
 .fine { font-size: 13px; color: var(--ink-soft); }
 
-.segmented { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 4px; border-radius: 999px; background: #dadef0; margin-bottom: 16px; }
-.segmented button { border: 0; background: none; border-radius: 999px; min-height: 42px; font-weight: 600; color: var(--ink-soft); cursor: pointer; }
+.segmented { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); padding: 4px; border-radius: 999px; background: #dadef0; margin-bottom: 16px; }
+.segmented button { border: 0; background: none; border-radius: 999px; min-height: 42px; min-width: 0; padding: 0 8px; font-weight: 600; color: var(--ink-soft); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .segmented button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(27,31,59,.18); }
 
 /* ---------- Connexion ---------- */
@@ -201,7 +201,7 @@ input:focus-visible, select:focus-visible { outline: 3px solid color-mix(in srgb
 }
 
 /* ---------- Pièces ---------- */
-.coin-pill { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px 0 8px; border: 0; border-radius: 999px; background: var(--surface); font-weight: 700; font-size: 15px; cursor: pointer; box-shadow: inset 0 0 0 1.5px var(--line); }
+.coin-pill { white-space: nowrap; flex: none; display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px 0 8px; border: 0; border-radius: 999px; background: var(--surface); font-weight: 700; font-size: 15px; cursor: pointer; box-shadow: inset 0 0 0 1.5px var(--line); }
 .coin { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: linear-gradient(135deg, #f7d774, #c8932a); color: #4a3205; font-style: normal; font-family: var(--font-display); font-size: 13px; font-weight: 800; box-shadow: inset 0 0 0 2px rgba(255,255,255,.45); }
 .wallet { font-size: 18px; margin-bottom: 14px; }
 .wallet strong { font-family: var(--font-display); font-size: 26px; font-weight: 800; letter-spacing: -0.03em; }
@@ -491,7 +491,7 @@ textarea { width: 100%; padding: 10px 14px; border: 1.5px solid var(--line); bor
 .admin.wide .admin-list.narrow { max-width: 520px; }
 
 /* Maître / détail : liste à gauche (défile seule), détail à droite (défile seul) */
-.md { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; flex: 1; min-height: 0; }
+.admin-md { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; flex: 1; min-height: 0; }
 .md-list { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
 .md-list > label { display: grid; gap: 4px; font-size: 12px; font-weight: 600; }
 .md-search { width: 100%; }
@@ -642,3 +642,32 @@ textarea { width: 100%; padding: 10px 14px; border: 1.5px solid var(--line); bor
 .slot.favorite { position: relative; border-color: var(--accent); color: var(--accent); }
 .slot-favorite { position: absolute; top: 4px; right: 4px; font-size: 12px; color: var(--accent); }
 .offer-row { cursor: default; }
+
+/* ================= Mobile : en-tête, onglets et page de connexion nets sur les petits écrans ================= */
+.nowrap { white-space: nowrap; }
+@media (max-width: 440px) {
+  .topbar { gap: 8px; padding-left: 14px; padding-right: 14px; }
+  .topbar .brand { gap: 8px; min-width: 0; }
+  .topbar .brand-mark { width: 34px; height: 34px; font-size: 14px; }
+  .topbar .brand-name { font-size: 18px; }
+  .segmented button { font-size: 14px; padding: 0 4px; }
+}
+/* En dessous de 400 px la pastille ne garde que le nombre de pièces (la pièce dorée suffit à comprendre) */
+@media (max-width: 400px) { .coin-unit { display: none; } .coin-pill { padding: 0 12px 0 6px; } }
+/* Page de connexion : la carte est en haut de l'écran, pas centrée dans un grand vide devant la présentation du jeu */
+@media (max-width: 560px) { .auth { min-height: 0; place-items: start center; padding: 40px 16px 28px; } }
+
+/* Filtres de « Mes cartes » sur téléphone : le nombre de cartes, puis les deux listes côte à côte sur toute la largeur */
+@media (max-width: 480px) {
+  .toolbar { flex-wrap: wrap; }
+  .toolbar-selects { flex: 1 1 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); }
+  .toolbar-selects .select, .toolbar-selects select { width: 100%; min-width: 0; }
+}
+
+/* Très petits téléphones (320 px) : rien ne dépasse de l'écran */
+.auth { grid-template-columns: minmax(0, 1fr); }
+.auth-card { min-width: 0; }
+@media (max-width: 340px) {
+  .segmented button { font-size: 13px; padding: 0 2px; }
+  .topbar { padding-left: 10px; padding-right: 10px; }
+}

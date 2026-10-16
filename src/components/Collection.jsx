@@ -133,7 +133,7 @@ export function AlbumStats({ rows, rarityMap }) {
     <div className="collection-head">
       <p className="collection-count">
         <strong>{fmt(base.filled)}</strong> emplacement{base.filled > 1 ? 's' : ''} rempli{base.filled > 1 ? 's' : ''} sur {fmt(base.total)}
-        <span className="muted"> ({fmtPct(base.pct)})</span>
+        <span className="muted nowrap"> ({fmtPct(base.pct)})</span>
       </p>
       <div className="progress" aria-hidden="true"><span style={{ width: `${Math.max(base.pct, base.filled ? 1 : 0)}%` }} /></div>
       {base.complete && <p className="album-complete">★ Full set complet !</p>}
