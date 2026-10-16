@@ -676,3 +676,35 @@ textarea { width: 100%; padding: 10px 14px; border: 1.5px solid var(--line); bor
 .copy-prod { display: grid; gap: 8px; padding: 12px 14px; border: 1.5px dashed var(--line); border-radius: 14px; background: #f7f8fd; }
 .copy-prod h4 { margin: 0; font-size: 15px; }
 .copy-prod > label:not(.check) { display: grid; gap: 4px; font-size: 12px; font-weight: 600; max-width: 360px; }
+
+/* Album : « Voir la collection » (bouton à droite du texte d'introduction) et sa fenêtre : cartes numérotées avec leur nombre de détenteurs */
+.album-intro { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.album-intro > .fine { margin: 0; flex: 1; min-width: 0; }
+.album-collection-btn { flex: none; min-height: 40px; padding: 8px 18px; font-size: 14px; white-space: nowrap; }
+@media (max-width: 560px) { .album-intro { flex-direction: column; align-items: stretch; gap: 10px; } .album-collection-btn { width: 100%; } }
+.holders-panel { max-width: 900px; }
+.holders-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.holders-head h2 { margin: 0; }
+.holders-panel .fine, .holders-sum { margin: 0; }
+.holders-sum { color: var(--ink-soft); }
+.holder-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 16px 12px; }
+.holder-tile { display: grid; gap: 4px; justify-items: center; align-content: start; text-align: center; min-width: 0; }
+.holder-art { width: 100%; aspect-ratio: 5 / 7; display: grid; place-items: center; overflow: hidden; border-radius: 12px; border: 2px solid var(--line); background: #fff; font-size: 44px; box-shadow: 0 6px 14px -8px rgba(27,31,59,.35); }
+.holder-art .type-art { font-size: 44px; }
+.holder-art img.type-art { width: 100%; height: 100%; object-fit: cover; }
+.holder-tile.hidden .holder-art { border-style: dashed; background: #eceefa; color: var(--ink-soft); box-shadow: none; }
+.holder-tile.hidden .holder-art span { font-family: var(--font-display); font-size: 56px; font-weight: 800; }
+.holder-no { font-size: 12px; font-weight: 700; color: var(--ink-soft); }
+.holder-name { font-size: 13px; line-height: 1.2; overflow-wrap: anywhere; }
+.holder-count { padding: 2px 10px; border-radius: 99px; background: #eceefc; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.holder-tile.hidden .holder-name { color: var(--ink-soft); }
+
+/* « Voir la collection » sur téléphone : 3 cartes par ligne, titre plus compact */
+@media (max-width: 480px) {
+  .holders-head h2 { font-size: 20px; }
+  .holder-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 8px; }
+  .holder-art, .holder-art .type-art { font-size: 34px; }
+  .holder-tile.hidden .holder-art span { font-size: 42px; }
+  .holder-name { font-size: 12px; }
+  .holder-count { padding: 2px 8px; font-size: 11px; }
+}

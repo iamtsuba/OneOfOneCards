@@ -36,6 +36,8 @@ export const marketMine = () => rpc('market_mine')
 
 // Album : un exemplaire numéroté choisi par carte (type) et par rareté
 export const albumView = (category) => rpc('album_view', { p_category: category })
+// « Voir la collection » : [{ type_id, holders }] = joueurs distincts qui possèdent au moins une carte de chaque type de la catégorie
+export const collectionHolders = (category) => rpc('collection_holders', { p_category: category })
 export const myTypeCards = (type, rarity = null) => rpc('my_type_cards', { p_type: type, p_rarity: rarity })
 export const setAlbumPick = (type, base, series, number) => rpc('set_album_pick', { p_type: type, p_base: base, p_series: series, p_number: number })
 export const clearAlbumPick = (type, rarity) => rpc('clear_album_pick', { p_type: type, p_rarity: rarity })

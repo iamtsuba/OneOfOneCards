@@ -91,7 +91,7 @@ export default function Collection({ goMarket }) {
       {error && <p className="msg error" role="alert">{error}</p>}
 
       {view === 'album' && (
-        <Album rows={albumRows} catalog={catalog} rarityMap={rarityMap} onRefresh={refresh} />
+        <Album rows={albumRows} catalog={catalog} rarityMap={rarityMap} onRefresh={refresh} categoryId={catId} />
       )}
       {view === 'cards' && (
         <MyCards
@@ -164,8 +164,9 @@ export function AlbumStats({ rows, rarityMap }) {
 }
 
 // Album : pour chaque carte (type), un emplacement par rareté ; on y met un de ses exemplaires numérotés de cette rareté
-export function Album({ rows, catalog, rarityMap, onRefresh }) {
+export function Album({ rows, catalog, rarityMap, onRefresh, categoryId = null }) {
   const [picker, setPicker] = useState(null)
+  const [showCollection, setShowCollection] = useState(false)
   if (rows === null) return null
   if (rows.length === 0) {
     return <div className="empty"><p><strong>Aucune carte dans cette catégorie pour l’instant.</strong></p></div>
@@ -178,10 +179,16 @@ export function Album({ rows, catalog, rarityMap, onRefresh }) {
   }
   return (
     <>
-      <p className="fine">
-        Un emplacement par rareté de chaque carte : clique-en un pour choisir, parmi tes exemplaires de cette rareté, celui qui y figure.
-        Une carte placée dans l’album ne peut plus être vendue. Les cartes 1/1 (rareté Unique) ne comptent pas dans le full set.
-      </p>
+      <div className="album-intro">
+        <p className="fine">
+          Un emplacement par rareté de chaque carte : clique-en un pour choisir, parmi tes exemplaires de cette rareté, celui qui y figure.
+          Une carte placée dans l’album ne peut plus être vendue. Les cartes 1/1 (rareté Unique) ne comptent pas dans le full set.
+        </p>
+        {categoryId != null && (
+          <button type="button" className="btn ghost album-collection-btn" onClick={() => setShowCollection(true)}>Voir la collection</button>
+        )}
+      </div>
+      {showCollection && categoryId != null && <CollectionHoldersModal categoryId={categoryId} catalog={catalog} onClose={() => setShowCollection(false)} />}
       <div className="album-types">
         {groups.map((g) => {
           const setNo = catalog.checklist(g.typeId)
@@ -265,6 +272,76 @@ export function Album({ rows, catalog, rarityMap, onRefresh }) {
 
 // Choix de la carte d'un emplacement : une seule proposition pour toutes les cartes à numéro masqué (elles sont
 // indiscernables), une par carte à numéro visible. Une fois placée dans l'album, une carte ne peut plus être vendue.
+// « Voir la collection » : toutes les cartes de la catégorie avec leur numéro et, dessous, le nombre de détenteurs (joueurs qui en possèdent
+// au moins un exemplaire, toi compris : 20 exemplaires chez toi et 3 chez un ami = 2 détenteurs). Une carte n'est dévoilée que si elle a
+// PLUS D'UN détenteur ; les autres restent cachées derrière un « ? » (leur numéro et leur nombre de détenteurs restent visibles).
+export function CollectionHoldersView({ categoryName, types, checklist, holders, loading = false, error = '', onClose }) {
+  const counts = new Map((holders ?? []).map((h) => [h.type_id, Number(h.holders)]))
+  const items = types
+    .map((t) => ({ t, n: counts.get(t.id) ?? 0, list: checklist(t.id) }))
+    .sort((a, b) => (a.list?.no ?? 1e9) - (b.list?.no ?? 1e9) || a.t.id - b.t.id)
+  const revealed = items.filter((x) => x.n > 1).length
+  const s = (n) => (n > 1 ? 's' : '')
+  return (
+    <div className="legal-overlay" role="dialog" aria-modal="true" aria-label={`Collection ${categoryName}`} onClick={onClose}>
+      <div className="legal-panel holders-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="holders-head">
+          <h2>Collection « {categoryName} »</h2>
+          <button type="button" className="btn ghost" onClick={onClose}>Fermer</button>
+        </div>
+        <p className="fine">
+          Toutes les cartes de la collection, avec leur numéro. Sous chacune : le nombre de joueurs qui en possèdent au moins un exemplaire (toi compris).
+          Une carte n’est dévoilée que lorsqu’elle a <strong>plus d’un détenteur</strong> ; les autres restent cachées (?).
+        </p>
+        {error && <p className="msg error" role="alert">{error}</p>}
+        {loading ? (
+          <p className="muted">Chargement…</p>
+        ) : (
+          <>
+            <p className="holders-sum"><strong>{revealed}</strong> carte{s(revealed)} dévoilée{s(revealed)} sur {items.length}</p>
+            <ul className="holder-grid">
+              {items.map(({ t, n, list }) => {
+                const open = n > 1
+                return (
+                  <li key={t.id} className={`holder-tile${open ? '' : ' hidden'}`}>
+                    <div className="holder-art" role="img" aria-label={open ? t.name : 'Carte cachée'}>
+                      {open ? <TypeArt type={t} /> : <span aria-hidden="true">?</span>}
+                    </div>
+                    <span className="holder-no">{list ? `n° ${list.no}/${list.total}${list.secret ? ' · secrète' : ''}` : ''}</span>
+                    <strong className="holder-name">{open ? t.name : '???'}</strong>
+                    <span className="holder-count">{fmt(n)} détenteur{s(n)}</span>
+                  </li>
+                )
+              })}
+            </ul>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function CollectionHoldersModal({ categoryId, catalog, onClose }) {
+  const [holders, setHolders] = useState(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let cancelled = false
+    api.collectionHolders(categoryId).then((r) => !cancelled && setHolders(r)).catch((e) => !cancelled && setError(explain(e)))
+    return () => { cancelled = true }
+  }, [categoryId])
+  return (
+    <CollectionHoldersView
+      categoryName={catalog.categoryMap[categoryId]?.name ?? ''}
+      types={catalog.types.filter((t) => t.category_id === categoryId)}
+      checklist={catalog.checklist}
+      holders={holders}
+      loading={holders === null && !error}
+      error={error}
+      onClose={onClose}
+    />
+  )
+}
+
 export function AlbumPicker({ typeId, typeName, rarityId, rarityName, rarityMap, hasPick, onClose, onChanged, initialCards }) {
   const [cards, setCards] = useState(initialCards ?? [])   // initialCards : cartes déjà connues (tests de rendu)
   const [loading, setLoading] = useState(!initialCards)

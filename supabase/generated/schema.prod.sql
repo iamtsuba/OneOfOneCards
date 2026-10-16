@@ -2118,6 +2118,25 @@ begin
   order by y.secret, y.o_pos, y.type_id, y.o_ord desc;
 end $$;
 
+-- « Voir la collection » (album) : pour chaque type d'une catégorie, le nombre de JOUEURS DISTINCTS qui possèdent au moins une carte de ce
+-- type (toutes raretés confondues). Si tu en as 20 et ton ami 3, il y a 2 détenteurs. Une carte revendue à la banque (sans propriétaire)
+-- ne compte pas. Seuls des nombres sont renvoyés, jamais de noms de joueurs. Le client ne dévoile un type que s'il a plus d'un détenteur.
+create or replace function public.o1ocards_collection_holders(p_category int)
+returns table (type_id int, holders bigint)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'not_authenticated'; end if;
+  return query
+  select t.id, count(distinct c.owner_id)
+  from public.o1ocards_types t
+  left join public.o1ocards_cards c on c.type_id = t.id and c.owner_id is not null
+  where t.category_id = p_category
+  group by t.id, t.position
+  order by t.position, t.id;
+end $$;
+revoke all on function public.o1ocards_collection_holders(int) from public, anon;
+grant execute on function public.o1ocards_collection_holders(int) to authenticated;
+
 -- Mes exemplaires d'un type, éventuellement d'une seule rareté (pour choisir lequel mettre dans l'emplacement).
 -- listed : en vente (ne peut pas entrer dans l'album) ; picked : c'est l'exemplaire actuellement dans l'album ;
 -- visible : son numéro est visible (sinon il fait partie de la pile des cartes sans numéro).
