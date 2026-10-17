@@ -1227,14 +1227,15 @@ $$;
 
 -- Tire une série (type, rareté de base, numéro de série) pour un emplacement : p_class = common, uncommon, premium ou any (toutes les cartes).
 -- Ne renvoie aucune ligne si l'emplacement n'a plus de carte.
-create or replace function public.pp_o1ocards_pick_series(p_cat int, p_class text, p_e double precision)
+-- p_exclude : cartes (types) à ne pas tirer ; sert aux Communes d'un booster, qui doivent être des cartes différentes
+create or replace function public.pp_o1ocards_pick_series(p_cat int, p_class text, p_e double precision, p_exclude int[] default '{}')
 returns table (type_id int, base text, g int)
 language plpgsql volatile security definer set search_path = public set jit = off as $$
 declare v_opt text; v_uid text;
 begin
   select id into v_uid from public.pp_o1ocards_rarities where kind = 'unique' limit 1;
   if p_class <> 'any' then
-    with sp as materialized (select * from public.pp_o1ocards_series_pool(p_cat, p_e)),
+    with sp as materialized (select * from public.pp_o1ocards_series_pool(p_cat, p_e) x where x.type_id <> all (coalesce(p_exclude, '{}'))),
     pool as (
       select sp.base as opt, sum(sp.remaining)::bigint as rem from sp where sp.g > 1 group by sp.base
       union all
@@ -1259,7 +1260,8 @@ begin
   with s as materialized (
     select sp.type_id, sp.base, sp.g, sp.w
     from public.pp_o1ocards_series_pool(p_cat, p_e) sp
-    where case when p_class = 'any' then true
+    where sp.type_id <> all (coalesce(p_exclude, '{}'))
+      and case when p_class = 'any' then true
                when v_opt = v_uid then sp.g = 1
                else sp.base = v_opt and sp.g > 1 end
   ),
@@ -1284,7 +1286,7 @@ end $$;
 
 revoke all on function public.pp_o1ocards_slot_class(int) from public, anon, authenticated;
 revoke all on function public.pp_o1ocards_series_pool(int, double precision) from public, anon, authenticated;
-revoke all on function public.pp_o1ocards_pick_series(int, text, double precision) from public, anon, authenticated;
+revoke all on function public.pp_o1ocards_pick_series(int, text, double precision, int[]) from public, anon, authenticated;
 revoke all on function public.pp_o1ocards_auto_place_album(uuid, int, text, int, int) from public, anon, authenticated;
 
 -- Réglage des poids de tirage d'une rareté (onglet Raretés de l'admin)
@@ -1316,6 +1318,7 @@ declare
   n_cards   int;
   e         double precision;
   v_class   text;
+  v_seen    int[] := '{}';   -- cartes déjà tirées parmi les Communes de ce booster
   tid       int;
   m         int;
   avail     int;
@@ -1365,7 +1368,11 @@ begin
       -- Emplacement de cette carte : les premières sont Communes, puis Peu communes, les suivantes Premium (voir pick_series)
       v_class := public.pp_o1ocards_slot_class(got + 1);
       tid := null; v_base := null; m := null;
-      select ps.type_id, ps.base, ps.g into tid, v_base, m from public.pp_o1ocards_pick_series(v_cat, v_class, e) ps;
+      -- Les Communes d'un booster sont des cartes DIFFÉRENTES : jamais de doublon ni de triplon d'une même carte
+      select ps.type_id, ps.base, ps.g into tid, v_base, m from public.pp_o1ocards_pick_series(v_cat, v_class, e, case when v_class = 'common' then v_seen else '{}'::int[] end) ps;
+      if tid is null and v_class = 'common' and cardinality(v_seen) > 0 then   -- plus assez de cartes différentes avec des Communes : un doublon plutôt qu'un booster incomplet
+        select ps.type_id, ps.base, ps.g into tid, v_base, m from public.pp_o1ocards_pick_series(v_cat, v_class, e) ps;
+      end if;
       if tid is null then   -- plus de carte dans ce palier : on tire parmi toutes les cartes encore disponibles
         select ps.type_id, ps.base, ps.g into tid, v_base, m from public.pp_o1ocards_pick_series(v_cat, 'any', e) ps;
         if tid is null then exhausted := true; exit; end if;
@@ -1391,6 +1398,7 @@ begin
       if v_new then perform public.pp_o1ocards_auto_place_album(uid, tid, v_base, m, num); end if;   -- nouvelle carte : directement dans l'album
 
       got := got + 1;
+      if v_class = 'common' then v_seen := array_append(v_seen, tid); end if;
       res := res || jsonb_build_array(jsonb_build_object(
         'type_id', tid, 'base_rarity', v_base, 'series', m, 'number', num, 'rarity_id', public.pp_o1ocards_rarity_id(num, m, tid, v_base), 'is_new', v_new
       ));

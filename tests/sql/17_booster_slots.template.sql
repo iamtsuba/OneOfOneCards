@@ -94,6 +94,8 @@ select x.b, t.ord::int as ord, (t.c ->> 'type_id')::int as type_id, t.c ->> 'bas
 from (select b, public.{{P}}open_booster() as j from generate_series(1, 2000) b offset 0) x, jsonb_array_elements(x.j -> 'cards') with ordinality as t(c, ord);
 select pg_temp.expect('chaque booster contient 5 cartes', (select count(*) from drawn) = 10000 and (select min(c) from (select count(*) c from drawn group by b) z) = 5 and (select max(c) from (select count(*) c from drawn group by b) z) = 5);
 select pg_temp.expect('les 3 premières cartes sont de la rareté « Commune » (identifiant zz_a, pas « common »)', (select count(*) from drawn where ord <= 3 and base = 'zz_a') = 6000);
+select pg_temp.expect('les 3 Communes de chaque booster sont 3 cartes DIFFÉRENTES : jamais de doublon ni de triplon (2 000 boosters, 4 cartes possibles)',
+  not exists (select 1 from drawn where ord <= 3 group by b having count(distinct type_id) < 3) and (select count(*) from (select b from drawn where ord <= 3 group by b having count(distinct type_id) = 3) z) = 2000);
 select pg_temp.expect('la 4e carte est de la rareté « Peu Commune » (identifiant zz_b)', (select count(*) from drawn where ord = 4 and base = 'zz_b') = 2000);
 select pg_temp.expect('aucune carte 1/1 (Unique) dans les 4 premiers emplacements', (select count(*) from drawn where ord <= 4 and series = 1) = 0);
 create temp table prem as select case when series = 1 then 'unique' else base end as opt from drawn where ord = 5;
@@ -162,9 +164,24 @@ select public.{{P}}admin_set_rarity_weights('mauvais', 'zz_c', 1, 1, 1) ->> 'err
 select pg_temp.expect('rien n''a changé après les refus', (select (weight_slots_1_3, weight_slot_4, weight_slot_5) = (2, 3, 4) from public.{{P}}rarities where id = 'zz_c'));
 select pg_temp.expect('admin_data renvoie les poids de chaque rareté', (select count(*) from jsonb_array_elements(public.{{P}}admin_data('thomarie') -> 'rarities') r where r ? 'weight_slot_5') = (select count(*) from public.{{P}}rarities));
 
+\echo '--- deux cartes seulement ont des Communes : les 3 Communes sont complétées avec un doublon plutôt qu''un booster incomplet'
+-- poids propres : les cartes 1 à 3 = Commune seulement (le réglage de l'admin testé plus haut avait donné un poids à « Rare »)
+update public.{{P}}rarities set weight_slots_1_3 = 0, weight_slot_4 = 0, weight_slot_5 = 0;
+update public.{{P}}rarities set weight_slots_1_3 = 1 where id = 'zz_a';
+update public.{{P}}rarities set weight_slot_5 = 30 where id = 'zz_c';
+update public.{{P}}categories set closed = true;
+insert into public.{{P}}categories (name, position, series_count, color, color2, text_color, enabled) values ('Slots Deux', 1, 10, '#ffffff', '#cccccc', '#000000', true) returning id as cat4 \gset
+insert into public.{{P}}types (category_id, name, image, position, secret) select :cat4, 'Duo ' || i, '🐭', i, false from generate_series(1, 2) i;
+insert into public.{{P}}type_rarities (type_id, rarity_id, max_series, numbered_series, card_style)
+select ty.id, r.rid, r.s, r.s, 'simple' from public.{{P}}types ty cross join (values ('zz_a', 6), ('zz_c', 4)) r(rid, s) where ty.category_id = :cat4;
+create temp table duo as
+select x.b, t.ord::int as ord, (t.c ->> 'type_id')::int as type_id, t.c ->> 'base_rarity' as base from (select b, public.{{P}}open_booster() as j from generate_series(1, 3) b offset 0) x, jsonb_array_elements(x.j -> 'cards') with ordinality as t(c, ord);
+select pg_temp.expect('booster complet (5 cartes) même avec seulement 2 cartes différentes', (select count(*) from duo where b = 1) = 5);
+select pg_temp.expect('les 3 Communes du 1er booster : les 2 cartes différentes y sont, la 3e est forcément un doublon', (select count(*) from duo where b = 1 and ord <= 3 and base = 'zz_a') = 3 and (select count(distinct type_id) from duo where b = 1 and ord <= 3) = 2);
+
 -- nettoyage : on laisse la base comme on l'a trouvée
 delete from public.{{P}}cards; delete from public.{{P}}album_picks;
-delete from public.{{P}}categories where name in ('Slots Test', 'Slots Repli');
+delete from public.{{P}}categories where name in ('Slots Test', 'Slots Repli', 'Slots Deux');
 delete from public.{{P}}rarities where id in ('zz_a', 'zz_b', 'zz_c', 'zz_d', 'zz_e', 'zz_f');
 update public.{{P}}rarities r set weight_slots_1_3 = b.a, weight_slot_4 = b.b, weight_slot_5 = b.c from w_backup b where b.id = r.id;
 update public.{{P}}categories set closed = false;
