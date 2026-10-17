@@ -21,6 +21,11 @@ insert into public.o1ocards_config (key, value, description) values
   ('cards_per_booster',      5,    'Nombre de cartes par booster'),
   ('booster_common_slots',   3,    'Composition d''un booster : nombre de premières cartes tirées avec les poids « cartes 1 à 3 » (en principe les Communes)'),
   ('booster_uncommon_slots', 1,    'Composition d''un booster : nombre de cartes de la 2e catégorie (4e carte, juste après les premières). Les cartes suivantes sont tirées selon les poids de la 5e carte. Les poids de chaque rareté se règlent dans l''onglet Raretés'),
+  ('gold_reward_weight_numbered', 1, 'Booster Gold (carte complétée dans l''album) : poids d''une carte à numéro visible du type complété pour la 5e carte'),
+  ('gold_reward_weight_artrare',   1, 'Booster Gold : poids d''une carte Art Rare pour la 5e carte'),
+  ('gold_reward_weight_alpha',     1, 'Booster Gold : poids d''une carte Alpha pour la 5e carte'),
+  ('gold_reward_weight_omega',     1, 'Booster Gold : poids d''une carte Omega pour la 5e carte'),
+  ('gold_reward_weight_unique',    1, 'Booster Gold : poids d''une carte Unique (1/1) pour la 5e carte'),
   ('start_boosters',         10,   'Boosters offerts à la création du profil'),
   ('start_coins',            0,    'Pièces offertes à la création du profil'),
   ('regen_minutes',          10,   'Délai entre deux recharges (minutes)'),
@@ -1039,6 +1044,8 @@ begin
     'coins',               p.coins,
     'coins_locked',        v_locked,
     'friend_requests',     (select count(*) from public.o1ocards_friendships f where f.addressee_id = p.id and f.status = 'pending'),
+    'gold_rewards',        (select coalesce(jsonb_agg(jsonb_build_object('id', g.id, 'type_id', g.type_id, 'seen', g.seen) order by g.id), '[]'::jsonb)
+                            from public.o1ocards_gold_rewards g where g.user_id = p.id and g.opened_at is null),
     'active_category_id',  v_cat,
     'next_category',       v_next,
     'closed_categories',   v_closed,
@@ -1267,11 +1274,13 @@ end $$;
 
 -- Une carte nouvelle (le joueur n'avait rien dans cet emplacement de l'album) est placée d'office dans l'album, à son emplacement
 create or replace function public.o1ocards_auto_place_album(p_uid uuid, p_type int, p_base text, p_series int, p_number int)
-returns void language sql security definer set search_path = public as $$
+returns void language plpgsql security definer set search_path = public as $$
+begin
   insert into public.o1ocards_album_picks (user_id, type_id, rarity_id, base_rarity, series, number)
   values (p_uid, p_type, public.o1ocards_rarity_id(p_number, p_series, p_type, p_base), p_base, p_series, p_number)
-  on conflict (user_id, type_id, rarity_id) do nothing
-$$;
+  on conflict (user_id, type_id, rarity_id) do nothing;
+  perform public.o1ocards_check_type_reward(p_uid, p_type);   -- la carte est peut-être maintenant complète : booster Gold
+end $$;
 
 revoke all on function public.o1ocards_slot_class(int) from public, anon, authenticated;
 revoke all on function public.o1ocards_series_pool(int, double precision) from public, anon, authenticated;
@@ -2508,6 +2517,251 @@ grant execute on function public.o1ocards_friend_remove(uuid) to authenticated;
 grant execute on function public.o1ocards_friends_list() to authenticated;
 grant execute on function public.o1ocards_friend_cards(uuid, boolean, int, int) to authenticated;
 
+-- =====================================================================================================================
+-- BOOSTER GOLD : récompense quand TOUS les emplacements d'une carte (type) sont remplis dans l'album (raretés ordinaires de la carte, Unique, Alpha,
+-- Omega : exactement les emplacements de album_view). Une seule récompense par carte et par joueur, même si on vide puis remplit l'album.
+-- Contenu : 3 Rare, 1 Super Rare, puis une 5e carte tirée au hasard (poids gold_reward_weight_*) parmi : une carte à numéro visible de la carte complétée,
+-- une Art Rare, une Alpha, une Omega, une Unique. Les cartes viennent des cartes restantes de la catégorie de la carte complétée ; une carte nouvelle
+-- va directement dans l'album. Les raretés Rare, Super Rare et Art Rare sont reconnues par leur NOM (jamais par leur identifiant).
+-- =====================================================================================================================
+create table if not exists public.o1ocards_gold_rewards (
+  id         bigint generated always as identity primary key,
+  user_id    uuid not null references public.o1ocards_profiles (id) on delete cascade,
+  type_id    int  not null references public.o1ocards_types (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  seen       boolean not null default false,   -- le joueur a vu l'annonce
+  opened_at  timestamptz,
+  cards      jsonb,
+  unique (user_id, type_id)
+);
+alter table public.o1ocards_gold_rewards enable row level security;
+revoke all on public.o1ocards_gold_rewards from anon, authenticated;
+
+-- Id d'une rareté ordinaire d'après son nom (sans accents ni casse) : 'rare', 'super rare', 'art rare'
+create or replace function public.o1ocards_rarity_by_name(p_key text)
+returns text language sql stable set search_path = public as $$
+  select r.id from public.o1ocards_rarities r
+  where r.kind = 'range' and regexp_replace(lower(translate(trim(r.name), 'éèêëàâîïôöùûüç', 'eeeeaaiioouuuc')), '\s+', ' ', 'g') = p_key
+  order by r.sort_order limit 1
+$$;
+
+-- Les emplacements d'une carte dans l'album (mêmes règles que album_view)
+create or replace function public.o1ocards_type_album_slots(p_type int)
+returns table (rid text)
+language sql stable security definer set search_path = public as $$
+  select c.rarity_id from public.o1ocards_type_config(p_type) c where c.smax >= 3 or (c.smax = 2 and c.numbered < 2)
+  union
+  select r.id from public.o1ocards_rarities r where r.kind = 'unique'
+  union
+  select r.id from public.o1ocards_rarities r
+  where r.kind in ('alpha', 'omega') and exists (select 1 from public.o1ocards_type_config(p_type) c where least(c.numbered::bigint, c.smax) >= 2)
+$$;
+
+-- Crée la récompense si tous les emplacements de la carte sont remplis dans l'album du joueur (et s'il ne l'a pas déjà eue)
+create or replace function public.o1ocards_check_type_reward(p_uid uuid, p_type int)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if exists (select 1 from public.o1ocards_gold_rewards where user_id = p_uid and type_id = p_type) then return; end if;
+  if not exists (select 1 from public.o1ocards_type_album_slots(p_type)) then return; end if;
+  if exists (
+    select 1 from public.o1ocards_type_album_slots(p_type) sl
+    where not exists (
+      select 1 from public.o1ocards_album_picks p
+      where p.user_id = p_uid and p.type_id = p_type and p.rarity_id = sl.rid
+        and public.o1ocards_rarity_id(p.number, p.series, p.type_id, p.base_rarity) = p.rarity_id)
+  ) then return; end if;
+  insert into public.o1ocards_gold_rewards (user_id, type_id) values (p_uid, p_type) on conflict (user_id, type_id) do nothing;
+end $$;
+
+-- Les séries d'une catégorie qui ont encore des cartes, avec ce qui reste : alpha (numéro 1) et omega (numéro m) libres, cartes « du milieu » libres
+create or replace function public.o1ocards_gold_pool(p_cat int, p_type int default null)
+returns table (type_id int, base text, g int, vis boolean, a_free int, o_free int, mid_free int, avail int)
+language sql stable security definer set search_path = public as $$
+  select z.type_id, z.base, z.g, z.vis, z.a_free, z.o_free,
+         case when z.g = 1 then 0 when z.vis then greatest(z.avail - z.a_free - z.o_free, 0) else z.avail end,
+         z.avail
+  from (
+    select ty.id as type_id, cf.rarity_id as base, g, (g <= cf.numbered) as vis, (g - coalesce(t.taken, 0))::int as avail,
+           (case when g > 1 and g <= cf.numbered and a.type_id is null then 1 else 0 end) as a_free,
+           (case when g > 1 and g <= cf.numbered and o.type_id is null then 1 else 0 end) as o_free
+    from public.o1ocards_types ty
+    cross join lateral public.o1ocards_type_config(ty.id) cf
+    cross join lateral generate_series(1, cf.smax) g
+    left join public.o1ocards_series_taken t on t.type_id = ty.id and t.base_rarity = cf.rarity_id and t.series = g
+    left join public.o1ocards_cards a on g > 1 and a.type_id = ty.id and a.base_rarity = cf.rarity_id and a.series = g and a.number = 1
+    left join public.o1ocards_cards o on g > 1 and o.type_id = ty.id and o.base_rarity = cf.rarity_id and o.series = g and o.number = g
+    where ty.category_id = p_cat and (p_type is null or ty.id = p_type) and g > coalesce(t.taken, 0)
+  ) z
+$$;
+
+-- Tire UNE carte libre : p_mode = plain (rareté p_rarity, sans Alpha/Omega/Unique), numbered (carte à numéro visible du type p_type), anyplain (n'importe
+-- quelle carte ordinaire), alpha, omega, unique. Ne renvoie rien s'il n'y a aucune carte possible.
+create or replace function public.o1ocards_gold_pick_card(p_cat int, p_mode text, p_rarity text, p_type int, p_e double precision)
+returns table (c_type int, c_base text, c_series int, c_number int)
+language plpgsql volatile security definer set search_path = public set jit = off as $$
+declare r record; k int; v_num int;
+begin
+  select s.type_id, s.base, s.g, s.vis, s.mid_free into r
+  from (
+    select z.*, sum(z.w) over (order by z.type_id, z.base, z.g) as cs, sum(z.w) over () as tw
+    from (
+      select gp.*,
+             (case p_mode when 'plain' then gp.mid_free when 'numbered' then gp.mid_free when 'anyplain' then gp.mid_free
+                          when 'alpha' then gp.a_free when 'omega' then gp.o_free when 'unique' then (case when gp.g = 1 then 1 else 0 end) else 0 end)
+             * power(gp.g::double precision, p_e) as w
+      from public.o1ocards_gold_pool(p_cat, case when p_mode = 'numbered' then p_type end) gp
+      where case p_mode when 'plain' then gp.base = p_rarity and gp.g > 1
+                        when 'numbered' then gp.vis and gp.g > 2
+                        when 'anyplain' then gp.g > 1
+                        else true end
+    ) z where z.w > 0
+  ) s, (select random() as rr) q
+  where s.cs > q.rr * s.tw
+  order by s.cs limit 1;
+  if r.type_id is null then return; end if;
+
+  if p_mode = 'alpha' then v_num := 1;
+  elsif p_mode = 'omega' then v_num := r.g;
+  elsif p_mode = 'unique' then v_num := 1;
+  else
+    -- une carte « du milieu » encore libre au hasard : numéros 2..m-1 si la série est à numéro visible (1 et m sont Alpha et Omega), tous sinon
+    k := floor(random() * r.mid_free)::int;
+    select x into v_num
+    from generate_series(case when r.vis then 2 else 1 end, case when r.vis then r.g - 1 else r.g end) x
+    where not exists (select 1 from public.o1ocards_cards c where c.type_id = r.type_id and c.base_rarity = r.base and c.series = r.g and c.number = x)
+    order by x offset k limit 1;
+  end if;
+  if v_num is null then return; end if;
+  c_type := r.type_id; c_base := r.base; c_series := r.g; c_number := v_num;
+  return next;
+end $$;
+
+-- Le contenu d'un booster Gold pour la carte p_type : renvoie les cartes tirées (comme un booster), avec album automatique pour les cartes nouvelles
+create or replace function public.o1ocards_draw_gold_reward(p_uid uuid, p_type int)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_cat   int;
+  e       double precision := coalesce(public.o1ocards_cfg('rarity_exponent'), 0)::double precision;
+  v_rare  text := public.o1ocards_rarity_by_name('rare');
+  v_super text := public.o1ocards_rarity_by_name('super rare');
+  v_art   text := public.o1ocards_rarity_by_name('art rare');
+  res     jsonb := '[]'::jsonb;
+  slot    int; mode text; modes text[]; tries int; ok boolean; c record; v_new boolean; rows int;
+  opts    text[]; wts double precision[]; tw double precision; r double precision; acc double precision; pick int; i int; n int;
+begin
+  select t.category_id into v_cat from public.o1ocards_types t where t.id = p_type;
+  if v_cat is null then return res; end if;
+
+  for slot in 1 .. 5 loop
+    if slot <= 3 then modes := array['plain:' || coalesce(v_rare, ''), 'anyplain'];
+    elsif slot = 4 then modes := array['plain:' || coalesce(v_super, ''), 'anyplain'];
+    else
+      -- 5e carte : une des cinq possibilités au hasard (poids réglables), les autres en repli, puis n'importe quelle carte ordinaire
+      opts := array['numbered', case when v_art is null then null else 'plain:' || v_art end, 'alpha', 'omega', 'unique'];
+      wts := array[coalesce(public.o1ocards_cfg('gold_reward_weight_numbered'), 1), coalesce(public.o1ocards_cfg('gold_reward_weight_artrare'), 1),
+                   coalesce(public.o1ocards_cfg('gold_reward_weight_alpha'), 1), coalesce(public.o1ocards_cfg('gold_reward_weight_omega'), 1),
+                   coalesce(public.o1ocards_cfg('gold_reward_weight_unique'), 1)]::double precision[];
+      modes := '{}';
+      for n in 1 .. 5 loop
+        tw := 0;
+        for i in 1 .. 5 loop if opts[i] is not null and wts[i] > 0 then tw := tw + wts[i]; end if; end loop;
+        exit when tw <= 0;
+        r := random() * tw; acc := 0; pick := null;
+        for i in 1 .. 5 loop
+          if opts[i] is not null and wts[i] > 0 then
+            acc := acc + wts[i];
+            if r < acc then pick := i; exit; end if;
+          end if;
+        end loop;
+        if pick is null then exit; end if;
+        modes := array_append(modes, opts[pick]);
+        wts[pick] := 0;
+      end loop;
+      modes := array_append(modes, 'anyplain'::text);
+    end if;
+
+    ok := false;
+    foreach mode in array modes loop
+      exit when ok;
+      tries := 0;
+      while tries < 5 and not ok loop
+        tries := tries + 1;
+        select * into c from public.o1ocards_gold_pick_card(v_cat, split_part(mode, ':', 1), nullif(split_part(mode, ':', 2), ''), p_type, e);
+        exit when c.c_type is null;
+        v_new := not public.o1ocards_owns_card_rarity(p_uid, c.c_type, public.o1ocards_rarity_id(c.c_number, c.c_series, c.c_type, c.c_base));
+        insert into public.o1ocards_cards (type_id, base_rarity, series, number, owner_id) values (c.c_type, c.c_base, c.c_series, c.c_number, p_uid)
+        on conflict (type_id, base_rarity, series, number) do nothing;
+        get diagnostics rows = row_count;
+        if rows = 1 then
+          ok := true;
+          if v_new then perform public.o1ocards_auto_place_album(p_uid, c.c_type, c.c_base, c.c_series, c.c_number); end if;
+          res := res || jsonb_build_array(jsonb_build_object(
+            'type_id', c.c_type, 'base_rarity', c.c_base, 'series', c.c_series, 'number', c.c_number,
+            'rarity_id', public.o1ocards_rarity_id(c.c_number, c.c_series, c.c_type, c.c_base), 'is_new', v_new));
+        end if;
+      end loop;
+    end loop;
+  end loop;
+  return res;
+end $$;
+
+-- Ouvrir un booster Gold gagné (une seule fois). Les cartes viennent de la catégorie de la carte complétée.
+create or replace function public.o1ocards_open_gold_reward(p_id bigint)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); p public.o1ocards_profiles; rw public.o1ocards_gold_rewards; v_cat int; res jsonb;
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  p := public.o1ocards_sync(uid);
+  select * into rw from public.o1ocards_gold_rewards where id = p_id and user_id = uid and opened_at is null for update;
+  if not found then raise exception 'no_gold_reward'; end if;
+  select t.category_id into v_cat from public.o1ocards_types t where t.id = rw.type_id;
+  res := public.o1ocards_draw_gold_reward(uid, rw.type_id);
+  if jsonb_array_length(res) = 0 then raise exception 'pool_empty'; end if;   -- plus aucune carte à tirer : la récompense reste à ouvrir
+  if public.o1ocards_category_taken(v_cat) >= public.o1ocards_category_total(v_cat) then
+    update public.o1ocards_categories set closed = true where id = v_cat;
+  end if;
+  update public.o1ocards_gold_rewards set opened_at = now(), seen = true, cards = res where id = rw.id;
+  select * into p from public.o1ocards_profiles where id = uid;
+  return jsonb_build_object('cards', res, 'golden', true, 'gold', true, 'type_id', rw.type_id, 'category_id', v_cat, 'status', public.o1ocards_status_json(p));
+end $$;
+
+-- Annonce vue (la fenêtre « Carte complétée » ne revient pas)
+create or replace function public.o1ocards_ack_gold_rewards()
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare p public.o1ocards_profiles;
+begin
+  if auth.uid() is null then raise exception 'not_authenticated'; end if;
+  update public.o1ocards_gold_rewards set seen = true where user_id = auth.uid() and not seen;
+  p := public.o1ocards_sync(auth.uid());
+  return public.o1ocards_status_json(p);
+end $$;
+
+-- Cartes déjà complètes avant cette fonction : leurs récompenses sont créées une fois (idempotent)
+create or replace function public.o1ocards_gold_rewards_backfill()
+returns int language plpgsql security definer set search_path = public as $$
+declare r record; n int := 0; before_n int;
+begin
+  for r in select distinct user_id, type_id from public.o1ocards_album_picks loop
+    select count(*) into before_n from public.o1ocards_gold_rewards where user_id = r.user_id and type_id = r.type_id;
+    perform public.o1ocards_check_type_reward(r.user_id, r.type_id);
+    if (select count(*) from public.o1ocards_gold_rewards where user_id = r.user_id and type_id = r.type_id) > before_n then n := n + 1; end if;
+  end loop;
+  return n;
+end $$;
+
+revoke all on function public.o1ocards_rarity_by_name(text) from public, anon, authenticated;
+revoke all on function public.o1ocards_type_album_slots(int) from public, anon, authenticated;
+revoke all on function public.o1ocards_check_type_reward(uuid, int) from public, anon, authenticated;
+revoke all on function public.o1ocards_gold_pool(int, int) from public, anon, authenticated;
+revoke all on function public.o1ocards_gold_pick_card(int, text, text, int, double precision) from public, anon, authenticated;
+revoke all on function public.o1ocards_draw_gold_reward(uuid, int) from public, anon, authenticated;
+revoke all on function public.o1ocards_gold_rewards_backfill() from public, anon, authenticated;
+revoke all on function public.o1ocards_open_gold_reward(bigint) from public, anon;
+revoke all on function public.o1ocards_ack_gold_rewards() from public, anon;
+grant execute on function public.o1ocards_open_gold_reward(bigint) to authenticated;
+grant execute on function public.o1ocards_ack_gold_rewards() to authenticated;
+select public.o1ocards_gold_rewards_backfill();
+
 -- « Voir la collection » (album) : pour chaque type d'une catégorie, le nombre de JOUEURS DISTINCTS qui possèdent au moins une carte de ce
 -- type (toutes raretés confondues). Si tu en as 20 et ton ami 3, il y a 2 détenteurs. Une carte revendue à la banque (sans propriétaire)
 -- ne compte pas. Seuls des nombres sont renvoyés, jamais de noms de joueurs. Le client ne dévoile un type que s'il a plus d'un détenteur.
@@ -2570,6 +2824,7 @@ begin
   values (uid, p_type, v_rarity, p_base, p_series, p_number, now())
   on conflict (user_id, type_id, rarity_id)
   do update set base_rarity = excluded.base_rarity, series = excluded.series, number = excluded.number, updated_at = now();
+  perform public.o1ocards_check_type_reward(uid, p_type);   -- la carte est peut-être maintenant complète : booster Gold
   return jsonb_build_object('ok', true, 'rarity_id', v_rarity);
 end $$;
 

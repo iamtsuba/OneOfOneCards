@@ -36,6 +36,9 @@ export const marketMine = () => rpc('market_mine')
 
 // Album : un exemplaire numéroté choisi par carte (type) et par rareté
 export const albumView = (category) => rpc('album_view', { p_category: category })
+// Booster Gold gagné en complétant tous les emplacements d'une carte dans l'album : ouverture, et accusé de réception de l'annonce
+export const openGoldReward = (id) => rpc('open_gold_reward', { p_id: id })
+export const ackGoldRewards = () => rpc('ack_gold_rewards')
 // Amis : recherche par début de pseudo, demandes, liste, collection d'un ami (ses doubles : p_doubles)
 export const friendSearch = (query) => rpc('friend_search', { p_query: query })
 export const friendRequest = (userId) => rpc('friend_request', { p_user: userId })
@@ -223,6 +226,7 @@ export function explain(e) {
   if (m.includes('card_in_album')) return 'Cette carte est dans ton album : elle ne peut pas être vendue. Retire-la de l’album pour la vendre.'
   if (m.includes('not_enough_cards')) return 'Il n’y a pas assez de cartes vendables dans cette pile (celles de l’album ou en vente sont exclues).'
   if (m.includes('invalid_count')) return 'Quantité invalide : entre un nombre entier de cartes, minimum 1.'
+  if (m.includes('no_gold_reward')) return 'Ce booster Gold n’est plus disponible.'
   if (m.includes('not_friends')) return 'Tu dois d’abord être ami avec ce joueur.'
   if (m.includes('cannot_friend_self')) return 'Tu ne peux pas t’ajouter toi-même.'
   if (m.includes('user_not_found')) return 'Ce joueur n’existe pas.'

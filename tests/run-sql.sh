@@ -84,7 +84,8 @@ for e in $ENVLIST; do
   before="$(snapshot "$other")"
   for f in tests/sql/*.template.sql; do
     name="$(basename "$f" .template.sql)"
-    case "$name" in *.preprod) [ "$e" = "preprod" ] || continue ;; esac   # test réservé à la préproduction (ex. copie vers la production)
+    case "$name" in *.preprod) [ "$e" = "preprod" ] || continue ;; esac
+    [ -z "${ONLY:-}" ] || case "$name" in "$ONLY"*) ;; *) continue ;; esac   # ONLY=19 : ne jouer que les tests dont le nom commence par 19   # test réservé à la préproduction (ex. copie vers la production)
     rendered="$DIR/$e-$name.sql"; sed "s/{{P}}/$p/g" "$f" > "$rendered"; chmod 644 "$rendered"
     step "[$e] $name"; out="$(sqlf o1o_test "$rendered")"; rc=$?
     mkdir -p tests/.out; echo "$out" > "tests/.out/$e-$name.txt"

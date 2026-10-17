@@ -7,6 +7,7 @@ import Auth from './components/Auth'
 import Brand from './components/Brand'
 import TabBar from './components/TabBar'
 import Friends from './components/Friends'
+import GoldRewardModal from './components/GoldRewardModal'
 import Boosters from './components/Boosters'
 import Collection from './components/Collection'
 import Market from './components/Market'
@@ -139,6 +140,15 @@ function Game({ session }) {
           rewards={status.unseen_rewards}
           onClose={async (openNow) => {
             try { setStatus(await api.ackRewards()) } catch { /* l'annonce réapparaîtra */ }
+            if (openNow) setTab('boosters')
+          }}
+        />
+      )}
+      {!revealing && (status.unseen_rewards ?? []).length === 0 && (status.gold_rewards ?? []).some((g) => !g.seen) && (
+        <GoldRewardModal
+          rewards={status.gold_rewards.filter((g) => !g.seen)}
+          onClose={async (openNow) => {
+            try { setStatus(await api.ackGoldRewards()) } catch { /* l'annonce réapparaîtra */ }
             if (openNow) setTab('boosters')
           }}
         />
