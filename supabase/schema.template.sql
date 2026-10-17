@@ -2466,8 +2466,10 @@ begin
 end $$;
 
 -- Les cartes d'un AMI (jamais d'un inconnu ni d'une demande en attente), les plus rares d'abord ; p_doubles = seulement ses doubles
+-- i_own = le joueur qui regarde possède déjà une carte de cet emplacement (même type, même rareté affichée) : simple information, une offre reste possible
+drop function if exists public.{{P}}friend_cards(uuid, boolean, int, int);
 create or replace function public.{{P}}friend_cards(p_friend uuid, p_doubles boolean default false, p_limit int default 60, p_offset int default 0)
-returns table (card_type int, card_base text, card_series int, card_number int, rarity_id text, is_double boolean, in_album boolean, listing_id bigint, total bigint, doubles_total bigint)
+returns table (card_type int, card_base text, card_series int, card_number int, rarity_id text, is_double boolean, in_album boolean, listing_id bigint, i_own boolean, total bigint, doubles_total bigint)
 language plpgsql stable security definer set search_path = public as $$
 declare uid uuid := auth.uid();
 begin
@@ -2482,7 +2484,8 @@ begin
   tot as (
     select count(*) filter (where not coalesce(p_doubles, false) or v.is_double) as total, count(*) filter (where v.is_double) as dbl from v
   )
-  select v.type_id, v.base_rarity, v.series, v.number, v.rarity_id, v.is_double, v.in_album, v.listing_id, tot.total, tot.dbl
+  select v.type_id, v.base_rarity, v.series, v.number, v.rarity_id, v.is_double, v.in_album, v.listing_id,
+         public.{{P}}owns_card_rarity(uid, v.type_id, v.rarity_id), tot.total, tot.dbl
   from v cross join tot
   where not coalesce(p_doubles, false) or v.is_double
   order by coalesce((select r.sort_order from public.{{P}}rarities r where r.id = v.rarity_id), 1000), v.type_id, v.series, v.number

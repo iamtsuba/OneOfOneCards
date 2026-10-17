@@ -71,6 +71,14 @@ select pg_temp.expect('3 doubles : les cartes 11, 12 (emplacement avec choix d''
 select pg_temp.expect('« doubles seulement » : total et doubles_total valent 3', (select max(total) from public.{{P}}friend_cards(:B, true)) = 3 and (select max(doubles_total) from public.{{P}}friend_cards(:B, false)) = 3);
 select pg_temp.expect('la carte de l''album et la carte seule ne sont jamais des doubles', not exists (select 1 from public.{{P}}friend_cards(:B) where is_double and card_number in (10, 20, 30)) and (select in_album from public.{{P}}friend_cards(:B) where card_number = 10));
 select pg_temp.expect('le double en vente porte son annonce', (select listing_id from public.{{P}}friend_cards(:B) where card_number = 12) is not null and (select listing_id from public.{{P}}friend_cards(:B) where card_number = 11) is null);
+-- « déjà possédé » : A a une carte dans l'emplacement du type 2 (même série) mais rien dans celui du type 1
+insert into public.{{P}}cards (type_id, series, number, owner_id) values (2, 100, 50, :A);
+select pg_temp.expect('i_own : les doubles 1/11 et 1/12 manquent à A, le double 2/21 est déjà possédé (emplacement du type 2)',
+  (select string_agg(card_type || '/' || card_number || ':' || i_own, ',' order by card_type, card_number) from public.{{P}}friend_cards(:B, true)) = '1/11:false,1/12:false,2/21:true');
+select pg_temp.expect('i_own concerne l''emplacement (type + rareté affichée), pas la carte exacte : la carte 2/20 aussi est « déjà possédée », la carte 3/30 non',
+  (select i_own from public.{{P}}friend_cards(:B) where card_type = 2 and card_number = 20) and not (select i_own from public.{{P}}friend_cards(:B) where card_type = 3));
+select pg_temp.expect('« déjà possédé » n''empêche pas l''offre : A propose 7 pièces pour le double 2/21 qu''il couvre déjà',
+  (public.{{P}}make_offer(2, (select base_rarity from public.{{P}}cards where type_id = 2 and number = 21), 100, 21, 7) ->> 'offer_id') is not null);
 select pg_temp.expect('la liste d''amis annonce 6 cartes et 3 doubles pour B', (select (cards, doubles) = (6, 3) from public.{{P}}friends_list() where user_id = :B));
 select pg_temp.expect('pagination : 2 cartes par page, total inchangé', (select count(*) from public.{{P}}friend_cards(:B, false, 2, 0)) = 2 and (select count(*) from public.{{P}}friend_cards(:B, false, 2, 4)) = 2 and (select count(*) from public.{{P}}friend_cards(:B, false, 2, 6)) = 0 and (select max(total) from public.{{P}}friend_cards(:B, false, 2, 0)) = 6);
 select pg_temp.expect('une demande acceptée mais C sans carte : 0 carte, 0 double', (select (cards, doubles) = (0, 0) from public.{{P}}friends_list() where user_id = :C));

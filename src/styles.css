@@ -764,3 +764,7 @@ ul.odds-slots li span { color: var(--ink-soft); }
 
 .friend-tag.sale { background: #fde68a; }
 @media (max-width: 340px) { .tabbar button { font-size: 11px; } }
+
+/* Doubles d'un ami : « Déjà possédé » (information) et « Manquante » (elle te manque) */
+.friend-tag.owned { background: #e5e7eb; color: #4b5563; }
+.friend-tag.missing { background: #bbf7d0; color: #14532d; }

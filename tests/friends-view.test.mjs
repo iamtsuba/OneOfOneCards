@@ -75,7 +75,7 @@ ok('page : aucune donnée parasite (undefined, NaN)', !/undefined|NaN|null/.test
 
 // ---- Collection d'un ami
 const card = (n, extra = {}) => ({ card_type: 1, card_base: 'common', card_series: 50, card_number: n, rarity_id: 'common', is_double: false, in_album: false, listing_id: null, ...extra })
-const cards = [card(10, { in_album: true }), card(11, { is_double: true }), card(12, { is_double: true, listing_id: 7 }), card(20, { card_type: 2, rarity_id: 'super', card_base: 'super' })]
+const cards = [card(10, { in_album: true }), card(11, { is_double: true, i_own: true }), card(12, { is_double: true, listing_id: 7, i_own: false }), card(20, { card_type: 2, rarity_id: 'super', card_base: 'super' })]
 const fc = (props = {}) => renderToStaticMarkup(wrap(React.createElement(FriendCollectionView, {
   friend: { user_id: 'a', username: 'Bea' }, cards, total: 4, doublesTotal: 2, doublesOnly: false, loading: false, error: '', rarityMap, onToggle: noop, onPick: noop, onMore: noop, onBack: noop, ...props })))
 const v = fc()
@@ -83,7 +83,11 @@ ok('collection d’un ami : titre, retour, deux onglets Toutes (4) et Doubles (2
 ok('collection d’un ami : l’onglet Doubles actif', /aria-selected="true" class="on">Doubles \(2\)</.test(fc({ doublesOnly: true, total: 2 })) && /aria-selected="false" class="">Toutes</.test(fc({ doublesOnly: true, total: 2 })))
 ok('collection d’un ami : une tuile par carte, les doubles seuls sont cliquables (offre)', (v.match(/class="friend-card[" ]/g) || []).length === 4 && (v.match(/class="friend-card double"/g) || []).length === 2 && (v.match(/<button type="button" class="friend-card"[^>]*disabled=""/g) || []).length === 2)
 ok('collection d’un ami : étiquette « Double » sur chaque double, plus « En vente » quand il est annoncé', (v.match(/friend-tag">Double</g) || []).length === 2 && (v.match(/friend-tag sale">En vente</g) || []).length === 1)
-ok('collection d’un ami : les cartes sont annoncées (rareté, double, album, en vente)', /aria-label="Commune, dans son album"/.test(v) && /aria-label="Commune, double"/.test(v) && /aria-label="Commune, double, en vente"/.test(v) && /aria-label="Super Rare"/.test(v))
+ok('collection d’un ami : les cartes sont annoncées (rareté, double, album, en vente)', /aria-label="Commune, dans son album"/.test(v) && /aria-label="Commune, double, déjà possédé"/.test(v) && /aria-label="Commune, double, en vente, il te manque"/.test(v) && /aria-label="Super Rare"/.test(v))
+ok('collection d’un ami : « Déjà possédé » sur un double dont tu as déjà l’emplacement, « Manquante » sinon', (v.match(/friend-tag owned">Déjà possédé</g) || []).length === 1 && (v.match(/friend-tag missing">Manquante</g) || []).length === 1)
+ok('collection d’un ami : « Déjà possédé » n’empêche pas l’offre (la tuile reste cliquable)', (() => { const tile = v.split('<li>').find((x) => x.includes('Déjà possédé')); return !!tile && /class="friend-card double"/.test(tile) && !/disabled=""/.test(tile.split('>')[0] + '>') })())
+ok('collection d’un ami : pas de marqueur sur les cartes qui ne sont pas des doubles (album, carte seule)', v.split('<li>').filter((x) => !x.includes('friend-card double')).every((x) => !/Déjà possédé|Manquante/.test(x)))
+ok('collection d’un ami : serveur sans l’information (i_own absent) : aucun marqueur, offre toujours possible', (() => { const h = fc({ cards: cards.map(({ i_own, ...c }) => c) }); return !/Déjà possédé|Manquante/.test(h) && (h.match(/class="friend-card double"/g) || []).length === 2 })())
 ok('collection d’un ami : une invitation courte à toucher un double', /Touche un double pour proposer une offre à Bea\./.test(v))
 ok('collection d’un ami : « Voir plus » quand il reste des cartes, absent sinon', /Voir plus \(3\)/.test(fc({ total: 7 })) && !/Voir plus/.test(v))
 ok('collection d’un ami : messages vides (aucun double, aucune carte), chargement, erreur', /Bea n’a aucun double pour le moment\./.test(fc({ cards: [], total: 0, doublesTotal: 0, doublesOnly: true })) && /Bea n’a aucune carte pour le moment\./.test(fc({ cards: [], total: 0, doublesTotal: 0 })) && /Chargement…/.test(fc({ cards: null, loading: true })) && /role="alert">Tu dois d’abord être ami/.test(fc({ error: 'Tu dois d’abord être ami avec ce joueur.' })))
