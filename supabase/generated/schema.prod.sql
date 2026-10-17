@@ -1136,11 +1136,14 @@ end $$;
 alter table public.o1ocards_rarities add column if not exists weight_slots_1_3 double precision not null default 0 check (weight_slots_1_3 >= 0);
 alter table public.o1ocards_rarities add column if not exists weight_slot_4    double precision not null default 0 check (weight_slot_4 >= 0);
 alter table public.o1ocards_rarities add column if not exists weight_slot_5    double precision not null default 0 check (weight_slot_5 >= 0);
--- Poids de départ selon le NOM de la rareté (jamais selon son identifiant) : Commune : cartes 1 à 3 ; Peu commune : carte 4 et 50 sur la carte 5 ;
--- Rare 35, Super Rare 11, Ultra Rare 3, Art Rare 0,8, Unique 0,2 sur la carte 5 ; toute autre rareté ordinaire 0,5. N'agit que tant qu'AUCUN poids
--- n'est réglé (une base déjà réglée n'est jamais modifiée).
+-- Poids de départ selon le NOM de la rareté (jamais selon son identifiant) : Commune : cartes 1 à 3 ; Peu commune : carte 4 et 10 sur la carte 5 ;
+-- Rare 55, Super Rare 29, Ultra Rare 5, Art Rare 0,8, Unique 0,2 sur la carte 5 (total 100) ; toute autre rareté ordinaire 0,5. N'agit que tant
+-- qu'AUCUN poids n'est réglé. Seule exception : les poids de départ de la toute première version (Peu commune 50, Rare 35, Super Rare 11, Ultra Rare 3)
+-- sont remplacés par les nouveaux, mais uniquement si ces quatre raretés ont encore EXACTEMENT ces anciennes valeurs (un réglage de l'admin n'est
+-- jamais écrasé).
 create or replace function public.o1ocards_seed_rarity_weights()
 returns void language plpgsql security definer set search_path = public as $$
+declare v_old boolean;
 begin
   if not exists (select 1 from public.o1ocards_rarities where weight_slots_1_3 > 0 or weight_slot_4 > 0 or weight_slot_5 > 0) then
     update public.o1ocards_rarities r set
@@ -1150,14 +1153,30 @@ begin
         when r.kind = 'unique' then 0.2
         when r.kind <> 'range' then 0
         when n.k = 'commune' then 0
-        when n.k = 'peu commune' then 50
-        when n.k = 'rare' then 35
-        when n.k = 'super rare' then 11
-        when n.k = 'ultra rare' then 3
+        when n.k = 'peu commune' then 10
+        when n.k = 'rare' then 55
+        when n.k = 'super rare' then 29
+        when n.k = 'ultra rare' then 5
         when n.k in ('art rare', 'full art', 'fullart') then 0.8
         else 0.5 end
     from (select id, regexp_replace(lower(translate(trim(name), 'éèêëàâîïôöùûüç', 'eeeeaaiioouuuc')), '\s+', ' ', 'g') as k from public.o1ocards_rarities) n
     where n.id = r.id;
+  end if;
+
+  -- anciens poids de départ (50 / 35 / 11 / 3) jamais modifiés : on passe aux nouveaux (10 / 55 / 29 / 5)
+  select bool_and(
+           (n.k = 'peu commune' and r.weight_slots_1_3 = 0 and r.weight_slot_4 = 1 and r.weight_slot_5 = 50)
+        or (n.k = 'rare'        and r.weight_slots_1_3 = 0 and r.weight_slot_4 = 0 and r.weight_slot_5 = 35)
+        or (n.k = 'super rare'  and r.weight_slots_1_3 = 0 and r.weight_slot_4 = 0 and r.weight_slot_5 = 11)
+        or (n.k = 'ultra rare'  and r.weight_slots_1_3 = 0 and r.weight_slot_4 = 0 and r.weight_slot_5 = 3))
+    into v_old
+  from public.o1ocards_rarities r
+  join (select id, regexp_replace(lower(translate(trim(name), 'éèêëàâîïôöùûüç', 'eeeeaaiioouuuc')), '\s+', ' ', 'g') as k from public.o1ocards_rarities) n on n.id = r.id
+  where r.kind = 'range' and n.k in ('peu commune', 'rare', 'super rare', 'ultra rare');
+  if coalesce(v_old, false) then
+    update public.o1ocards_rarities r set weight_slot_5 = case n.k when 'peu commune' then 10 when 'rare' then 55 when 'super rare' then 29 when 'ultra rare' then 5 end
+    from (select id, regexp_replace(lower(translate(trim(name), 'éèêëàâîïôöùûüç', 'eeeeaaiioouuuc')), '\s+', ' ', 'g') as k from public.o1ocards_rarities) n
+    where n.id = r.id and r.kind = 'range' and n.k in ('peu commune', 'rare', 'super rare', 'ultra rare');
   end if;
 end $$;
 revoke all on function public.o1ocards_seed_rarity_weights() from public, anon, authenticated;

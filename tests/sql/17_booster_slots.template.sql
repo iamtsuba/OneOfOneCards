@@ -14,17 +14,41 @@ insert into public.{{P}}rarities (id, name, kind, max_series, sort_order, color,
   ('zz_a', 'Commune', 'range', 1500, 9, '#ddd', '#bbb', '#000'), ('zz_b', 'Peu Commune', 'range', 1000, 8, '#aaa', '#888', '#000'), ('zz_c', 'Rare', 'range', 250, 7, '#0a0', '#060', '#fff'),
   ('zz_d', 'Super Rare', 'range', 100, 6, '#00f', '#008', '#fff'), ('zz_e', 'Ultra Rare', 'range', 35, 5, '#f04', '#a02', '#fff'), ('zz_f', 'Art Rare', 'range', 50, 4, '#fc0', '#a80', '#000');
 select public.{{P}}seed_rarity_weights();
-select pg_temp.expect('Commune (id zz_a) : cartes 1 à 3 seulement ; Peu Commune (id zz_b) : carte 4 et 50 sur la carte 5',
+select pg_temp.expect('Commune (id zz_a) : cartes 1 à 3 seulement ; Peu Commune (id zz_b) : carte 4 et 10 sur la carte 5',
   (select (weight_slots_1_3, weight_slot_4, weight_slot_5) = (1, 0, 0) from public.{{P}}rarities where id = 'zz_a')
-  and (select (weight_slots_1_3, weight_slot_4, weight_slot_5) = (0, 1, 50) from public.{{P}}rarities where id = 'zz_b'));
-select pg_temp.expect('Rare 35, Super Rare 11, Ultra Rare 3, Art Rare 0,8 sur la carte 5',
-  (select weight_slot_5 from public.{{P}}rarities where id = 'zz_c') = 35 and (select weight_slot_5 from public.{{P}}rarities where id = 'zz_d') = 11
-  and (select weight_slot_5 from public.{{P}}rarities where id = 'zz_e') = 3 and (select weight_slot_5 from public.{{P}}rarities where id = 'zz_f') = 0.8);
+  and (select (weight_slots_1_3, weight_slot_4, weight_slot_5) = (0, 1, 10) from public.{{P}}rarities where id = 'zz_b'));
+select pg_temp.expect('carte 5 : Rare 55, Super Rare 29, Ultra Rare 5, Art Rare 0,8',
+  (select weight_slot_5 from public.{{P}}rarities where id = 'zz_c') = 55 and (select weight_slot_5 from public.{{P}}rarities where id = 'zz_d') = 29
+  and (select weight_slot_5 from public.{{P}}rarities where id = 'zz_e') = 5 and (select weight_slot_5 from public.{{P}}rarities where id = 'zz_f') = 0.8);
+select pg_temp.expect('les poids de départ de la carte 5 totalisent 100 (Peu Commune 10 + Rare 55 + Super 29 + Ultra 5 + Art Rare 0,8 + Unique 0,2)',
+  abs((select sum(weight_slot_5) from public.{{P}}rarities where id in ('zz_b', 'zz_c', 'zz_d', 'zz_e', 'zz_f') or kind = 'unique') - 100) < 0.000001);
 select pg_temp.expect('Unique 0,2 sur la carte 5 ; Alpha et Omega jamais tirées par poids', (select weight_slot_5 from public.{{P}}rarities where kind = 'unique') = 0.2
   and (select count(*) from public.{{P}}rarities where kind in ('alpha', 'omega') and (weight_slots_1_3 + weight_slot_4 + weight_slot_5) > 0) = 0);
 update public.{{P}}rarities set weight_slot_5 = 7 where id = 'zz_c';
 select public.{{P}}seed_rarity_weights();
 select pg_temp.expect('une base déjà réglée n''est jamais modifiée par le semis', (select weight_slot_5 from public.{{P}}rarities where id = 'zz_c') = 7);
+
+\echo '--- anciens poids de départ (50 / 35 / 11 / 3) : remplacés par 10 / 55 / 29 / 5 seulement s''ils n''ont jamais été modifiés'
+-- (la base de test contient aussi les vraies raretés « Rare », « Super Rare », « Ultra Rare » : elles doivent avoir les anciens poids elles aussi)
+update public.{{P}}rarities set weight_slot_5 = 35 where id = 'rare';
+update public.{{P}}rarities set weight_slot_5 = 11 where id = 'super';
+update public.{{P}}rarities set weight_slot_5 = 3 where id = 'ultra';
+update public.{{P}}rarities set weight_slot_5 = 50 where id = 'zz_b';
+update public.{{P}}rarities set weight_slot_5 = 35 where id = 'zz_c';
+update public.{{P}}rarities set weight_slot_5 = 11 where id = 'zz_d';
+update public.{{P}}rarities set weight_slot_5 = 3 where id = 'zz_e';
+select public.{{P}}seed_rarity_weights();
+select pg_temp.expect('anciens poids intacts : passage à Peu Commune 10, Rare 55, Super Rare 29, Ultra Rare 5',
+  (select weight_slot_5 from public.{{P}}rarities where id = 'zz_b') = 10 and (select weight_slot_5 from public.{{P}}rarities where id = 'zz_c') = 55
+  and (select weight_slot_5 from public.{{P}}rarities where id = 'zz_d') = 29 and (select weight_slot_5 from public.{{P}}rarities where id = 'zz_e') = 5);
+update public.{{P}}rarities set weight_slot_5 = 50 where id = 'zz_b';
+update public.{{P}}rarities set weight_slot_5 = 40 where id = 'zz_c';   -- l'admin a changé la Rare : plus aucune mise à jour automatique
+update public.{{P}}rarities set weight_slot_5 = 11 where id = 'zz_d';
+update public.{{P}}rarities set weight_slot_5 = 3 where id = 'zz_e';
+select public.{{P}}seed_rarity_weights();
+select pg_temp.expect('un seul réglage modifié par l''admin : rien n''est remplacé (50 / 40 / 11 / 3 conservés)',
+  (select weight_slot_5 from public.{{P}}rarities where id = 'zz_b') = 50 and (select weight_slot_5 from public.{{P}}rarities where id = 'zz_c') = 40
+  and (select weight_slot_5 from public.{{P}}rarities where id = 'zz_d') = 11 and (select weight_slot_5 from public.{{P}}rarities where id = 'zz_e') = 3);
 
 \echo '--- poids de test : cartes 1 à 3 = Commune ; carte 4 = Peu Commune ; carte 5 = Peu Commune 50, Rare 30, Super 11, Ultra 4, Unique 3, Art Rare 2'
 update public.{{P}}rarities set weight_slots_1_3 = 0, weight_slot_4 = 0, weight_slot_5 = 0;
