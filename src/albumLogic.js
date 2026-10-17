@@ -1,9 +1,13 @@
 // Logique de l'album et des piles de cartes : pure, testable sans navigateur (tests/album-logic.test.mjs).
 
-// La rareté Unique est un bonus : ses emplacements sont visibles dans l'album mais ne comptent pas dans le full set.
-export const isBonus = (rarity) => rarity?.kind === 'unique'
+// Les raretés spéciales Unique (1/1), Alpha (1/N) et Omega (N/N) sont hors master set : leurs emplacements sont visibles dans l'album mais ne
+// comptent pas dans le master set (comme les cartes secrètes). Le master set = un emplacement par rareté ordinaire de chaque carte.
+export const SPECIAL_KINDS = ['unique', 'alpha', 'omega']
+export const isBonus = (rarity) => SPECIAL_KINDS.includes(rarity?.kind)
+// Numéro affiché à côté d'une rareté spéciale : Unique 1/1, Alpha 1/N, Omega N/N (N = nombre de cartes de la série)
+export const specialSuffix = (rarity) => ({ unique: '1/1', alpha: '1/N', omega: 'N/N' })[rarity?.kind] ?? ''
 
-// rows : sortie de album_view (un emplacement par carte et par rareté). Le full set = tous les emplacements sauf Unique.
+// rows : sortie de album_view (un emplacement par carte et par rareté). Le master set = tous les emplacements sauf Unique, Alpha et Omega.
 export function albumStats(rows, rarityMap) {
   const base = { filled: 0, total: 0 }
   const bonus = { filled: 0, total: 0 }
@@ -23,7 +27,7 @@ export function albumStats(rows, rarityMap) {
     bucket.total += 1
     if (filled) bucket.filled += 1
     if (!filled && Number(r.owned_count) > 0) fillable += 1
-    const e = byRarity.get(r.rarity_id) ?? { id: r.rarity_id, total: 0, filled: 0, bonus: isBonus(rarity) }
+    const e = byRarity.get(r.rarity_id) ?? { id: r.rarity_id, total: 0, filled: 0, bonus: isBonus(rarity), suffix: specialSuffix(rarity) }
     e.total += 1
     if (filled) e.filled += 1
     byRarity.set(r.rarity_id, e)

@@ -43,7 +43,7 @@ ul { padding: 0; list-style: none; }
 .page-title { font-family: var(--font-display); font-size: 34px; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 14px; }
 
 .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--surface); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
-.tabbar-inner { max-width: 640px; margin: 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); height: var(--tab-h); }
+.tabbar-inner { max-width: 640px; margin: 0 auto; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); height: var(--tab-h); }
 .tabbar button { border: 0; background: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 13px; font-weight: 600; color: var(--ink-soft); cursor: pointer; }
 .tabbar button.on { color: var(--ink); }
 .tabbar button.on .tab-icon { background: var(--ink); color: #fff; }
@@ -715,3 +715,52 @@ textarea { width: 100%; padding: 10px 14px; border: 1.5px solid var(--line); bor
 .odds-premium .fine { margin: 0 0 4px; }
 /* Révélation : une carte nouvelle est déjà dans l'album */
 .reveal-new { margin: 2px 0 0; color: #ffe27a; font-weight: 700; }
+
+/* Master set épuré : le détail est derrière un bouton « i » */
+.master-label { margin-right: 6px; font-weight: 700; color: var(--ink-soft); }
+.info-btn { display: inline-grid; place-items: center; width: 26px; height: 26px; margin-left: 8px; padding: 0; border: 1.5px solid var(--line); border-radius: 50%; background: var(--surface);
+  color: var(--ink-soft); font: italic 700 15px/1 var(--font-display, serif); cursor: pointer; vertical-align: 2px; }
+.info-btn:hover { border-color: var(--ink); color: var(--ink); }
+.info-panel { max-width: 520px; }
+.info-body { display: grid; gap: 10px; }
+.info-body p { margin: 0; color: var(--ink-soft); }
+.album-intro { justify-content: flex-end; }
+@media (max-width: 560px) { .album-intro { justify-content: stretch; } }
+
+/* Réglage des poids de tirage d'une rareté (admin) et composition d'un booster (chances de tirage) */
+.rarity-weights { display: grid; gap: 8px; margin: 0; padding: 10px 12px; border: 1.5px dashed var(--line); border-radius: 12px; }
+.rarity-weights legend { padding: 0 6px; font-size: 13px; font-weight: 700; }
+.rarity-weights .fine { margin: 0; }
+.admin-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+ul.odds-slots { display: grid; gap: 4px; margin: 0 0 8px; padding: 0; list-style: none; }
+ul.odds-slots li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+ul.odds-slots li strong { min-width: 84px; }
+ul.odds-slots li span { color: var(--ink-soft); }
+
+/* Page Amis */
+.friends-page { display: grid; gap: 14px; align-content: start; }
+.friends-add { display: grid; gap: 6px; }
+.friends-add > label { font-weight: 700; }
+.friends-search { display: flex; gap: 8px; }
+.friends-search input { flex: 1; min-width: 0; }
+.friend-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.friend-rows > li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--surface); }
+.friend-name { display: grid; min-width: 0; }
+.friend-name small { font-size: 12px; }
+.friend-actions { display: inline-flex; gap: 6px; flex: none; }
+.btn.small { min-height: 34px; padding: 6px 14px; font-size: 13px; }
+.friend-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 12px 10px; }
+.friend-card { display: grid; gap: 4px; justify-items: center; width: 100%; padding: 4px; border: 2px solid transparent; border-radius: 14px; background: transparent; cursor: default; }
+.friend-card:disabled { opacity: .85; }
+.friend-card.double { border-color: var(--line); background: var(--surface); cursor: pointer; }
+.friend-tag { padding: 1px 8px; border-radius: 99px; background: #eceefc; font-size: 11px; font-weight: 700; white-space: nowrap; }
+
+/* Barre du bas à 5 onglets : texte un peu plus petit sur les écrans étroits ; tuiles d'amis de largeur égale */
+@media (max-width: 400px) { .tabbar button { font-size: 12px; } }
+.friend-cards { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+@media (max-width: 560px) { .friend-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.friend-card { min-width: 0; }
+.friend-tag { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+
+.friend-tag.sale { background: #fde68a; }
+@media (max-width: 340px) { .tabbar button { font-size: 11px; } }

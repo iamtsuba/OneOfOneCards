@@ -48,13 +48,14 @@ const rows = [
 ]
 
 const stats = renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows, rarityMap })))
-ok('stats : 1 emplacement rempli sur 4 (25 %)', /<strong>1<\/strong> emplacement rempli sur 4/.test(stats) && /25/.test(stats))
-ok('stats : 1 autre emplacement peut être rempli avec les cartes possédées (l’Ultra Rare)', /1 autre emplacement peut être rempli/.test(stats))
-ok('stats par rareté : Commune 1/2, Ultra Rare 0/1, Alpha 0/1', /Commune <strong>1\/2<\/strong>/.test(stats) && /Ultra Rare <strong>0\/1<\/strong>/.test(stats) && /Alpha <strong>0\/1<\/strong>/.test(stats))
+ok('stats : master set 1 / 3 (33,3 %) : Commune ×2 et Ultra Rare ; l’Alpha n’en fait pas partie', /Master set<\/span> <strong>1<\/strong> \/ 3/.test(stats) && /33,3/.test(stats))
+const statsInfo = renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows, rarityMap, initialInfo: true })))
+ok('stats : le détail est derrière le bouton « i » (1 autre emplacement peut être rempli)', /class="info-btn"/.test(stats) && !/peut être rempli/.test(stats) && /1 autre emplacement peut être rempli/.test(statsInfo))
+ok('stats par rareté : Commune 1/2, Ultra Rare 0/1, Alpha 0/1 avec son suffixe 1/N', /Commune <strong>1\/2<\/strong>/.test(stats) && /Ultra Rare <strong>0\/1<\/strong>/.test(stats) && /Alpha <strong>0\/1<\/strong><span class="muted"> · 1\/N</.test(stats))
 ok('stats : ni « cartes à toi sur » ni statistiques générales', !/cartes? à toi sur|déjà tirées par l/.test(stats))
 ok('stats : chargement tant que l’album n’est pas là', /Chargement/.test(renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows: null, rarityMap })))))
 const none = renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows: rows.filter((r) => r.pick_series != null || r.owned_count === 0), rarityMap })))
-ok('stats : message quand plus rien ne peut être rempli', /Aucun autre emplacement/.test(none))
+ok('stats : message quand plus rien ne peut être rempli (dans la fenêtre d’information)', /Aucun autre emplacement/.test(renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows: rows.filter((r) => r.pick_series != null || r.owned_count === 0), rarityMap, initialInfo: true })))) && !/Aucun autre emplacement/.test(none))
 
 const html = renderToStaticMarkup(wrap(React.createElement(Album, { rows, catalog, rarityMap, onRefresh: () => {} })))
 ok('album : une section par carte (2)', (html.match(/class="album-type"/g) || []).length === 2)
@@ -64,7 +65,7 @@ ok('album : emplacement rempli, à remplir et manquants bien distingués', /albu
 ok('album : le rempli montre la carte choisie (07/10)', /card-num">07\/10</.test(html))
 ok('album : « À remplir (2) » pour l’Ultra Rare, « Manquante » pour les autres', /À remplir \(2\)/.test(html) && (html.match(/Manquante/g) || []).length === 2)
 ok('album : un emplacement sans exemplaire n’est pas cliquable', (html.match(/<button[^>]*album-slot missing[^>]*disabled/g) || []).length === 2 && !/<button[^>]*album-slot (filled|fillable)[^>]*disabled/.test(html))
-ok('album : numéro de checklist et progression par carte', /n° 1\/2/.test(html) && /n° 2\/2/.test(html) && /album-type-count">1\/3</.test(html))
+ok('album : numéro de checklist et progression du master set par carte (l’Alpha n’y compte pas : 1/2)', /n° 1\/2/.test(html) && /n° 2\/2/.test(html) && /album-type-count">1\/2</.test(html) && /album-type-count">0\/1</.test(html))
 ok('album : couleur de rareté portée par l’emplacement', /--r1:#e11d48/.test(html))
 ok('album : vide = message', /Aucune carte dans cette catégorie/.test(renderToStaticMarkup(wrap(React.createElement(Album, { rows: [], catalog, rarityMap, onRefresh: () => {} })))))
 
@@ -85,24 +86,29 @@ for (const size of ['lg', 'sm']) {
 }
 
 
-// ---- Unique = bonus : visible dans l'album, hors full set (statistiques, compteur par carte, étiquette)
-const rm2 = { ...rarityMap, unique: { id: 'unique', name: 'Unique', kind: 'unique', sort_order: 1, color: '#7c3aed', color2: '#5b21b6', text_color: '#fff' } }
+// ---- Unique, Alpha et Omega : visibles dans l'album, hors master set (statistiques, compteur par carte, étiquettes 1/1, 1/N, N/N)
+const rm2 = { ...rarityMap, unique: { id: 'unique', name: 'Unique', kind: 'unique', sort_order: 1, color: '#7c3aed', color2: '#5b21b6', text_color: '#fff' },
+  omega: { id: 'omega', name: 'Omega', kind: 'omega', sort_order: 3, color: '#cbd5e1', color2: '#94a3b8', text_color: '#222' } }
 const bonusRows = []
-for (const t of [1, 2]) for (const r of ['common', 'ultra', 'alpha', 'unique']) bonusRows.push({ type_id: t, type_name: `Carte ${t}`, rarity_id: r, pick_series: null, pick_number: null, owned_count: 0 })
+for (const t of [1, 2]) for (const r of ['common', 'ultra', 'omega', 'alpha', 'unique']) bonusRows.push({ type_id: t, type_name: `Carte ${t}`, rarity_id: r, pick_series: null, pick_number: null, owned_count: 0 })
 bonusRows[0].pick_series = 10; bonusRows[0].pick_number = 7   // une Commune remplie
-bonusRows[3].pick_series = 1; bonusRows[3].pick_number = 1    // une Unique remplie (bonus)
+bonusRows[4].pick_series = 1; bonusRows[4].pick_number = 1    // une Unique remplie (hors master set)
+bonusRows[3].pick_series = 4; bonusRows[3].pick_number = 1    // une Alpha remplie (hors master set)
 const bs = renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows: bonusRows, rarityMap: rm2 })))
-ok('stats : le full set exclut les Unique (1 rempli sur 6, pas sur 8)', /<strong>1<\/strong> emplacement rempli sur 6/.test(bs))
-ok('stats : les cartes 1/1 sont annoncées à part (1/2), hors full set, sans le mot « bonus »', /Cartes 1\/1, hors full set : <strong>1\/2<\/strong>/.test(bs) && !/[Bb]onus/.test(bs))
-ok('stats : la puce Unique est marquée 1/1', /Unique <strong>1\/2<\/strong><span class="muted"> · 1\/1</.test(bs))
-const allBase = bonusRows.map((r) => (r.rarity_id === 'unique' ? r : { ...r, pick_series: 5, pick_number: 2 }))
-ok('stats : « Full set complet » sans avoir aucune Unique', /Full set complet/.test(renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows: allBase.map((r) => ({ ...r, pick_series: r.rarity_id === 'unique' ? null : 5 })), rarityMap: rm2 })))))
-ok('stats : pas de « Full set complet » tant qu’il manque un emplacement', !/Full set complet/.test(bs))
+const bsInfo = renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows: bonusRows, rarityMap: rm2, initialInfo: true })))
+ok('stats : le master set exclut Unique, Alpha et Omega (1 rempli sur 4, pas sur 10)', /Master set<\/span> <strong>1<\/strong> \/ 4/.test(bs))
+ok('stats : remplir une Alpha ou une Unique ne fait pas avancer le compteur du master set', /<strong>1<\/strong> \/ 4/.test(bs) && !/<strong>3<\/strong> \/ /.test(bs))
+ok('stats : les cartes spéciales sont annoncées à part dans la fenêtre d’information (2 sur 6), sans le mot « bonus »', /ne comptent pas dans le master set \(tu en as 2 sur 6 emplacements\)/.test(bsInfo) && !/[Bb]onus/.test(bs + bsInfo))
+ok('stats : un suffixe à côté de chaque rareté spéciale : Unique 1/1, Alpha 1/N, Omega N/N', /Unique <strong>1\/2<\/strong><span class="muted"> · 1\/1</.test(bs) && /Alpha <strong>1\/2<\/strong><span class="muted"> · 1\/N</.test(bs) && /Omega <strong>0\/2<\/strong><span class="muted"> · N\/N</.test(bs) && !/Commune <strong>[^<]*<\/strong><span class="muted"> ·/.test(bs))
+const allBase = bonusRows.map((r) => (['unique', 'alpha', 'omega'].includes(r.rarity_id) ? r : { ...r, pick_series: 5, pick_number: 2 }))
+ok('stats : « Master set complet » sans avoir aucune carte spéciale', /Master set complet/.test(renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows: allBase.map((r) => ({ ...r, pick_series: ['unique', 'alpha', 'omega'].includes(r.rarity_id) ? null : 5 })), rarityMap: rm2 })))))
+ok('stats : pas de « Master set complet » tant qu’il manque un emplacement', !/Master set complet/.test(bs))
 const catalog2 = { ...catalog, typeMap: { 1: { id: 1, name: 'Carte 1', image: '🐱' }, 2: { id: 2, name: 'Carte 2', image: '😾' } }, checklist: (id) => ({ no: id, total: 2, secret: false }) }
 const bAlbum = renderToStaticMarkup(wrap(React.createElement(Album, { rows: bonusRows, catalog: catalog2, rarityMap: rm2, onRefresh: () => {} })))
-ok('album : compteur par carte sans les Unique, 1/1 à côté (carte 1 : 1/3 · 1/1 : 1/1 ; carte 2 : 0/3 · 1/1 : 0/1)', /album-type-count">1\/3 · 1\/1 : 1\/1</.test(bAlbum) && /album-type-count">0\/3 · 1\/1 : 0\/1</.test(bAlbum))
-ok('album : emplacement Unique marqué « 1/1 » (étiquette), les autres non, et plus aucun mot « bonus » à l’écran', (bAlbum.match(/album-slot [a-z]+ bonus/g) || []).length === 2 && (bAlbum.match(/album-bonus-tag">1\/1</g) || []).length === 2 && !/>[^<]*[Bb]onus[^<]*</.test(bAlbum) && !/aria-label="[^"]*bonus/.test(bAlbum))
-ok('album : les Unique restent visibles (8 emplacements au total)', (bAlbum.match(/class="album-slot /g) || []).length === 8)
+ok('album : le compteur de chaque carte ne parle que du master set (carte 1 : 1/2 ; carte 2 : 0/2), sans « 1/1 : »', /album-type-count">1\/2</.test(bAlbum) && /album-type-count">0\/2</.test(bAlbum) && !/album-type-count">[^<]*1\/1 :/.test(bAlbum))
+ok('album : emplacements Omega, Alpha et Unique étiquetés N/N, 1/N et 1/1 (les raretés ordinaires non), sans le mot « bonus » à l’écran', (bAlbum.match(/album-slot [a-z]+ bonus/g) || []).length === 6 && (bAlbum.match(/album-bonus-tag">1\/1</g) || []).length === 2 && (bAlbum.match(/album-bonus-tag">1\/N</g) || []).length === 2 && (bAlbum.match(/album-bonus-tag">N\/N</g) || []).length === 2 && !/>[^<]*[Bb]onus[^<]*</.test(bAlbum) && !/aria-label="[^"]*bonus/.test(bAlbum))
+ok('album : les emplacements spéciaux restent visibles (10 emplacements au total)', (bAlbum.match(/class="album-slot /g) || []).length === 10)
+ok('album : l’annonce d’un emplacement spécial dit « hors master set »', /Alpha \(1\/N, hors master set\)/.test(bAlbum))
 
 // ---- Sélecteur de l'album : 200 cartes masquées = 1 proposition, + 3 numérotées = 4
 const mk = (series, number, visible, extra2 = {}) => ({ base_rarity: 'common', series, number, rarity_id: 'common', listed: false, picked: false, visible, ...extra2 })
@@ -153,7 +159,8 @@ ok('secrète : une section « Carte secrète » avec son numéro 4/3', /album-my
 ok('secrète : rien ne fuit (ni nom ni visuel du type, aucun emplacement de rareté)', !/NOM SECRET|IMAGE-SECRETE/.test(my) && (my.match(/class="album-type"/g) || []).length === 2 && (my.match(/class="album-slot /g) || []).length === 4)
 ok('secrète : tuile mystère annoncée aux lecteurs d’écran', /aria-label="Carte secrète pas encore découverte"/.test(my) && /À découvrir/.test(my))
 const mst = renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows: mysteryRows, rarityMap })))
-ok('stats : « Cartes secrètes découvertes : 0/1 », full set inchangé (1 sur 4)', /Cartes secrètes découvertes, hors full set : <strong>0\/1<\/strong>/.test(mst) && /<strong>1<\/strong> emplacement rempli sur 4/.test(mst))
+const mstInfo = renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows: mysteryRows, rarityMap, initialInfo: true })))
+ok('stats : cartes secrètes 0/1 annoncées dans la fenêtre d’information, master set inchangé (1 sur 3)', /Les cartes secrètes non plus \(0\/1 découverte\)/.test(mstInfo) && /Master set<\/span> <strong>1<\/strong> \/ 3/.test(mst))
 const revealedRows = [...rows, { type_id: 7, type_name: 'Chat Iny', type_image: '🤫', rarity_id: 'common', pick_base: null, pick_series: null, pick_number: null, owned_count: 1, secret: true, revealed: true }]
 const rv = renderToStaticMarkup(wrap(React.createElement(Album, { rows: revealedRows, catalog: catalogSecret, rarityMap, onRefresh: () => {} })))
 ok('secrète découverte : elle apparaît comme une carte normale (nom, n° 4/3 · secrète, emplacements)', /Chat Iny/.test(rv) && /n° 4\/3 · secrète/.test(rv) && !/album-mystery/.test(rv))
@@ -163,7 +170,7 @@ ok('secrète découverte : elle apparaît comme une carte normale (nom, n° 4/3 
   const albumRowsMin = [{ type_id: 1, type_name: 'Chat va ?', type_image: '🐱', rarity_id: 'common', pick_base: null, pick_series: null, pick_number: null, owned_count: 1, secret: false, revealed: true }]
   const withBtn = renderToStaticMarkup(wrap(React.createElement(Album, { rows: albumRowsMin, catalog, rarityMap, onRefresh: () => {}, categoryId: 1 })))
   ok('album : un bouton « Voir la collection » à côté du texte d’introduction', /class="album-intro"/.test(withBtn) && /<button type="button" class="btn ghost album-collection-btn">Voir la collection<\/button>/.test(withBtn) && withBtn.indexOf('album-intro') < withBtn.indexOf('Voir la collection'))
-  ok('album : le texte d’introduction est conservé', /Un emplacement par rareté de chaque carte/.test(withBtn) && /Une carte placée dans l’album ne peut plus être vendue/.test(withBtn))
+  ok('album : plus de long texte d’introduction (il est derrière le bouton « i » des statistiques)', !/Un emplacement par rareté de chaque carte/.test(withBtn) && /une carte placée dans l’album ne peut plus être vendue/i.test(renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows: albumRowsMin, rarityMap, initialInfo: true })))) && /placée automatiquement/.test(renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows: albumRowsMin, rarityMap, initialInfo: true })))))
   const noBtn = renderToStaticMarkup(wrap(React.createElement(Album, { rows: albumRowsMin, catalog, rarityMap, onRefresh: () => {} })))
   ok('album : pas de bouton sans catégorie connue', !/Voir la collection/.test(noBtn))
   ok('album : la fenêtre n’est pas ouverte tant qu’on n’a pas cliqué', !/holders-panel|holder-grid/.test(withBtn))

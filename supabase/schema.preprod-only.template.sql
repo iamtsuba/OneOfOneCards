@@ -47,8 +47,8 @@ begin
     if not coalesce(p_create_missing_rarities, false) then
       return jsonb_build_object('error', 'prod_missing_rarities:' || array_to_string(v_missing, ','));
     end if;
-    insert into public.{{PROD}}rarities (id, name, kind, max_series, sort_order, color, color2, text_color)
-    select id, name, kind, max_series, sort_order, color, color2, text_color
+    insert into public.{{PROD}}rarities (id, name, kind, max_series, sort_order, color, color2, text_color, weight_slots_1_3, weight_slot_4, weight_slot_5)
+    select id, name, kind, max_series, sort_order, color, color2, text_color, weight_slots_1_3, weight_slot_4, weight_slot_5
     from public.{{P}}rarities where id = any (v_missing);
   end if;
 

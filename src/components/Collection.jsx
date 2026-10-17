@@ -5,7 +5,7 @@ import { useGame, fmt, fmtPct } from '../game'
 import Card from './Card'
 import CardModal from './CardModal'
 import TypeArt from './TypeArt'
-import { albumStats, isBonus, pickerEntries, stackInfo } from '../albumLogic'
+import { albumStats, isBonus, pickerEntries, specialSuffix, stackInfo } from '../albumLogic'
 
 const SORTS = [
   ['series', 'Par série'],
@@ -125,39 +125,64 @@ export default function Collection({ goMarket }) {
 }
 
 // Statistiques de l'album de la catégorie : le full set compte tous les emplacements SAUF la rareté Unique, qui n'en fait pas partie (cartes 1/1)
-export function AlbumStats({ rows, rarityMap }) {
+// Petite fenêtre d'information (bouton « i ») : garde l'écran épuré, le détail est à un clic
+export function InfoButton({ onClick, label = 'Informations' }) {
+  return <button type="button" className="info-btn" aria-label={label} title={label} onClick={onClick}>i</button>
+}
+export function InfoSheet({ title, onClose, children }) {
+  return (
+    <div className="legal-overlay" role="dialog" aria-modal="true" aria-label={title} onClick={onClose}>
+      <div className="legal-panel info-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="holders-head"><h2>{title}</h2><button type="button" className="btn ghost" onClick={onClose}>Fermer</button></div>
+        <div className="info-body">{children}</div>
+      </div>
+    </div>
+  )
+}
+
+// Statistiques du master set : un compteur, une barre, les raretés. Les explications sont derrière le bouton « i ».
+export function AlbumStats({ rows, rarityMap, initialInfo = false }) {
+  const [info, setInfo] = useState(initialInfo)
   if (!rows) return <div className="collection-head"><p className="fine">Chargement de l’album…</p></div>
   const st = albumStats(rows, rarityMap)
   const { base, bonus } = st
   return (
     <div className="collection-head">
       <p className="collection-count">
-        <strong>{fmt(base.filled)}</strong> emplacement{base.filled > 1 ? 's' : ''} rempli{base.filled > 1 ? 's' : ''} sur {fmt(base.total)}
+        <span className="master-label">Master set</span> <strong>{fmt(base.filled)}</strong> / {fmt(base.total)}
         <span className="muted nowrap"> ({fmtPct(base.pct)})</span>
+        <InfoButton onClick={() => setInfo(true)} label="Comment fonctionne le master set ?" />
       </p>
       <div className="progress" aria-hidden="true"><span style={{ width: `${Math.max(base.pct, base.filled ? 1 : 0)}%` }} /></div>
-      {base.complete && <p className="album-complete">★ Full set complet !</p>}
-      {bonus.total > 0 && (
-        <p className="fine">Cartes 1/1, hors full set : <strong>{bonus.filled}/{bonus.total}</strong></p>
-      )}
-      {st.secrets.total > 0 && (
-        <p className="fine">Cartes secrètes découvertes, hors full set : <strong>{st.secrets.found}/{st.secrets.total}</strong></p>
-      )}
-      <p className="fine">
-        {st.fillable > 0
-          ? `${fmt(st.fillable)} autre${st.fillable > 1 ? 's' : ''} emplacement${st.fillable > 1 ? 's peuvent' : ' peut'} être rempli${st.fillable > 1 ? 's' : ''} avec tes cartes.`
-          : 'Aucun autre emplacement ne peut être rempli avec tes cartes pour le moment.'}
-      </p>
+      {base.complete && <p className="album-complete">★ Master set complet !</p>}
       {st.byRarity.length > 0 && (
         <ul className="album-rarity-stats" aria-label="Emplacements remplis par rareté">
           {st.byRarity.map((e) => (
             <li key={e.id} style={{ '--r1': rarityMap[e.id]?.color, '--r2': rarityMap[e.id]?.color2 }}>
               <i className="rarity-dot" aria-hidden="true" />
               {rarityMap[e.id]?.name ?? e.id} <strong>{e.filled}/{e.total}</strong>
-              {e.bonus && <span className="muted"> · 1/1</span>}
+              {e.suffix && <span className="muted"> · {e.suffix}</span>}
             </li>
           ))}
         </ul>
+      )}
+      {info && (
+        <InfoSheet title="Master set et album" onClose={() => setInfo(false)}>
+          <p>
+            <strong>Master set</strong> : un emplacement par rareté ordinaire de chaque carte. Les cartes <strong>Unique</strong> (1/1), <strong>Alpha</strong> (1/N)
+            et <strong>Omega</strong> (N/N) sont des cartes spéciales : elles ne comptent pas dans le master set{bonus.total > 0 ? ` (tu en as ${fmt(bonus.filled)} sur ${fmt(bonus.total)} emplacements)` : ''}.
+            {st.secrets.total > 0 && ` Les cartes secrètes non plus (${st.secrets.found}/${st.secrets.total} découverte${st.secrets.found > 1 ? 's' : ''}).`}
+          </p>
+          <p>
+            <strong>Album</strong> : un emplacement par rareté de chaque carte. Clique-en un pour choisir, parmi tes exemplaires de cette rareté, celui qui y figure. Une carte
+            tirée en booster qui te manquait est placée automatiquement ; une carte placée dans l’album ne peut plus être vendue.
+          </p>
+          <p>
+            {st.fillable > 0
+              ? `${fmt(st.fillable)} autre${st.fillable > 1 ? 's' : ''} emplacement${st.fillable > 1 ? 's peuvent' : ' peut'} être rempli${st.fillable > 1 ? 's' : ''} avec tes cartes.`
+              : 'Aucun autre emplacement ne peut être rempli avec tes cartes pour le moment.'}
+          </p>
+        </InfoSheet>
       )}
     </div>
   )
@@ -180,10 +205,6 @@ export function Album({ rows, catalog, rarityMap, onRefresh, categoryId = null }
   return (
     <>
       <div className="album-intro">
-        <p className="fine">
-          Un emplacement par rareté de chaque carte : clique-en un pour choisir, parmi tes exemplaires de cette rareté, celui qui y figure.
-          Une carte placée dans l’album ne peut plus être vendue. Les cartes 1/1 (rareté Unique) ne comptent pas dans le full set.
-        </p>
         {categoryId != null && (
           <button type="button" className="btn ghost album-collection-btn" onClick={() => setShowCollection(true)}>Voir la collection</button>
         )}
@@ -208,16 +229,14 @@ export function Album({ rows, catalog, rarityMap, onRefresh, categoryId = null }
             )
           }
           const base = g.slots.filter((x) => !isBonus(rarityMap[x.rarity_id]))
-          const bonus = g.slots.filter((x) => isBonus(rarityMap[x.rarity_id]))
           const done = base.filter((x) => x.pick_series != null).length
-          const bonusDone = bonus.filter((x) => x.pick_series != null).length
           return (
             <section className="album-type" key={g.typeId}>
               <header className="album-type-head">
                 <h3>{g.name}</h3>
                 {setNo && <span className="muted">n° {setNo.no}/{setNo.total}{setNo.secret ? ' · secrète' : ''}</span>}
                 <span className="fine album-type-count">
-                  {done}/{base.length}{bonus.length > 0 ? ` · 1/1 : ${bonusDone}/${bonus.length}` : ''}
+                  {done}/{base.length}
                 </span>
               </header>
               <ul className="album-slots">
@@ -232,7 +251,7 @@ export function Album({ rows, catalog, rarityMap, onRefresh, categoryId = null }
                         className={`album-slot ${picked ? 'filled' : owned > 0 ? 'fillable' : 'missing'} ${bonusSlot ? 'bonus' : ''}`}
                         style={{ '--r1': rarity?.color, '--r2': rarity?.color2 }}
                         disabled={!picked && owned === 0}
-                        aria-label={`${g.name}, ${rarity?.name}${bonusSlot ? ' (1/1, hors full set)' : ''} : ${picked ? 'rempli, changer' : owned > 0 ? 'à remplir' : 'aucune carte'}`}
+                        aria-label={`${g.name}, ${rarity?.name}${bonusSlot ? ` (${specialSuffix(rarity)}, hors master set)` : ''} : ${picked ? 'rempli, changer' : owned > 0 ? 'à remplir' : 'aucune carte'}`}
                         onClick={() => setPicker({ typeId: g.typeId, typeName: g.name, rarityId: slot.rarity_id, hasPick: picked })}
                       >
                         <span className="album-card-slot">
@@ -242,7 +261,7 @@ export function Album({ rows, catalog, rarityMap, onRefresh, categoryId = null }
                             <span className="album-empty"><TypeArt type={catalog.typeMap[g.typeId]} /></span>
                           )}
                         </span>
-                        <span className="album-slot-label">{rarity?.name}{bonusSlot && <small className="album-bonus-tag">1/1</small>}</span>
+                        <span className="album-slot-label">{rarity?.name}{bonusSlot && <small className="album-bonus-tag">{specialSuffix(rarity)}</small>}</span>
                         {!picked && <span className="album-slot-hint">{owned > 0 ? `À remplir (${owned})` : 'Manquante'}</span>}
                       </button>
                     </li>

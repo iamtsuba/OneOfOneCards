@@ -3,47 +3,42 @@ import * as api from '../api'
 import { explain } from '../api'
 import { useGame, fmt, fmtShare } from '../game'
 
-// Nom d'un palier Premium annoncé par le serveur : Rare, Super Rare, Ultra Rare (noms des raretés), Full Art, autres raretés
-const TIER_LABELS = { fullart: 'Full Art', other: 'Autres raretés' }
-export const tierLabel = (tier, rarityMap) => TIER_LABELS[tier] ?? rarityMap?.[tier]?.name ?? tier
-
-// Contenu de l'encart : composition d'un booster, chances de la carte Premium et part de chaque rareté (sans appel réseau : testable seul)
+// Contenu de l'encart : composition d'un booster carte par carte (raretés possibles et chances), part de chaque rareté (sans appel réseau : testable seul)
 export function OddsBody({ data, category, rarityMap }) {
   const golden = data.golden
   const goldenList = (golden?.contents ?? []).map((c) => `${c.quantity} ${rarityMap[c.rarity_id]?.name ?? c.rarity_id}`).join(', ')
   const slots = data.slots
-  const commonName = rarityMap.common?.name ?? 'Commune'
-  const uncommonName = rarityMap.peu_commune?.name ?? 'Peu commune'
-  const s = (n) => (n > 1 ? 's' : '')
+  const opts = data.slot_options ?? {}
+  const name = (id) => rarityMap[id]?.name ?? id
+  // « Carte 1 », « Cartes 1 à 3 » : numéros des cartes de chaque type d'emplacement, dans l'ordre du tirage
+  const lines = []
+  if (slots) {
+    let from = 1
+    for (const [cls, n] of [['common', slots.common], ['uncommon', slots.uncommon], ['premium', slots.premium]]) {
+      if (n > 0) {
+        lines.push({ cls, label: n === 1 ? `Carte ${from}` : `Cartes ${from} à ${from + n - 1}`, options: opts[cls] ?? [] })
+        from += n
+      }
+    }
+  }
   return (
     <>
-      {slots && (
-        <p className="odds-slots">
-          <strong>Un booster</strong> = {data.cards_per_booster} cartes, tirées dans cet ordre :{' '}
-          {[
-            slots.common > 0 && `${slots.common} ${commonName}${s(slots.common)}`,
-            slots.uncommon > 0 && `${slots.uncommon} ${uncommonName}${s(slots.uncommon)}`,
-            slots.premium > 0 && `${slots.premium} carte${s(slots.premium)} Premium`,
-          ].filter(Boolean).join(', ')}.
-        </p>
-      )}
-      {slots?.premium > 0 && data.premium?.length > 0 && (
-        <div className="odds-premium">
-          <p className="fine"><strong>Carte Premium</strong> : sa rareté est tirée d’abord, puis la carte parmi celles qui restent de cette rareté.</p>
-          <ul className="odds-list">
-            {data.premium.map((t) => (
-              <li key={t.tier}>
-                <i className="dot" style={{ '--dot': rarityMap[t.tier]?.color ?? '#7c5cff', '--dot2': rarityMap[t.tier]?.color2 ?? '#c9a8ff' }} />
-                <span className="odds-name">{tierLabel(t.tier, rarityMap)}</span>
-                <span className="odds-val">{fmtShare(t.p)}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
+      {lines.length > 0 && (
+        <ul className="odds-slots" aria-label="Composition d’un booster">
+          {lines.map((l) => (
+            <li key={l.cls}>
+              <strong>{l.label}</strong>
+              <span>
+                {l.options.length === 0 && 'au hasard parmi les cartes restantes'}
+                {l.options.length === 1 && name(l.options[0].id)}
+                {l.options.length > 1 && l.options.map((o) => `${name(o.id)} ${fmtShare(o.p)}`).join(' · ')}
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
       <p className="fine">
-        {slots ? 'Part de chaque rareté parmi toutes les cartes d’un booster' : 'Part de chaque rareté sur la totalité des cartes encore disponibles'} de « {category.name} » ({fmt(data.pool_left)} cartes
-        encore disponibles). C’est la chance qu’une carte tirée soit de cette rareté.
+        Part de chaque rareté parmi les cartes tirées de « {category.name} » ({fmt(data.pool_left)} cartes encore disponibles).
       </p>
       <ul className="odds-list">
         {data.by_rarity.map((r) => {
@@ -58,21 +53,15 @@ export function OddsBody({ data, category, rarityMap }) {
           )
         })}
       </ul>
-      {golden && (
+      {golden && golden.chance > 0 && (
         <p className="fine">
-          Booster doré : {golden.chance > 0 ? fmtShare(golden.chance) : 'désactivé'} par booster
-          {goldenList ? `, il contient ${goldenList}` : ''}.
-          {golden.unique_chance > 0 && ` Et une chance de ${fmtShare(golden.unique_chance)} d’avoir en plus une carte Unique (1/1) !`}
+          Booster doré : {fmtShare(golden.chance)} par booster{goldenList ? `, il contient ${goldenList}` : ''}.
+          {golden.unique_chance > 0 && ` Et ${fmtShare(golden.unique_chance)} de chances d’avoir en plus une carte Unique (1/1) !`}
         </p>
       )}
       <p className="fine">
-        {slots
-          ? 'Les Alpha, Omega et Unique sont des cartes spéciales : elles se trouvent dans les mêmes emplacements que leur rareté d’origine, d’où des parts un peu plus basses pour les raretés ordinaires. '
-          : ''}
-        {data.exponent === 0
-          ? 'Dans chaque emplacement, chaque carte encore disponible de la rareté tirée a la même chance d’être tirée.'
-          : 'Les cartes des petites séries ont moins de chances d’être tirées que celles des grandes séries.'}
-        {' '}Si une rareté est épuisée, la carte est tirée parmi toutes celles qui restent. Ces chances évoluent à mesure que les cartes sont tirées.
+        {data.exponent === 0 ? 'Dans une rareté, chaque carte restante a la même chance.' : 'Les petites séries ont moins de chances que les grandes.'} Si une rareté est épuisée, la carte est
+        tirée parmi toutes celles qui restent.
       </p>
     </>
   )

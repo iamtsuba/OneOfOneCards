@@ -6,6 +6,7 @@ import { GameContext, fmt, fmtCoins } from './game'
 import Auth from './components/Auth'
 import Brand from './components/Brand'
 import TabBar from './components/TabBar'
+import Friends from './components/Friends'
 import Boosters from './components/Boosters'
 import Collection from './components/Collection'
 import Market from './components/Market'
@@ -130,6 +131,7 @@ function Game({ session }) {
         {tab === 'boosters' && <Boosters goCollection={() => setTab('collection')} />}
         {tab === 'collection' && <Collection goMarket={(v) => { setMarketView(v || 'browse'); setMarketListingId(null); setTab('market') }} />}
         {tab === 'market' && <Market key={`${marketView}-${marketListingId || ''}`} initialView={marketView} initialListingId={marketListingId} />}
+        {tab === 'friends' && <Friends />}
         {tab === 'profile' && <Profile session={session} />}
       </main>
       {!revealing && (status.unseen_rewards ?? []).length > 0 && (
@@ -141,7 +143,7 @@ function Game({ session }) {
           }}
         />
       )}
-      <TabBar tab={tab} onChange={(t) => { if (t === 'market') { setMarketView('browse'); setMarketListingId(null) } setTab(t) }} boosters={status.boosters + (status.bonus_boosters || 0)} />
+      <TabBar tab={tab} onChange={(t) => { if (t === 'market') { setMarketView('browse'); setMarketListingId(null) } setTab(t) }} boosters={status.boosters + (status.bonus_boosters || 0)} requests={status.friend_requests || 0} />
     </GameContext.Provider>
   )
 }

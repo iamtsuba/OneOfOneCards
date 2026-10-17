@@ -180,5 +180,18 @@ ok('onglet Sécurité : s’affiche', clean(show(M.SecurityTab, { onChange: asyn
   ok('erreurs de la copie : raretés manquantes listées, catégorie déjà en production, accès verrouillé', /legende, platine/.test(ex(new Error('prod_missing_rarities:legende,platine'))) && /Créer en production les raretés manquantes/.test(ex(new Error('prod_missing_rarities:platine'))) && /existe déjà en production/.test(ex(new Error('prod_category_exists'))) && /verrouillé/.test(ex(new Error('prod_admin_locked'))))
 }
 
+// ---------- Poids de tirage des boosters dans la fiche d'une rareté ----------
+{
+  const rt = show(M.RaritiesTab, { data })
+  const rangeKinds = data.rarities.filter((r) => r.kind === 'range' || r.kind === 'unique').length
+  ok('raretés : un bloc « Tirage des boosters : poids » (cartes 1 à 3, carte 4, carte 5) pour chaque rareté ordinaire et pour Unique', rt !== null && (rt.match(/<legend>Tirage des boosters : poids<\/legend>/g) || []).length === rangeKinds)
+  ok('raretés : les trois champs de poids sont des nombres, avec leur propre bouton « Enregistrer les poids »', (rt.match(/Cartes 1 à 3<input type="number"/g) || []).length === rangeKinds && (rt.match(/>Carte 4<input type="number"/g) || []).length === rangeKinds && (rt.match(/>Carte 5<input type="number"/g) || []).length === rangeKinds && (rt.match(/Enregistrer les poids/g) || []).length === rangeKinds)
+  ok('raretés : pas de poids pour Alpha et Omega (elles ne se tirent pas par poids)', (rt.match(/<legend>/g) || []).length === rangeKinds && data.rarities.some((r) => r.kind === 'alpha') && data.rarities.some((r) => r.kind === 'omega'))
+  const withW = { ...data, rarities: data.rarities.map((r) => (r.id === 'rare' ? { ...r, weight_slots_1_3: 0, weight_slot_4: 0, weight_slot_5: 35 } : r)) }
+  ok('raretés : le poids enregistré est affiché (Rare : 0 / 0 / 35)', /value="35"/.test(show(M.RaritiesTab, { data: withW })))
+  ok('raretés : l\'explication reste courte (0 = jamais, chance = poids / somme)', /0 = jamais à cet emplacement/.test(rt) && /poids divisé par la somme des poids/.test(rt))
+  ok('erreur de poids lisible', /Poids invalides/.test(M.explain(new Error('invalid_weight'))))
+}
+
 if (bad) { console.error(`\n${bad} contrôle(s) en échec`); process.exit(1) }
 console.log('\nConsole admin (rendu) : tous les contrôles sont passés.')

@@ -36,6 +36,14 @@ export const marketMine = () => rpc('market_mine')
 
 // Album : un exemplaire numéroté choisi par carte (type) et par rareté
 export const albumView = (category) => rpc('album_view', { p_category: category })
+// Amis : recherche par début de pseudo, demandes, liste, collection d'un ami (ses doubles : p_doubles)
+export const friendSearch = (query) => rpc('friend_search', { p_query: query })
+export const friendRequest = (userId) => rpc('friend_request', { p_user: userId })
+export const friendRespond = (friendshipId, accept) => rpc('friend_respond', { p_id: friendshipId, p_accept: accept })
+export const friendRemove = (userId) => rpc('friend_remove', { p_user: userId })
+export const friendsList = () => rpc('friends_list')
+export const friendCards = (friendId, doubles = false, limit = 60, offset = 0) =>
+  rpc('friend_cards', { p_friend: friendId, p_doubles: doubles, p_limit: limit, p_offset: offset })
 // « Voir la collection » : [{ type_id, holders }] = joueurs distincts qui possèdent au moins une carte de chaque type de la catégorie
 export const collectionHolders = (category) => rpc('collection_holders', { p_category: category })
 export const myTypeCards = (type, rarity = null) => rpc('my_type_cards', { p_type: type, p_rarity: rarity })
@@ -127,6 +135,9 @@ export const adminSaveRarity = (pw, r) =>
     p_password: pw, p_id: r.id, p_name: r.name, p_max_series: r.max_series === null || r.max_series === '' ? null : Number(r.max_series),
     p_color: r.color, p_color2: r.color2, p_text_color: r.text_color,
   })
+// Poids de tirage d'une rareté : cartes 1 à 3, carte 4, carte 5 (0 = jamais tirée à cet emplacement)
+export const adminSetRarityWeights = (pw, id, w13, w4, w5) =>
+  rpc('admin_set_rarity_weights', { p_password: pw, p_id: id, p_w13: Number(w13), p_w4: Number(w4), p_w5: Number(w5) })
 export const adminCreateRarity = (pw, r) =>
   rpc('admin_create_rarity', {
     p_password: pw, p_id: r.id, p_name: r.name, p_max_series: Number(r.max_series),
@@ -201,6 +212,7 @@ export function explain(e) {
   if (m.includes('has_bids')) return 'Des offres ont été faites : l’annonce ne peut plus être retirée.'
   if (m.includes('listing_unavailable')) return 'Cette annonce n’est plus disponible.'
   if (m.includes('invalid_price')) return 'Prix invalide : entre un nombre entier de pièces, minimum 1.'
+  if (m.includes('invalid_weight')) return 'Poids invalides : un nombre positif ou nul.'
   if (m.includes('invalid_type_rarities')) return 'Raretés du type invalides : une même rareté une seule fois, séries entre 0 et 5000 (au moins une rareté avec des séries), « numérotées » au plus égal au nombre de séries, style Simple ou FullArt.'
   if (m.includes('id_taken')) return 'Cet identifiant de rareté existe déjà.'
   if (m.includes('invalid_id')) return 'Identifiant invalide : minuscules, chiffres et _ uniquement, 2 à 20 caractères, débute par une lettre.'
@@ -211,6 +223,12 @@ export function explain(e) {
   if (m.includes('card_in_album')) return 'Cette carte est dans ton album : elle ne peut pas être vendue. Retire-la de l’album pour la vendre.'
   if (m.includes('not_enough_cards')) return 'Il n’y a pas assez de cartes vendables dans cette pile (celles de l’album ou en vente sont exclues).'
   if (m.includes('invalid_count')) return 'Quantité invalide : entre un nombre entier de cartes, minimum 1.'
+  if (m.includes('not_friends')) return 'Tu dois d’abord être ami avec ce joueur.'
+  if (m.includes('cannot_friend_self')) return 'Tu ne peux pas t’ajouter toi-même.'
+  if (m.includes('user_not_found')) return 'Ce joueur n’existe pas.'
+  if (m.includes('already_friends')) return 'Vous êtes déjà amis.'
+  if (m.includes('request_pending')) return 'Ta demande est déjà envoyée.'
+  if (m.includes('too_many_friends')) return 'Tu as atteint la limite d’amis et de demandes (200).'
   if (m.includes('own_card')) return 'Cette carte est déjà à toi.'
   if (m.includes('card_not_taken')) return 'Cette carte n’a pas encore été tirée : impossible de faire une offre.'
   if (m.includes('buyer_insufficient_coins')) return 'L’acheteur n’a plus assez de pièces pour cette offre.'

@@ -1130,6 +1130,10 @@ export function RaritiesTab({ data, run, busy }) {
 
 function RarityForm({ rarity, run, busy }) {
   const [f, setF] = useState({ name: rarity.name, max_series: rarity.max_series ?? '', color: rarity.color, color2: rarity.color2, text_color: rarity.text_color })
+  // Poids de tirage dans un booster : cartes 1 à 3, carte 4 et carte 5 (les cartes Alpha et Omega ne se tirent pas par poids)
+  const [w, setW] = useState({ a: String(rarity.weight_slots_1_3 ?? 0), b: String(rarity.weight_slot_4 ?? 0), c: String(rarity.weight_slot_5 ?? 0) })
+  const weighted = rarity.kind === 'range' || rarity.kind === 'unique'
+  const wValid = [w.a, w.b, w.c].every((x) => x !== '' && Number(x) >= 0 && Number.isFinite(Number(x)))
   const set = (k) => (v) => setF((cur) => ({ ...cur, [k]: v }))
   return (
     <div className="admin-card" style={{ '--cat1': f.color, '--cat2': f.color2 }}>
@@ -1145,6 +1149,20 @@ function RarityForm({ rarity, run, busy }) {
         <Color label="Couleur 2" value={f.color2} onChange={set('color2')} />
         <Color label="Texte" value={f.text_color} onChange={set('text_color')} />
       </div>
+      {weighted && (
+        <fieldset className="rarity-weights">
+          <legend>Tirage des boosters : poids</legend>
+          <div className="admin-grid three">
+            <label>Cartes 1 à 3<input type="number" min="0" step="any" value={w.a} onChange={(e) => setW({ ...w, a: e.target.value })} /></label>
+            <label>Carte 4<input type="number" min="0" step="any" value={w.b} onChange={(e) => setW({ ...w, b: e.target.value })} /></label>
+            <label>Carte 5<input type="number" min="0" step="any" value={w.c} onChange={(e) => setW({ ...w, c: e.target.value })} /></label>
+          </div>
+          <p className="fine">0 = jamais à cet emplacement. La chance d’une rareté est son poids divisé par la somme des poids des raretés qui ont encore des cartes.{rarity.kind === 'unique' ? ' Unique : les cartes 1/1.' : ''}</p>
+          <div className="row">
+            <button className="btn ghost" disabled={busy || !wValid} onClick={() => run((pw) => api.adminSetRarityWeights(pw, rarity.id, w.a, w.b, w.c), 'Poids enregistrés.')}>Enregistrer les poids</button>
+          </div>
+        </fieldset>
+      )}
       <div className="row">
         <button className="btn" disabled={busy || !f.name.trim()} onClick={() => run((pw) => api.adminSaveRarity(pw, { id: rarity.id, ...f }), 'Rareté enregistrée.')}>Enregistrer</button>
         {rarity.kind === 'range' && (

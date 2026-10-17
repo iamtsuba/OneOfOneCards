@@ -19,13 +19,8 @@ create table if not exists public.o1ocards_config (
 
 insert into public.o1ocards_config (key, value, description) values
   ('cards_per_booster',      5,    'Nombre de cartes par booster'),
-  ('booster_common_slots',   3,    'Composition d''un booster : nombre de cartes Communes (les premières cartes tirées)'),
-  ('booster_uncommon_slots', 1,    'Composition d''un booster : nombre de cartes Peu communes (juste après les Communes). Toutes les autres cartes du booster sont des cartes Premium'),
-  ('premium_weight_rare',    84,   'Carte Premium : poids des Rare. Probabilité = poids / somme des poids des paliers qui ont encore des cartes'),
-  ('premium_weight_super',   13,   'Carte Premium : poids des Super Rare'),
-  ('premium_weight_ultra',   2.7,  'Carte Premium : poids des Ultra Rare'),
-  ('premium_weight_other',   1,    'Carte Premium : poids des autres raretés (ex. Légende), hors Full Art'),
-  ('premium_weight_fullart', 0.3,  'Carte Premium : poids des cartes Full Art (style FullArt d''une rareté Premium). À garder plus bas que les Ultra Rare'),
+  ('booster_common_slots',   3,    'Composition d''un booster : nombre de premières cartes tirées avec les poids « cartes 1 à 3 » (en principe les Communes)'),
+  ('booster_uncommon_slots', 1,    'Composition d''un booster : nombre de cartes de la 2e catégorie (4e carte, juste après les premières). Les cartes suivantes sont tirées selon les poids de la 5e carte. Les poids de chaque rareté se règlent dans l''onglet Raretés'),
   ('start_boosters',         10,   'Boosters offerts à la création du profil'),
   ('start_coins',            0,    'Pièces offertes à la création du profil'),
   ('regen_minutes',          10,   'Délai entre deux recharges (minutes)'),
@@ -1043,6 +1038,7 @@ begin
                                 else p.boosters_updated_at + v_min * interval '1 minute' end,
     'coins',               p.coins,
     'coins_locked',        v_locked,
+    'friend_requests',     (select count(*) from public.o1ocards_friendships f where f.addressee_id = p.id and f.status = 'pending'),
     'active_category_id',  v_cat,
     'next_category',       v_next,
     'closed_categories',   v_closed,
@@ -1133,29 +1129,52 @@ end $$;
 -- Ouvre un booster de la catégorie en cours. Chaque carte tirée n'existait pas encore : elle devient
 -- la seule de son espèce, et elle est à toi. Quand la catégorie est épuisée, la suivante prend le relais.
 -- (jit = off : le plan de ces requêtes est jugé coûteux par PostgreSQL, qui le compilerait à chaque appel pour ~35 ms de plus)
--- ---------- Composition d'un booster : emplacements et paliers de rareté ----------
--- Un booster est tiré carte après carte, dans l'ordre : les booster_common_slots premières cartes sont de rareté de base Commune
--- (id « common »), les booster_uncommon_slots suivantes Peu commune (id « peu_commune »), toutes les autres sont des cartes PREMIUM.
--- Pour une carte Premium on tire d'abord un PALIER selon les poids premium_weight_* (Rare, Super Rare, Ultra Rare, autres raretés, Full Art :
--- une rareté Premium dont le style de carte est FullArt), parmi les paliers qui ont encore des cartes, puis une carte au hasard parmi les
--- cartes restantes de ce palier (poids d'une série = cartes restantes x taille^exposant, comme avant). Si un emplacement n'a plus de carte
--- dans son palier (ou si la rareté n'existe pas dans la catégorie), la carte est tirée parmi toutes les cartes encore disponibles.
-create or replace function public.o1ocards_booster_tier(p_base text, p_style text)
-returns text language sql immutable as $$
-  select case
-    when p_base = 'common'      then 'common'
-    when p_base = 'peu_commune' then 'uncommon'
-    when p_style = 'fullart'    then 'fullart'
-    when p_base in ('rare', 'super', 'ultra') then p_base
-    else 'other'
-  end
-$$;
 
-create or replace function public.o1ocards_premium_weight(p_tier text)
-returns double precision language sql stable set search_path = public as $$
-  select case when p_tier in ('common', 'uncommon') then 0
-              else greatest(coalesce(public.o1ocards_cfg('premium_weight_' || p_tier), 0), 0)::double precision end
-$$;
+-- Tirage d'un booster : poids de chaque rareté pour les premières cartes (booster_common_slots : « cartes 1 à 3 »), pour la carte suivante
+-- (booster_uncommon_slots : « carte 4 ») et pour toutes les autres (« carte 5 »). Une rareté à 0 n'est jamais tirée à cet emplacement. Ces
+-- poids sont réglables dans l'onglet Raretés de l'admin ; l'identifiant d'une rareté n'a aucune importance.
+alter table public.o1ocards_rarities add column if not exists weight_slots_1_3 double precision not null default 0 check (weight_slots_1_3 >= 0);
+alter table public.o1ocards_rarities add column if not exists weight_slot_4    double precision not null default 0 check (weight_slot_4 >= 0);
+alter table public.o1ocards_rarities add column if not exists weight_slot_5    double precision not null default 0 check (weight_slot_5 >= 0);
+-- Poids de départ selon le NOM de la rareté (jamais selon son identifiant) : Commune : cartes 1 à 3 ; Peu commune : carte 4 et 50 sur la carte 5 ;
+-- Rare 35, Super Rare 11, Ultra Rare 3, Art Rare 0,8, Unique 0,2 sur la carte 5 ; toute autre rareté ordinaire 0,5. N'agit que tant qu'AUCUN poids
+-- n'est réglé (une base déjà réglée n'est jamais modifiée).
+create or replace function public.o1ocards_seed_rarity_weights()
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not exists (select 1 from public.o1ocards_rarities where weight_slots_1_3 > 0 or weight_slot_4 > 0 or weight_slot_5 > 0) then
+    update public.o1ocards_rarities r set
+      weight_slots_1_3 = case when n.k = 'commune' then 1 else 0 end,
+      weight_slot_4    = case when n.k = 'peu commune' then 1 else 0 end,
+      weight_slot_5    = case
+        when r.kind = 'unique' then 0.2
+        when r.kind <> 'range' then 0
+        when n.k = 'commune' then 0
+        when n.k = 'peu commune' then 50
+        when n.k = 'rare' then 35
+        when n.k = 'super rare' then 11
+        when n.k = 'ultra rare' then 3
+        when n.k in ('art rare', 'full art', 'fullart') then 0.8
+        else 0.5 end
+    from (select id, regexp_replace(lower(translate(trim(name), 'éèêëàâîïôöùûüç', 'eeeeaaiioouuuc')), '\s+', ' ', 'g') as k from public.o1ocards_rarities) n
+    where n.id = r.id;
+  end if;
+end $$;
+revoke all on function public.o1ocards_seed_rarity_weights() from public, anon, authenticated;
+select public.o1ocards_seed_rarity_weights();
+delete from public.o1ocards_config where key like 'premium_weight_%';
+
+-- ---------- Composition d'un booster : emplacements et poids par rareté ----------
+-- Un booster est tiré carte après carte, dans l'ordre : les booster_common_slots premières cartes suivent les poids « cartes 1 à 3 » des raretés
+-- (les Communes), les booster_uncommon_slots suivantes les poids « carte 4 » (les Peu communes), toutes les autres les poids « carte 5 ».
+-- Pour chaque carte, on tire d'abord une RARETÉ selon ces poids, parmi celles qui ont encore des cartes dans la catégorie, puis une carte au hasard
+-- parmi les cartes restantes de cette rareté (poids d'une série = cartes restantes x taille^exposant). La rareté « Unique » est une option comme les
+-- autres : ses cartes sont les 1/1 (série 1), qui ne sortent donc que par ce poids (ou par le repli). Si aucune rareté n'est possible à un
+-- emplacement, la carte est tirée parmi toutes les cartes encore disponibles.
+drop function if exists public.o1ocards_booster_tier(text, text);
+drop function if exists public.o1ocards_premium_weight(text);
+drop function if exists public.o1ocards_series_pool(int, double precision);
+drop function if exists public.o1ocards_pick_series(int, text, double precision);
 
 -- Type d'emplacement de la carte numéro p_slot (1, 2, 3…) d'un booster : common, uncommon ou premium
 create or replace function public.o1ocards_slot_class(p_slot int)
@@ -1167,16 +1186,14 @@ returns text language sql stable set search_path = public as $$
   end
 $$;
 
--- Toutes les séries d'une catégorie qui ont encore des cartes : (type, rareté de base, série), cartes restantes, palier et poids de tirage
+-- Toutes les séries d'une catégorie qui ont encore des cartes : (type, rareté de base, série), cartes restantes et poids de tirage
 create or replace function public.o1ocards_series_pool(p_cat int, p_e double precision)
-returns table (type_id int, base text, g int, remaining int, tier text, w double precision)
+returns table (type_id int, base text, g int, remaining int, w double precision)
 language sql stable security definer set search_path = public as $$
   select ty.id, cf.rarity_id, g, (g - coalesce(t.taken, 0))::int,
-         public.o1ocards_booster_tier(cf.rarity_id, coalesce(tr.card_style, 'simple')),
          (g - coalesce(t.taken, 0)) * power(g::double precision, p_e)
   from public.o1ocards_types ty
   cross join lateral public.o1ocards_type_config(ty.id) cf
-  left join public.o1ocards_type_rarities tr on tr.type_id = ty.id and tr.rarity_id = cf.rarity_id
   cross join lateral generate_series(1, cf.smax) g
   left join public.o1ocards_series_taken t on t.type_id = ty.id and t.base_rarity = cf.rarity_id and t.series = g
   where ty.category_id = p_cat and g > coalesce(t.taken, 0)
@@ -1187,30 +1204,38 @@ $$;
 create or replace function public.o1ocards_pick_series(p_cat int, p_class text, p_e double precision)
 returns table (type_id int, base text, g int)
 language plpgsql volatile security definer set search_path = public set jit = off as $$
-declare v_tier text;
+declare v_opt text; v_uid text;
 begin
-  if p_class = 'premium' then
-    with pool as (
-      select sp.tier, sum(sp.remaining) as rem
-      from public.o1ocards_series_pool(p_cat, p_e) sp
-      where sp.tier not in ('common', 'uncommon')
-      group by sp.tier
+  select id into v_uid from public.o1ocards_rarities where kind = 'unique' limit 1;
+  if p_class <> 'any' then
+    with sp as materialized (select * from public.o1ocards_series_pool(p_cat, p_e)),
+    pool as (
+      select sp.base as opt, sum(sp.remaining)::bigint as rem from sp where sp.g > 1 group by sp.base
+      union all
+      select v_uid, count(*)::bigint from sp where sp.g = 1 and v_uid is not null
     ),
-    wts as (select pool.tier, public.o1ocards_premium_weight(pool.tier) as wt from pool where pool.rem > 0),
-    pos as (select wts.tier, wts.wt, sum(wts.wt) over (order by wts.tier) as cs from wts where wts.wt > 0),
+    wts as (
+      select pool.opt,
+             case p_class when 'common' then r.weight_slots_1_3 when 'uncommon' then r.weight_slot_4 else r.weight_slot_5 end as wt
+      from pool join public.o1ocards_rarities r on r.id = pool.opt
+      where pool.rem > 0
+    ),
+    pos as (select wts.opt, wts.wt, sum(wts.wt) over (order by wts.opt) as cs from wts where wts.wt > 0),
     tot as (select sum(pos.wt) as tw, random() as rr from pos)
-    select pos.tier into v_tier
+    select pos.opt into v_opt
     from pos cross join tot
     where tot.tw > 0 and pos.cs > tot.rr * tot.tw
     order by pos.cs limit 1;
-    if v_tier is null then return; end if;
+    if v_opt is null then return; end if;
   end if;
 
   return query
   with s as materialized (
     select sp.type_id, sp.base, sp.g, sp.w
     from public.o1ocards_series_pool(p_cat, p_e) sp
-    where case p_class when 'any' then true when 'premium' then sp.tier = v_tier else sp.tier = p_class end
+    where case when p_class = 'any' then true
+               when v_opt = v_uid then sp.g = 1
+               else sp.base = v_opt and sp.g > 1 end
   ),
   t as (select sum(s.w) as tw, random() as rr from s)
   select z.type_id, z.base, z.g
@@ -1229,12 +1254,27 @@ returns void language sql security definer set search_path = public as $$
   on conflict (user_id, type_id, rarity_id) do nothing
 $$;
 
-revoke all on function public.o1ocards_booster_tier(text, text) from public, anon, authenticated;
-revoke all on function public.o1ocards_premium_weight(text) from public, anon, authenticated;
 revoke all on function public.o1ocards_slot_class(int) from public, anon, authenticated;
 revoke all on function public.o1ocards_series_pool(int, double precision) from public, anon, authenticated;
 revoke all on function public.o1ocards_pick_series(int, text, double precision) from public, anon, authenticated;
 revoke all on function public.o1ocards_auto_place_album(uuid, int, text, int, int) from public, anon, authenticated;
+
+-- Réglage des poids de tirage d'une rareté (onglet Raretés de l'admin)
+create or replace function public.o1ocards_admin_set_rarity_weights(p_password text, p_id text, p_w13 double precision, p_w4 double precision, p_w5 double precision)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare err text := public.o1ocards_admin_guard(p_password);
+begin
+  if err is not null then return jsonb_build_object('error', err); end if;
+  if p_w13 is null or p_w4 is null or p_w5 is null or least(p_w13, p_w4, p_w5) < 0 or greatest(p_w13, p_w4, p_w5) > 1000000 then
+    raise exception 'invalid_weight';
+  end if;
+  update public.o1ocards_rarities set weight_slots_1_3 = p_w13, weight_slot_4 = p_w4, weight_slot_5 = p_w5
+  where id = p_id and kind in ('range', 'unique');
+  if not found then raise exception 'not_found'; end if;
+  return jsonb_build_object('ok', true);
+end $$;
+revoke all on function public.o1ocards_admin_set_rarity_weights(text, text, double precision, double precision, double precision) from public, anon;
+grant execute on function public.o1ocards_admin_set_rarity_weights(text, text, double precision, double precision, double precision) to authenticated;
 
 create or replace function public.o1ocards_open_booster()
 returns jsonb language plpgsql security definer set search_path = public set jit = off as $$
@@ -1602,23 +1642,20 @@ begin
   select id into v_alpha  from public.o1ocards_rarities where kind = 'alpha'  limit 1;
   select id into v_omega  from public.o1ocards_rarities where kind = 'omega'  limit 1;
 
-  -- Composition d'un booster : Communes, puis Peu communes, le reste est Premium (mêmes règles que open_booster)
+  -- Composition d'un booster : premières cartes, carte suivante, le reste (mêmes règles que open_booster)
   n_com := least(greatest(coalesce(public.o1ocards_cfg('booster_common_slots'), 3)::int, 0), n_cards);
   n_unc := least(greatest(coalesce(public.o1ocards_cfg('booster_uncommon_slots'), 1)::int, 0), n_cards - n_com);
   n_pre := n_cards - n_com - n_unc;
 
-  -- Chaque rareté de base d'un type a ses séries 1..smax. s = une ligne par (type, rareté de base, série) avec le nombre de
-  -- cartes restantes et son palier ; vis = numéro visible (séries 1..numbered) : Alpha (1/m) et Omega (m/m) existent seulement alors.
+  -- s = une ligne par (type, rareté de base, série) avec le nombre de cartes restantes ; vis = numéro visible (séries 1..numbered) :
+  -- Alpha (1/m) et Omega (m/m) existent seulement alors. parts = les cartes par rareté AFFICHÉE ; is_first = carte 1/1 (rareté Unique).
   with cf as materialized (
-    select ty.id as type_id, c.rarity_id as base, c.smax, c.numbered,
-           public.o1ocards_booster_tier(c.rarity_id, coalesce(tr.card_style, 'simple')) as tier
-    from public.o1ocards_types ty
-    cross join lateral public.o1ocards_type_config(ty.id) c
-    left join public.o1ocards_type_rarities tr on tr.type_id = ty.id and tr.rarity_id = c.rarity_id
+    select ty.id as type_id, c.rarity_id as base, c.smax, c.numbered
+    from public.o1ocards_types ty cross join lateral public.o1ocards_type_config(ty.id) c
     where ty.category_id = v_cat
   ),
   s as (
-    select cf.type_id, cf.base as rid, cf.tier, g as m, (g <= cf.numbered) as vis, (g - coalesce(t.taken, 0)) as avail,
+    select cf.type_id, cf.base as rid, g as m, (g <= cf.numbered) as vis, (g - coalesce(t.taken, 0)) as avail,
            (case when a.type_id is not null then 1 else 0 end) as a_taken,
            (case when o.type_id is not null then 1 else 0 end) as o_taken
     from cf
@@ -1628,55 +1665,56 @@ begin
     left join public.o1ocards_cards o on g > 1 and o.type_id = cf.type_id and o.base_rarity = cf.base and o.series = g and o.number = g
   ),
   parts as (
-    select v_unique as id, tier, greatest(avail, 0)::bigint as remaining, 1::bigint as total, greatest(avail, 0)::double precision as w
+    select v_unique as id, rid as base, true as is_first, greatest(avail, 0)::bigint as remaining, 1::bigint as total, greatest(avail, 0)::double precision as w
       from s where m = 1 and v_unique is not null
     union all
-    select v_alpha, tier, (1 - a_taken)::bigint, 1::bigint, (1 - a_taken) * power(m::double precision, e)
+    select v_alpha, rid, false, (1 - a_taken)::bigint, 1::bigint, (1 - a_taken) * power(m::double precision, e)
       from s where m > 1 and vis and v_alpha is not null
     union all
-    select v_omega, tier, (1 - o_taken)::bigint, 1::bigint, (1 - o_taken) * power(m::double precision, e)
+    select v_omega, rid, false, (1 - o_taken)::bigint, 1::bigint, (1 - o_taken) * power(m::double precision, e)
       from s where m > 1 and vis and v_omega is not null
     union all
-    select rid, tier,
+    select rid, rid, false,
            (case when vis then greatest(avail - 2 + a_taken + o_taken, 0) else greatest(avail, 0) end)::bigint,
            (case when vis then m - 2 else m end)::bigint,
            (case when vis then greatest(avail - 2 + a_taken + o_taken, 0) else greatest(avail, 0) end) * power(m::double precision, e)
       from s where m > 1
   ),
-  -- poids de chaque palier (seuls ceux qui ont encore des cartes comptent)
-  tier_w as (select tier, sum(w) as tw from parts group by tier having sum(w) > 0),
-  ptot as (select coalesce(sum(tw), 0) as w from tier_w),
-  pw as (select tier, public.o1ocards_premium_weight(tier) as wt from tier_w where tier not in ('common', 'uncommon')),
-  pwt as (select coalesce(sum(wt), 0) as w from pw),
+  -- repli : toutes les cartes restantes
+  any_pool as (select id, sum(w) as w from parts group by id having sum(w) > 0),
+  any_tot as (select coalesce(sum(w), 0) as tw from any_pool),
+  -- options de tirage : chaque rareté ordinaire (sans ses 1/1) et la rareté Unique (les 1/1 de toutes les raretés)
+  opt_pool as (
+    select base as opt, id, sum(w) as w from parts where not is_first group by base, id having sum(w) > 0
+    union all
+    select v_unique as opt, id, sum(w) from parts where is_first group by id having sum(w) > 0
+  ),
+  opt_tot as (select opt, sum(w) as tw from opt_pool group by opt),
   cls(class, n) as (values ('common', n_com), ('uncommon', n_unc), ('premium', n_pre)),
-  -- pour chaque type d'emplacement, probabilité de chaque palier (avec le repli sur toutes les cartes si le palier est épuisé)
-  dist as (
-    select c.class, c.n, t.tier,
-           case c.class
-             when 'common'   then case when exists (select 1 from tier_w where tier = 'common')
-                                       then (t.tier = 'common')::int::double precision else t.tw / ptot.w end
-             when 'uncommon' then case when exists (select 1 from tier_w where tier = 'uncommon')
-                                       then (t.tier = 'uncommon')::int::double precision else t.tw / ptot.w end
-             else case when pwt.w > 0 then coalesce((select pw.wt from pw where pw.tier = t.tier), 0) / pwt.w else t.tw / ptot.w end
-           end as p
-    from cls c cross join tier_w t cross join ptot cross join pwt
+  slot_w as (
+    select c.class, c.n, o.opt,
+           case c.class when 'common' then r.weight_slots_1_3 when 'uncommon' then r.weight_slot_4 else r.weight_slot_5 end as wt
+    from cls c cross join opt_tot o join public.o1ocards_rarities r on r.id = o.opt
   ),
-  rid_t as (
-    select id, tier, sum(w) as w, sum(remaining)::bigint as remaining, sum(total)::bigint as total from parts group by id, tier
-  ),
+  cls_tot as (select class, n, sum(wt) as sw from slot_w group by class, n),
   -- chance qu'UNE carte d'un emplacement de ce type soit de cette rareté affichée
   mix as (
-    select rt.id, d.class, d.n, sum(case when tw.tw > 0 then d.p * rt.w / tw.tw else 0 end) as p
-    from rid_t rt
-    join tier_w tw on tw.tier = rt.tier
-    join dist d on d.tier = rt.tier
-    group by rt.id, d.class, d.n
+    select c.class, c.n, p.id,
+           case when coalesce(ct.sw, 0) > 0
+                then coalesce((select sum(sw2.wt / ct.sw * op.w / ot.tw)
+                               from slot_w sw2
+                               join opt_pool op on op.opt = sw2.opt and op.id = p.id
+                               join opt_tot ot on ot.opt = sw2.opt
+                               where sw2.class = c.class), 0)
+                else p.w / nullif(at.tw, 0)
+           end as p
+    from cls c cross join any_pool p cross join any_tot at left join cls_tot ct on ct.class = c.class
   ),
   expd as (
     select id, sum(n * p) as expected, 1 - exp(sum(n * ln(greatest(1 - least(p, 1), 1e-12)))) as at_least
     from mix group by id
   ),
-  agg as (select id, sum(remaining)::bigint as remaining, sum(total)::bigint as total from rid_t group by id)
+  agg as (select id, sum(remaining)::bigint as remaining, sum(total)::bigint as total from parts group by id)
   select jsonb_build_object(
     'by_rarity', coalesce((
       select jsonb_agg(jsonb_build_object(
@@ -1689,10 +1727,13 @@ begin
       from public.o1ocards_rarities r
       left join agg a on a.id = r.id
       left join expd x on x.id = r.id), '[]'::jsonb),
-    'premium', coalesce((
-      select jsonb_agg(jsonb_build_object('tier', d.tier, 'p', d.p) order by d.p desc, d.tier)
-      from dist d where d.class = 'premium' and d.p > 0), '[]'::jsonb))
-  into v_res;
+    -- pour chaque type d'emplacement, les raretés possibles et leur chance (somme = 1)
+    'slot_options', (
+      select jsonb_object_agg(z.class, z.opts) from (
+        select sw.class, coalesce(jsonb_agg(jsonb_build_object('id', sw.opt, 'p', sw.wt / ct.sw) order by sw.wt desc, sw.opt), '[]'::jsonb) as opts
+        from slot_w sw join cls_tot ct on ct.class = sw.class and ct.sw > 0
+        where sw.wt > 0 group by sw.class) z)
+  ) into v_res;
 
   select jsonb_build_object(
            'chance', coalesce(public.o1ocards_cfg('golden_booster_chance'), 0),
@@ -1708,7 +1749,7 @@ begin
     'pool_left',         public.o1ocards_category_total(v_cat) - public.o1ocards_category_taken(v_cat),
     'slots',             jsonb_build_object('common', n_com, 'uncommon', n_unc, 'premium', n_pre),
     'by_rarity',         v_res -> 'by_rarity',
-    'premium',           v_res -> 'premium',
+    'slot_options',      coalesce(v_res -> 'slot_options', '{}'::jsonb),
     'golden',            v_golden
   );
 end $$;
@@ -2259,6 +2300,184 @@ begin
   ) y
   order by y.secret, y.o_pos, y.type_id, y.o_ord desc;
 end $$;
+
+-- =====================================================================================================================
+-- AMIS : demandes, liste, collection d'un ami et de ses doubles. Tout passe par des fonctions : la table n'est jamais lisible directement.
+-- Une demande est « pending » jusqu'à ce que l'autre l'accepte (« accepted ») ; la refuser ou la retirer la supprime. Un ami voit toute la
+-- collection de l'autre, dont ses DOUBLES (cartes qui ne sont pas dans son album alors que l'emplacement est déjà pris) : il peut lui
+-- proposer une offre (make_offer) sur un double.
+-- =====================================================================================================================
+create table if not exists public.o1ocards_friendships (
+  id           bigint generated always as identity primary key,
+  requester_id uuid not null references public.o1ocards_profiles (id) on delete cascade,
+  addressee_id uuid not null references public.o1ocards_profiles (id) on delete cascade,
+  status       text not null default 'pending' check (status in ('pending', 'accepted')),
+  created_at   timestamptz not null default now(),
+  responded_at timestamptz,
+  check (requester_id <> addressee_id)
+);
+-- une seule relation par paire de joueurs, quel que soit le sens
+create unique index if not exists o1ocards_friendships_pair_uq on public.o1ocards_friendships (least(requester_id, addressee_id), greatest(requester_id, addressee_id));
+create index if not exists o1ocards_friendships_addressee_idx on public.o1ocards_friendships (addressee_id, status);
+alter table public.o1ocards_friendships enable row level security;
+revoke all on public.o1ocards_friendships from anon, authenticated;
+
+-- Les cartes d'un joueur avec : leur rareté affichée, si elles sont dans son album, si ce sont des DOUBLES, et leur annonce éventuelle.
+-- Double = carte hors album dans un emplacement (type, rareté affichée) déjà pris par une autre carte (celle de l'album, ou à défaut la
+-- première par série et numéro). Fonction interne : jamais appelable directement.
+create or replace function public.o1ocards_owner_cards_view(p_owner uuid)
+returns table (type_id int, base_rarity text, series int, number int, rarity_id text, in_album boolean, is_double boolean, listing_id bigint)
+language sql stable security definer set search_path = public as $$
+  with mine as (
+    select c.type_id, c.base_rarity, c.series, c.number, public.o1ocards_rarity_id(c.number, c.series, c.type_id, c.base_rarity) as rid
+    from public.o1ocards_cards c where c.owner_id = p_owner
+  ),
+  j as (
+    select m.*,
+           (p.series is not null) as in_album,
+           exists (select 1 from public.o1ocards_album_picks p2 where p2.user_id = p_owner and p2.type_id = m.type_id and p2.rarity_id = m.rid) as slot_has_pick,
+           row_number() over (partition by m.type_id, m.rid order by m.series, m.number) as rn
+    from mine m
+    left join public.o1ocards_album_picks p
+           on p.user_id = p_owner and p.type_id = m.type_id and p.rarity_id = m.rid and p.base_rarity = m.base_rarity and p.series = m.series and p.number = m.number
+  )
+  select j.type_id, j.base_rarity, j.series, j.number, j.rid, j.in_album,
+         (not j.in_album and (j.slot_has_pick or j.rn > 1)) as is_double,
+         (select l.id from public.o1ocards_listings l
+           where l.type_id = j.type_id and l.base_rarity = j.base_rarity and l.series = j.series and l.number = j.number and l.status = 'active' limit 1)
+  from j
+$$;
+revoke all on function public.o1ocards_owner_cards_view(uuid) from public, anon, authenticated;
+
+-- Recherche d'un joueur par le début de son pseudo (2 caractères au moins, 10 résultats) : seulement id, pseudo et lien avec toi
+create or replace function public.o1ocards_friend_search(p_query text)
+returns table (user_id uuid, username text, relation text)
+language plpgsql stable security definer set search_path = public as $$
+declare uid uuid := auth.uid(); q text := trim(coalesce(p_query, ''));
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  if char_length(q) < 2 then return; end if;
+  return query
+  select p.id, p.username,
+         case when f.id is null then 'none'
+              when f.status = 'accepted' then 'friend'
+              when f.requester_id = uid then 'sent'
+              else 'received' end
+  from public.o1ocards_profiles p
+  left join public.o1ocards_friendships f
+         on least(f.requester_id, f.addressee_id) = least(uid, p.id) and greatest(f.requester_id, f.addressee_id) = greatest(uid, p.id)
+  where p.id <> uid
+    and lower(p.username) like lower(replace(replace(replace(q, '\', '\\'), '%', '\%'), '_', '\_')) || '%' escape '\'
+  order by lower(p.username), p.id
+  limit 10;
+end $$;
+
+-- Demande d'ami. Si l'autre joueur t'avait déjà fait une demande, vous devenez amis tout de suite.
+create or replace function public.o1ocards_friend_request(p_user uuid)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); f public.o1ocards_friendships%rowtype;
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  perform public.o1ocards_ensure_profile(uid);
+  if p_user is null or p_user = uid then raise exception 'cannot_friend_self'; end if;
+  if not exists (select 1 from public.o1ocards_profiles where id = p_user) then raise exception 'user_not_found'; end if;
+  select * into f from public.o1ocards_friendships
+   where least(requester_id, addressee_id) = least(uid, p_user) and greatest(requester_id, addressee_id) = greatest(uid, p_user);
+  if found then
+    if f.status = 'accepted' then raise exception 'already_friends'; end if;
+    if f.requester_id = uid then raise exception 'request_pending'; end if;
+    update public.o1ocards_friendships set status = 'accepted', responded_at = now() where id = f.id;
+    return jsonb_build_object('ok', true, 'status', 'accepted');
+  end if;
+  if (select count(*) from public.o1ocards_friendships where requester_id = uid or addressee_id = uid) >= 200 then raise exception 'too_many_friends'; end if;
+  insert into public.o1ocards_friendships (requester_id, addressee_id) values (uid, p_user);
+  return jsonb_build_object('ok', true, 'status', 'pending');
+end $$;
+
+-- Réponse à une demande reçue : accepter, ou refuser (la demande disparaît)
+create or replace function public.o1ocards_friend_respond(p_id bigint, p_accept boolean)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid();
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  if coalesce(p_accept, false) then
+    update public.o1ocards_friendships set status = 'accepted', responded_at = now() where id = p_id and addressee_id = uid and status = 'pending';
+  else
+    delete from public.o1ocards_friendships where id = p_id and addressee_id = uid and status = 'pending';
+  end if;
+  if not found then raise exception 'not_found'; end if;
+  return jsonb_build_object('ok', true);
+end $$;
+
+-- Retirer un ami, ou annuler une demande envoyée
+create or replace function public.o1ocards_friend_remove(p_user uuid)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid();
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  delete from public.o1ocards_friendships
+   where least(requester_id, addressee_id) = least(uid, p_user) and greatest(requester_id, addressee_id) = greatest(uid, p_user);
+  if not found then raise exception 'not_found'; end if;
+  return jsonb_build_object('ok', true);
+end $$;
+
+-- Mes amis et mes demandes : demandes reçues d'abord, puis envoyées, puis amis (avec leur nombre de cartes et de doubles)
+create or replace function public.o1ocards_friends_list()
+returns table (friendship_id bigint, user_id uuid, username text, relation text, cards bigint, doubles bigint, since timestamptz)
+language plpgsql stable security definer set search_path = public as $$
+declare uid uuid := auth.uid();
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  return query
+  select z.fid, z.oid, z.uname, z.rel, z.n, z.d, z.since
+  from (
+    select f.id as fid, o.id as oid, o.username as uname,
+           case when f.status = 'accepted' then 'friend' when f.requester_id = uid then 'sent' else 'received' end as rel,
+           coalesce(cv.n, 0)::bigint as n, coalesce(cv.d, 0)::bigint as d, coalesce(f.responded_at, f.created_at) as since
+    from public.o1ocards_friendships f
+    join public.o1ocards_profiles o on o.id = case when f.requester_id = uid then f.addressee_id else f.requester_id end
+    left join lateral (select count(*) as n, count(*) filter (where v.is_double) as d from public.o1ocards_owner_cards_view(o.id) v) cv on f.status = 'accepted'
+    where uid in (f.requester_id, f.addressee_id)
+  ) z
+  order by case z.rel when 'received' then 0 when 'sent' then 1 else 2 end, lower(z.uname), z.oid;
+end $$;
+
+-- Les cartes d'un AMI (jamais d'un inconnu ni d'une demande en attente), les plus rares d'abord ; p_doubles = seulement ses doubles
+create or replace function public.o1ocards_friend_cards(p_friend uuid, p_doubles boolean default false, p_limit int default 60, p_offset int default 0)
+returns table (card_type int, card_base text, card_series int, card_number int, rarity_id text, is_double boolean, in_album boolean, listing_id bigint, total bigint, doubles_total bigint)
+language plpgsql stable security definer set search_path = public as $$
+declare uid uuid := auth.uid();
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  if not exists (select 1 from public.o1ocards_friendships f
+                  where f.status = 'accepted'
+                    and least(f.requester_id, f.addressee_id) = least(uid, p_friend) and greatest(f.requester_id, f.addressee_id) = greatest(uid, p_friend)) then
+    raise exception 'not_friends';
+  end if;
+  return query
+  with v as materialized (select * from public.o1ocards_owner_cards_view(p_friend)),
+  tot as (
+    select count(*) filter (where not coalesce(p_doubles, false) or v.is_double) as total, count(*) filter (where v.is_double) as dbl from v
+  )
+  select v.type_id, v.base_rarity, v.series, v.number, v.rarity_id, v.is_double, v.in_album, v.listing_id, tot.total, tot.dbl
+  from v cross join tot
+  where not coalesce(p_doubles, false) or v.is_double
+  order by coalesce((select r.sort_order from public.o1ocards_rarities r where r.id = v.rarity_id), 1000), v.type_id, v.series, v.number
+  limit least(greatest(coalesce(p_limit, 60), 1), 200) offset greatest(coalesce(p_offset, 0), 0);
+end $$;
+
+revoke all on function public.o1ocards_friend_search(text) from public, anon;
+revoke all on function public.o1ocards_friend_request(uuid) from public, anon;
+revoke all on function public.o1ocards_friend_respond(bigint, boolean) from public, anon;
+revoke all on function public.o1ocards_friend_remove(uuid) from public, anon;
+revoke all on function public.o1ocards_friends_list() from public, anon;
+revoke all on function public.o1ocards_friend_cards(uuid, boolean, int, int) from public, anon;
+grant execute on function public.o1ocards_friend_search(text) to authenticated;
+grant execute on function public.o1ocards_friend_request(uuid) to authenticated;
+grant execute on function public.o1ocards_friend_respond(bigint, boolean) to authenticated;
+grant execute on function public.o1ocards_friend_remove(uuid) to authenticated;
+grant execute on function public.o1ocards_friends_list() to authenticated;
+grant execute on function public.o1ocards_friend_cards(uuid, boolean, int, int) to authenticated;
 
 -- « Voir la collection » (album) : pour chaque type d'une catégorie, le nombre de JOUEURS DISTINCTS qui possèdent au moins une carte de ce
 -- type (toutes raretés confondues). Si tu en as 20 et ton ami 3, il y a 2 détenteurs. Une carte revendue à la banque (sans propriétaire)

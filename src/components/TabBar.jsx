@@ -1,4 +1,9 @@
 const Icon = {
+  friends: (
+    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="9" cy="8.5" r="3.2" /><path d="M3.2 19.5c.6-3.3 3-5 5.8-5s5.2 1.7 5.8 5" /><circle cx="17" cy="9.5" r="2.5" /><path d="M16.2 14.7c2.6-.2 4.3 1.4 4.8 4.3" />
+    </svg>
+  ),
   boosters: (
     <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M6 3.5h12l-1 2H7l-1-2Z" /><rect x="6" y="5.5" width="12" height="15" rx="1" /><path d="M6 20.5l-.5 1h13l-.5-1" /><path d="M9 12.5h6" />
@@ -21,14 +26,16 @@ const Icon = {
   ),
 }
 
-const TABS = [
-  ['boosters', 'Boosters'],
+// Ordre de la barre du bas : Amis, Collection, Boosters, Marché, Profil
+export const TABS = [
+  ['friends', 'Amis'],
   ['collection', 'Collection'],
+  ['boosters', 'Boosters'],
   ['market', 'Marché'],
   ['profile', 'Profil'],
 ]
 
-export default function TabBar({ tab, onChange, boosters }) {
+export default function TabBar({ tab, onChange, boosters, requests = 0 }) {
   return (
     <nav className="tabbar" aria-label="Navigation principale">
       <div className="tabbar-inner">
@@ -37,6 +44,7 @@ export default function TabBar({ tab, onChange, boosters }) {
             <span className="tab-icon">
               {Icon[id]}
               {id === 'boosters' && boosters > 0 && <span className="tab-badge">{boosters}</span>}
+              {id === 'friends' && requests > 0 && <span className="tab-badge" aria-label={`${requests} demande${requests > 1 ? 's' : ''} d’ami`}>{requests}</span>}
             </span>
             <span>{label}</span>
           </button>
