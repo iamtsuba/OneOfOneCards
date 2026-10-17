@@ -89,6 +89,38 @@ select pg_temp.expect('la table des amis n''est lisible par personne directement
 select pg_temp.expect('A propose 5 pièces à B pour son double 1/11', (public.{{P}}make_offer(1, (select base_rarity from public.{{P}}cards where type_id = 1 and number = 11), 100, 11, 5) ->> 'offer_id') is not null);
 select pg_temp.expect('l''offre existe (acheteur A, vendeur B, 5 pièces) et B est prévenu', (select count(*) from public.{{P}}offers where buyer_id = :A and seller_id = :B and amount = 5) = 1 and (select count(*) from public.{{P}}notifications where user_id = :B and kind = 'offer_received') >= 1);
 
+\echo '--- offre acceptée par un ami : la carte nouvelle va directement dans l''album de l''acheteur'
+create temp table coins_avant as select id, coins from public.{{P}}profiles where id in (:A, :B, :C);
+update public.{{P}}profiles set coins = 1000 where id in (:A, :B, :C);
+select id as oid1 from public.{{P}}offers where buyer_id = :A and seller_id = :B and amount = 5 \gset
+select pg_temp.expect('avant : A n''a rien dans l''emplacement (type 1, série 100) de son album', not exists (select 1 from public.{{P}}album_picks where user_id = :A and type_id = 1));
+set request.jwt.claim.sub = :B;
+select (public.{{P}}respond_offer(:oid1, true) -> 'status') is not null as acceptee_par_b;
+set request.jwt.claim.sub = :A;
+select pg_temp.expect('la carte 1/11 est maintenant à A', (select owner_id from public.{{P}}cards where type_id = 1 and series = 100 and number = 11) = :A);
+select pg_temp.expect('... et elle est directement dans l''album de A (carte nouvelle, vendeur ami)', exists (select 1 from public.{{P}}album_picks where user_id = :A and type_id = 1 and series = 100 and number = 11));
+select pg_temp.expect('l''album de B est inchangé (sa carte 10 y est toujours, rien n''y a été ajouté pour lui)', (select count(*) from public.{{P}}album_picks where user_id = :B) = 1 and exists (select 1 from public.{{P}}album_picks where user_id = :B and number = 10));
+select pg_temp.expect('l''acheteur est prévenu de l''acceptation', exists (select 1 from public.{{P}}notifications where user_id = :A and kind = 'offer_accepted'));
+-- deuxième offre : même emplacement, A a déjà la carte 11 dans son album -> la carte 12 n'est pas nouvelle, l'album ne change pas
+select (public.{{P}}make_offer(1, (select base_rarity from public.{{P}}cards where type_id = 1 and number = 12), 100, 12, 6) ->> 'offer_id')::bigint as oid2 \gset
+set request.jwt.claim.sub = :B;
+select (public.{{P}}respond_offer(:oid2, true) -> 'status') is not null as acceptee_2;
+set request.jwt.claim.sub = :A;
+select pg_temp.expect('carte déjà couverte : la carte 12 arrive chez A mais l''album garde la carte 11 (aucun remplacement)',
+  (select owner_id from public.{{P}}cards where type_id = 1 and number = 12) = :A
+  and (select count(*) from public.{{P}}album_picks where user_id = :A and type_id = 1) = 1 and exists (select 1 from public.{{P}}album_picks where user_id = :A and type_id = 1 and number = 11));
+-- offre d'un joueur qui n'est PAS ami du vendeur : la carte arrive, mais pas dans l'album
+set request.jwt.claim.sub = :C;
+select (public.{{P}}make_offer(2, (select base_rarity from public.{{P}}cards where type_id = 2 and number = 21), 100, 21, 5) ->> 'offer_id')::bigint as oid3 \gset
+set request.jwt.claim.sub = :B;
+select (public.{{P}}respond_offer(:oid3, true) -> 'status') is not null as acceptee_3;
+set request.jwt.claim.sub = :C;
+select pg_temp.expect('vendeur non ami : la carte 2/21 arrive chez C mais n''est PAS placée dans son album',
+  (select owner_id from public.{{P}}cards where type_id = 2 and number = 21) = :C and not exists (select 1 from public.{{P}}album_picks where user_id = :C));
+set request.jwt.claim.sub = :A;
+select pg_temp.expect('A peut vendre la carte 12 (hors album) : seul l''emplacement nouveau a été protégé', not exists (select 1 from public.{{P}}album_picks where user_id = :A and number = 12));
+update public.{{P}}profiles p set coins = c.coins from coins_avant c where c.id = p.id;
+
 \echo '--- retirer un ami'
 select public.{{P}}friend_remove(:C) ->> 'ok' as retire;
 select pg_temp.expect('A retire C : la relation disparaît', not exists (select 1 from public.{{P}}friends_list() where user_id = :C));

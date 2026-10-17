@@ -2163,7 +2163,7 @@ end $$;
 -- Toute annonce active sur la carte est retirée (la propriété change) ; une enchère déjà surenchérie bloque l'acceptation.
 create or replace function public.o1ocards_respond_offer(p_id bigint, p_accept boolean)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare uid uuid := auth.uid(); o public.o1ocards_offers; v_owner uuid; bal bigint; p public.o1ocards_profiles;
+declare uid uuid := auth.uid(); o public.o1ocards_offers; v_owner uuid; bal bigint; p public.o1ocards_profiles; v_auto boolean;
 begin
   if uid is null then raise exception 'not_authenticated'; end if;
   select * into o from public.o1ocards_offers where id = p_id for update;
@@ -2198,10 +2198,17 @@ begin
   select coins into bal from public.o1ocards_profiles where id = o.buyer_id;
   if bal < o.amount then raise exception 'buyer_insufficient_coins'; end if;
 
+  -- Offre acceptée par un AMI de l'acheteur, pour une carte qui lui manquait (rien dans cet emplacement de son album) : elle va directement dans son album
+  v_auto := exists (select 1 from public.o1ocards_friendships f
+                     where f.status = 'accepted'
+                       and least(f.requester_id, f.addressee_id) = least(uid, o.buyer_id) and greatest(f.requester_id, f.addressee_id) = greatest(uid, o.buyer_id))
+            and not public.o1ocards_owns_card_rarity(o.buyer_id, o.type_id, public.o1ocards_rarity_id(o.number, o.series, o.type_id, o.base_rarity));
+
   update public.o1ocards_profiles set coins = coins - o.amount where id = o.buyer_id;
   update public.o1ocards_profiles set coins = coins + o.amount where id = uid returning * into p;
   update public.o1ocards_cards set owner_id = o.buyer_id, obtained_at = now()
   where type_id = o.type_id and base_rarity = o.base_rarity and series = o.series and number = o.number;
+  if v_auto then perform public.o1ocards_auto_place_album(o.buyer_id, o.type_id, o.base_rarity, o.series, o.number); end if;
   delete from public.o1ocards_favorites where user_id = o.buyer_id and type_id = o.type_id and base_rarity = o.base_rarity and series = o.series and number = o.number;
   delete from public.o1ocards_album_picks where user_id = o.seller_id and type_id = o.type_id and base_rarity = o.base_rarity and series = o.series and number = o.number;
 
