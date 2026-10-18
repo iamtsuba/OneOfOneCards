@@ -86,6 +86,18 @@ select pg_temp.expect('Art Rare plus rare que Ultra Rare, plus rare que Super Ra
       and max((o ->> 'p')::float) filter (where o ->> 'id' = 'zz_c') < max((o ->> 'p')::float) filter (where o ->> 'id' = 'zz_b')
    from odds0, jsonb_array_elements(j -> 'slot_options' -> 'premium') o));
 select pg_temp.expect('la somme des parts par rareté affichée vaut 1', abs((select sum((r ->> 'share')::float) from odds0, jsonb_array_elements(j -> 'by_rarity') r) - 1) < 0.0001);
+create or replace function pg_temp.mixp(cls text, rid text) returns float language sql as $$
+  select coalesce((select (o ->> 'p')::float from odds0, jsonb_array_elements(j -> 'slot_mix' -> cls) o where o ->> 'id' = rid), 0) $$;
+select pg_temp.expect('répartition réelle par emplacement : la somme des chances vaut 1 pour cartes 1 à 3, carte 4 et carte 5',
+  (select bool_and(abs(s - 1) < 0.000001) and count(*) = 3 from (select k, (select sum((o ->> 'p')::float) from jsonb_array_elements(v) o) as s from odds0, jsonb_each(j -> 'slot_mix') as e(k, v)) z));
+select pg_temp.expect('cartes 1 à 3 : presque 100 % Commune (le reste vient du même stock : Alpha, Omega, Unique) ; carte 4 : presque 100 % Peu Commune',
+  pg_temp.mixp('common', 'zz_a') > 0.9 and pg_temp.mixp('common', 'zz_a') < 1 and pg_temp.mixp('common', 'alpha') > 0 and pg_temp.mixp('common', 'zz_a') + pg_temp.mixp('common', 'alpha') + pg_temp.mixp('common', 'omega') + pg_temp.mixp('common', 'unique') > 0.999999
+  and pg_temp.mixp('uncommon', 'zz_b') > 0.9);
+select pg_temp.expect('la part de chaque rareté affichée est la moyenne pondérée des emplacements (3 / 1 / 1 sur 5) : mêmes nombres que la liste par rareté',
+  (select bool_and(abs((r ->> 'share')::float - (3 * pg_temp.mixp('common', r ->> 'id') + pg_temp.mixp('uncommon', r ->> 'id') + pg_temp.mixp('premium', r ->> 'id')) / 5) < 0.000001)
+   from odds0, jsonb_array_elements(j -> 'by_rarity') r));
+select pg_temp.expect('carte 5 : Peu Commune ≈ 50 %, Rare ≈ 30 % (chances réelles, un peu sous les poids : Alpha, Omega et Unique viennent du même stock)',
+  pg_temp.mixp('premium', 'zz_b') between 0.4 and 0.5 and pg_temp.mixp('premium', 'zz_c') between 0.25 and 0.3);
 
 \echo '--- 2 000 boosters ouverts'
 create temp table drawn as

@@ -1763,6 +1763,11 @@ begin
       from public.pp_o1ocards_rarities r
       left join agg a on a.id = r.id
       left join expd x on x.id = r.id), '[]'::jsonb),
+    -- pour chaque type d'emplacement, la répartition RÉELLE par rareté affichée sur les cartes restantes (Alpha, Omega et Unique comprises ; somme = 1)
+    'slot_mix', coalesce((
+      select jsonb_object_agg(z.class, z.opts) from (
+        select m.class, jsonb_agg(jsonb_build_object('id', m.id, 'p', m.p) order by m.p desc, m.id) as opts
+        from mix m where m.p > 0 group by m.class) z), '{}'::jsonb),
     -- pour chaque type d'emplacement, les raretés possibles et leur chance (somme = 1)
     'slot_options', (
       select jsonb_object_agg(z.class, z.opts) from (
@@ -1785,6 +1790,7 @@ begin
     'pool_left',         public.pp_o1ocards_category_total(v_cat) - public.pp_o1ocards_category_taken(v_cat),
     'slots',             jsonb_build_object('common', n_com, 'uncommon', n_unc, 'premium', n_pre),
     'by_rarity',         v_res -> 'by_rarity',
+    'slot_mix',          coalesce(v_res -> 'slot_mix', '{}'::jsonb),
     'slot_options',      coalesce(v_res -> 'slot_options', '{}'::jsonb),
     'golden',            v_golden
   );
