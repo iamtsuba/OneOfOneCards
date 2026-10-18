@@ -850,3 +850,5 @@ ul.odds-slots li span { color: var(--ink-soft); }
 @media (min-width: 760px) { .zoom-card { width: 380px; } }
 
 .zoom-overlay { background: radial-gradient(circle at 50% 28%, #262b63 0%, #10122c 72%); }
+
+.field-hint { display: block; margin-top: 4px; color: var(--ink-soft); font-weight: 400; font-size: 12px; }

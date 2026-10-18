@@ -15,6 +15,8 @@ set request.jwt.claim.sub = :C; select public.{{P}}status() is not null as c_pro
 update public.{{P}}profiles set coins = 100 where id = :B; update public.{{P}}profiles set coins = 5 where id = :C;
 set request.jwt.claim.sub = :A;
 select count(*) from (select public.{{P}}open_booster() from generate_series(1,3)) x;
+-- les cartes nouvelles vont d'office dans l'album (donc ne se vendent pas) : on les en sort pour pouvoir les mettre en vente
+delete from public.{{P}}album_picks where user_id = :A;
 create temp table ca as select type_id, base_rarity, series, number, row_number() over (order by type_id, series, number) rn from public.{{P}}cards where owner_id = :A limit 4;
 
 \echo '=== FAVORIS : mise en favori, interdit sur sa propre carte, notif à la mise en vente'

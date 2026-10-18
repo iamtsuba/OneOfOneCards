@@ -923,17 +923,65 @@ end $$;
 
 create or replace function public.o1ocards_ensure_profile(p_uid uuid)
 returns void language plpgsql security definer set search_path = public as $$
+declare v_base text; v_name text; i int := 1;
 begin
-  insert into public.o1ocards_profiles (id, username, boosters, coins)
-  select a.id,
-         left(coalesce(nullif(trim(a.raw_user_meta_data ->> 'username'), ''),
-                       nullif(split_part(a.email, '@', 1), ''), 'joueur'), 24),
-         public.o1ocards_cfg('start_boosters')::int,
-         coalesce(public.o1ocards_cfg('start_coins'), 0)::bigint
-  from auth.users a
-  where a.id = p_uid
-  on conflict (id) do nothing;
+  if exists (select 1 from public.o1ocards_profiles where id = p_uid) then return; end if;
+  select left(coalesce(nullif(trim(a.raw_user_meta_data ->> 'username'), ''), nullif(split_part(a.email, '@', 1), ''), 'joueur'), 24)
+    into v_base from auth.users a where a.id = p_uid;
+  if v_base is null then return; end if;   -- utilisateur inconnu
+  -- Le pseudo est UNIQUE (casse ignorée) : s'il est déjà pris, on ajoute _2, _3… (cas rare : le formulaire d'inscription vérifie avant)
+  loop
+    v_name := case when i = 1 then v_base else left(v_base, 24 - length('_' || i)) || '_' || i end;
+    begin
+      insert into public.o1ocards_profiles (id, username, boosters, coins)
+      values (p_uid, v_name, public.o1ocards_cfg('start_boosters')::int, coalesce(public.o1ocards_cfg('start_coins'), 0)::bigint)
+      on conflict (id) do nothing;
+      return;
+    exception when unique_violation then
+      i := i + 1;
+      if i > 1000 then raise; end if;
+    end;
+  end loop;
 end $$;
+
+-- ---------- Pseudo unique et définitif ----------
+-- Pseudos déjà en double (casse ignorée) : le plus ancien le garde, les autres reçoivent _2, _3… Sans effet une fois les pseudos uniques.
+create or replace function public.o1ocards_dedupe_usernames()
+returns int language plpgsql security definer set search_path = public as $$
+declare r record; n int := 0; i int; cand text;
+begin
+  for r in
+    select id, trim(username) as u, row_number() over (partition by lower(trim(username)) order by created_at, id) as rn
+    from public.o1ocards_profiles
+  loop
+    if r.rn > 1 then
+      i := r.rn;
+      loop
+        cand := left(r.u, 24 - length('_' || i)) || '_' || i;
+        exit when not exists (select 1 from public.o1ocards_profiles where lower(username) = lower(cand));
+        i := i + 1;
+      end loop;
+      update public.o1ocards_profiles set username = cand where id = r.id;
+      n := n + 1;
+    end if;
+  end loop;
+  return n;
+end $$;
+revoke all on function public.o1ocards_dedupe_usernames() from public, anon, authenticated;
+select public.o1ocards_dedupe_usernames();
+create unique index if not exists o1ocards_profiles_username_uq on public.o1ocards_profiles (lower(username));
+
+-- Le pseudo d'un compte en cours de création est déjà réservé (inscription non encore confirmée par email)
+create or replace function public.o1ocards_username_available(p_username text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select char_length(trim(coalesce(p_username, ''))) between 2 and 24
+     and not exists (select 1 from public.o1ocards_profiles pr where lower(pr.username) = lower(trim(p_username)))
+     and not exists (select 1 from auth.users a where lower(trim(a.raw_user_meta_data ->> 'username')) = lower(trim(p_username))
+                       and not exists (select 1 from public.o1ocards_profiles pr2 where pr2.id = a.id))
+$$;
+revoke all on function public.o1ocards_username_available(text) from public;
+grant execute on function public.o1ocards_username_available(text) to anon, authenticated;
+drop function if exists public.o1ocards_set_username(text);
 
 -- ---------- Recharge des boosters (calculée à la demande) ----------
 create or replace function public.o1ocards_sync(p_uid uuid)
@@ -1783,6 +1831,7 @@ begin
     'total_cards',    public.o1ocards_category_total(v_cat),
     'unique_owned',   v_owned,
     'series_started', v_started,
+    'types_completed', (select count(*) from public.o1ocards_gold_rewards g where g.user_id = uid),
     'by_rarity',      coalesce(by_rarity, '[]'::jsonb),
     'categories',     v_cats,
     'types',          v_types,
@@ -1924,16 +1973,6 @@ begin
   );
 end $$;
 
-create or replace function public.o1ocards_set_username(p_username text)
-returns text language plpgsql security definer set search_path = public as $$
-declare v text := trim(coalesce(p_username, ''));
-begin
-  if auth.uid() is null then raise exception 'not_authenticated'; end if;
-  if char_length(v) < 2 or char_length(v) > 24 then raise exception 'invalid_username'; end if;
-  perform public.o1ocards_ensure_profile(auth.uid());
-  update public.o1ocards_profiles set username = v where id = auth.uid();
-  return v;
-end $$;
 
 -- ---------- Marché ----------
 
@@ -3663,7 +3702,6 @@ revoke all on function public.o1ocards_ack_rewards()                            
 revoke all on function public.o1ocards_list_collection(int, int, text, text, int, int)   from public, anon;
 revoke all on function public.o1ocards_my_stats(int)                                     from public, anon;
 revoke all on function public.o1ocards_draw_odds(int, int)                               from public, anon;
-revoke all on function public.o1ocards_set_username(text)                                from public, anon;
 revoke all on function public.o1ocards_sell_direct(int, text, int, int)                        from public, anon;
 revoke all on function public.o1ocards_list_card(int, text, int, int, text, int)               from public, anon;
 revoke all on function public.o1ocards_cancel_listing(bigint)                            from public, anon;
@@ -3709,7 +3747,6 @@ grant execute on function public.o1ocards_ack_rewards()                         
 grant execute on function public.o1ocards_list_collection(int, int, text, text, int, int)   to authenticated;
 grant execute on function public.o1ocards_my_stats(int)                                     to authenticated;
 grant execute on function public.o1ocards_draw_odds(int, int)                               to authenticated;
-grant execute on function public.o1ocards_set_username(text)                                to authenticated;
 grant execute on function public.o1ocards_sell_direct(int, text, int, int)                        to authenticated;
 grant execute on function public.o1ocards_list_card(int, text, int, int, text, int)               to authenticated;
 grant execute on function public.o1ocards_cancel_listing(bigint)                            to authenticated;

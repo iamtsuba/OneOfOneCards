@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { supabase } from '../supabase'
-import { explain } from '../api'
+import { explain, usernameAvailable } from '../api'
 import Brand from './Brand'
 import LegalSheet from './Legal'
 import Landing from './Landing'
@@ -25,6 +25,8 @@ export default function Auth() {
         const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
         if (error) throw error
       } else {
+        // Le pseudo est unique et définitif : on s'assure qu'il est libre avant de créer le compte
+        if ((await usernameAvailable(username.trim())) !== true) throw new Error('username_taken')   // seule une réponse « vrai » autorise l'inscription
         const { data, error } = await supabase.auth.signUp({
           email: email.trim(),
           password,
@@ -67,6 +69,7 @@ export default function Auth() {
             <label>
               Pseudo
               <input value={username} onChange={(e) => setUsername(e.target.value)} minLength={2} maxLength={24} autoComplete="nickname" required />
+              <small className="field-hint">Unique et définitif : tu ne pourras pas le changer.</small>
             </label>
           )}
           <label>

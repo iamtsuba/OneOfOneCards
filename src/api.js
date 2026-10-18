@@ -21,7 +21,8 @@ export const ackRewards = () => rpc('ack_rewards')
 export const getStats = (category = null) => rpc('my_stats', { p_category: category })
 export const getOdds = (category = null, boosterType = null) => rpc('draw_odds', { p_category: category, p_booster_type: boosterType })
 export const typeState = (type, series) => rpc('type_state', { p_type: type, p_series: series })
-export const setUsername = (name) => rpc('set_username', { p_username: name })
+// Le pseudo est unique (casse ignorée) et définitif : on vérifie sa disponibilité avant de créer le compte, il ne se change plus ensuite
+export const usernameAvailable = (name) => rpc('username_available', { p_username: name })
 export const listCollection = ({ category = null, type = null, rarity = null, sort = 'series', limit = 60, offset = 0 } = {}) =>
   rpc('list_collection', { p_category: category, p_type: type, p_rarity: rarity, p_sort: sort, p_limit: limit, p_offset: offset })
 
@@ -212,6 +213,7 @@ export function explain(e) {
   if (m.includes('no_golden_pack')) return 'Tu n’as pas de pack doré à ouvrir.'
   if (m.includes('no_boosters')) return 'Tu n’as plus de booster pour le moment.'
   if (m.includes('pool_empty')) return 'Toutes les cartes ont déjà été tirées.'
+  if (m.includes('username_taken')) return 'Ce pseudo est déjà pris : choisis-en un autre.'
   if (m.includes('invalid_username')) return 'Le pseudo doit contenir entre 2 et 24 caractères.'
   if (m.includes('card_listed')) return 'Cette carte est en vente sur le marché : retire d’abord l’annonce.'
   if (m.includes('not_owner')) return 'Cette carte ne t’appartient pas (ou plus).'
