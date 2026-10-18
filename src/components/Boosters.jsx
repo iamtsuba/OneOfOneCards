@@ -13,6 +13,47 @@ import { InfoButton } from './Collection'
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 
+// Résumé d'un booster : les cartes tirées, chacune est un bouton qui l'ouvre en grand
+export function SummaryGrid({ cards, rarityMap, catalog, revealAll = false, onZoom }) {
+  return (
+    <ul className="summary-grid">
+      {cards.map((c, i) => (
+        <li key={`${c.type_id}-${c.base_rarity}-${c.series}-${c.number}`}>
+          <button type="button" className="summary-card" onClick={() => onZoom(i)}
+            aria-label={`Voir en grand : ${rarityMap[c.rarity_id]?.name ?? c.rarity_id}, ${catalog?.typeMap?.[c.type_id]?.name ?? 'carte'}`}>
+            <Card typeId={c.type_id} base={c.base_rarity} series={c.series} number={c.number} rarity={rarityMap[c.rarity_id]} size="sm" isNew={!!c.is_new} glow shine={revealAll} />
+          </button>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+// Une carte du booster en grand ; ‹ › pour passer à la précédente ou à la suivante, toucher le fond ou « Fermer » pour revenir au résumé
+export function CardZoom({ cards, index, rarityMap, catalog, onClose, onMove }) {
+  const c = cards[index]
+  if (!c) return null
+  const rarity = rarityMap[c.rarity_id]
+  const stop = (e) => e.stopPropagation()
+  return (
+    <div className="zoom-overlay" role="dialog" aria-modal="true" aria-label="Carte en grand" onClick={onClose}>
+      <div className="zoom-card" onClick={stop}>
+        <Card typeId={c.type_id} base={c.base_rarity} series={c.series} number={c.number} rarity={rarity} size="lg" isNew={!!c.is_new} glow shine />
+      </div>
+      <p className="reveal-line" onClick={stop}>
+        <strong>{rarity?.name ?? c.rarity_id}</strong> : « {catalog?.typeMap?.[c.type_id]?.name} »{catalog?.cardRef?.(c.type_id, c.base_rarity, c.number, c.series)}
+        {c.is_new ? ' · nouvelle carte' : ''}
+      </p>
+      <div className="zoom-actions" onClick={stop}>
+        <button type="button" className="btn ghost-light" disabled={index <= 0} onClick={() => onMove(-1)} aria-label="Carte précédente">‹</button>
+        <button type="button" className="btn light" onClick={onClose}>Fermer</button>
+        <button type="button" className="btn ghost-light" disabled={index >= cards.length - 1} onClick={() => onMove(1)} aria-label="Carte suivante">›</button>
+      </div>
+      <p className="zoom-count" onClick={stop}>{index + 1} / {cards.length}</p>
+    </div>
+  )
+}
+
 // Autres types de boosters (Silver, Gold, Légende…) : en stock et/ou en vente contre des pièces ; « i » ouvre leurs chances
 export function ExtraBoosters({ items, coins, disabled, onOpen, onBuy, onInfo }) {
   if (!items || items.length === 0) return null
@@ -283,6 +324,20 @@ export default function Boosters({ goCollection }) {
 export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onAgain, onCollection }) {
   const shownAt = useRef(Date.now())
   const close = () => setOverlay(null)
+  const [zoom, setZoom] = useState(null)   // index de la carte ouverte en grand dans le résumé
+
+  // Carte en grand : Échap revient au résumé (sans fermer le booster), flèches pour parcourir les cartes
+  useEffect(() => {
+    if (zoom == null) return undefined
+    const n = overlay?.cards?.length ?? 0
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); setZoom(null) }
+      else if (e.key === 'ArrowLeft') setZoom((z) => Math.max(0, (z ?? 0) - 1))
+      else if (e.key === 'ArrowRight') setZoom((z) => Math.min(n - 1, (z ?? 0) + 1))
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [zoom, overlay?.cards?.length])
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape' && overlay.phase === 'reveal') close() }
@@ -317,13 +372,8 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
           </p>
         )}
         <h2 className={`overlay-title ${golden ? 'gold' : ''}`}>{gold ? 'Booster Gold' : golden ? 'Booster doré' : label ? `Booster ${label}` : 'Ton booster'}</h2>
-        <ul className="summary-grid">
-          {cards.map((c) => (
-            <li key={`${c.type_id}-${c.series}-${c.number}`}>
-              <Card typeId={c.type_id} base={c.base_rarity} series={c.series} number={c.number} rarity={rarityMap[c.rarity_id]} size="sm" isNew={!!c.is_new} glow shine={revealAll} />
-            </li>
-          ))}
-        </ul>
+        <SummaryGrid cards={cards} rarityMap={rarityMap} catalog={catalog} revealAll={revealAll} onZoom={setZoom} />
+        {zoom != null && <CardZoom cards={cards} index={zoom} rarityMap={rarityMap} catalog={catalog} onClose={() => setZoom(null)} onMove={(d) => setZoom((z) => Math.max(0, Math.min(cards.length - 1, (z ?? 0) + d)))} />}
         <p className="overlay-hint">
           {cards.length} carte{cards.length > 1 ? 's' : ''} ajoutée{cards.length > 1 ? 's' : ''} à ta collection{cards.filter((x) => x.is_new).length > 0 ? ` (dont ${cards.filter((x) => x.is_new).length} nouvelle${cards.filter((x) => x.is_new).length > 1 ? 's, placées' : ', placée'} dans ton album)` : ''}. Meilleure carte : {rarityMap[rarest.rarity_id]?.name}, {catalog?.typeMap?.[rarest.type_id]?.name}{catalog?.cardRef?.(rarest.type_id, rarest.base_rarity, rarest.number, rarest.series)}.
         </p>
