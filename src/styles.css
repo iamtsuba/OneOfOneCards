@@ -817,3 +817,23 @@ ul.odds-slots li span { color: var(--ink-soft); }
   .booster-row { grid-template-columns: minmax(0, 1fr) 58px 34px; }
   .booster-row select { grid-column: 1 / -1; }
 }
+
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+/* Chances de tirage : mini-cartes et pastilles aux couleurs des raretés */
+.odds-cards { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 12px; }
+.odds-card-row { display: flex; align-items: flex-start; gap: 12px; }
+.odds-mini { position: relative; flex: none; display: grid; place-items: center; width: 34px; height: 46px; border-radius: 8px; font-size: 17px; font-weight: 800;
+  color: var(--rt); background: linear-gradient(160deg, var(--r1), var(--r2)); box-shadow: 0 3px 8px -3px rgba(27, 31, 59, .45), inset 0 0 0 2px rgba(255, 255, 255, .5); }
+.odds-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; flex: 1; padding-top: 2px; }
+.odds-chip { display: inline-flex; align-items: baseline; gap: 5px; padding: 4px 12px; border-radius: 99px; font-size: 14px; font-weight: 600; line-height: 1.25;
+  color: var(--rt); background: linear-gradient(135deg, var(--r1), var(--r2)); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .08); }
+.odds-chip strong { font-weight: 800; }
+.odds-chip.plain { color: var(--ink-soft); background: #eceefc; box-shadow: none; }
+.odds-bar { display: flex; flex: 0 0 100%; height: 8px; margin-top: 2px; border-radius: 99px; overflow: hidden; background: #eceefc; gap: 2px; }
+.odds-bar i { min-width: 3px; background: linear-gradient(90deg, var(--r1), var(--r2)); }
+.odds-special { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 0; padding-top: 10px; border-top: 1px solid var(--line); }
+.odds-special-label { margin-right: 2px; font-weight: 700; }
+
+.odds-chip { padding: 3px 10px; font-size: 13px; gap: 4px; }
+.odds-chips { gap: 5px; }

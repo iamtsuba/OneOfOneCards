@@ -13,6 +13,8 @@ export function fmtOdds(p) {
 }
 
 const SPECIAL = ['unique', 'alpha', 'omega']
+// Couleurs d'une rareté (comme sur les cartes) pour une pastille, une mini-carte ou un segment de barre
+const tone = (r) => ({ '--r1': r?.color ?? '#d9d4c5', '--r2': r?.color2 ?? r?.color ?? '#b5ad99', '--rt': r?.text_color ?? '#222' })
 
 // Encart concis : une ligne par carte du booster avec la chance de chaque rareté (calculée sur les cartes réellement restantes), les cartes spéciales
 // par booster, le stock. Le détail (parts par rareté, règles, booster doré) est derrière le bouton « i ». Sans appel réseau : testable seul.
@@ -20,19 +22,16 @@ export function OddsBody({ data, category, rarityMap, initialInfo = false, compa
   const [info, setInfo] = useState(initialInfo)
   const slots = data.slots
   const name = (id) => rarityMap[id]?.name ?? id
-  // chance par rareté AFFICHÉE et par type d'emplacement (serveur récent) ; sinon, par rareté de tirage (ancien serveur)
   // chance par rareté AFFICHÉE pour chaque carte du booster (serveur récent : data.positions) ; sinon par type d'emplacement (serveurs précédents)
-  const textOf = (mix) => {
-    const shown = (mix ?? []).filter((o) => o.p >= 0.001)   // en dessous de 0,1 %, la rareté est dans la ligne « cartes spéciales »
-    return shown.length ? shown.map((o) => `${name(o.id)} ${fmtOdds(o.p)}`).join(' · ') : 'au hasard parmi les cartes restantes'
-  }
+  // en dessous de 0,1 %, la rareté n'est pas affichée sur la ligne (elle est dans « Par booster »)
+  const entriesOf = (mix) => (mix ?? []).filter((o) => o.p >= 0.001)
   const mixOf = (cls) => data.slot_mix?.[cls] ?? data.slot_options?.[cls] ?? []
   let lines = []
   if (data.positions) {
-    lines = data.positions.map((p) => ({ n: p.n, text: textOf(p.mix) }))
+    lines = data.positions.map((p) => ({ n: p.n, entries: entriesOf(p.mix) }))
   } else if (slots) {
     for (const [cls, n] of [['common', slots.common], ['uncommon', slots.uncommon], ['premium', slots.premium]]) {
-      for (let i = 0; i < n; i++) lines.push({ n: lines.length + 1, text: textOf(mixOf(cls)) })
+      for (let i = 0; i < n; i++) lines.push({ n: lines.length + 1, entries: entriesOf(mixOf(cls)) })
     }
   }
 
@@ -45,14 +44,29 @@ export function OddsBody({ data, category, rarityMap, initialInfo = false, compa
   return (
     <>
       {lines.length > 0 && (
-        <ul className="odds-slots" aria-label="Chances par carte du booster">
-          {lines.map((l) => <li key={l.n}><strong>Carte {l.n}</strong><span>{l.text}</span></li>)}
-        </ul>
+        <ol className="odds-cards" aria-label="Chances par carte du booster">
+          {lines.map((l) => (
+            <li key={l.n} className="odds-card-row">
+              <span className="odds-mini" style={tone(rarityMap[l.entries[0]?.id])} aria-hidden="true">{l.n}</span>
+              <div className="odds-chips">
+                <span className="sr-only">Carte {l.n} : </span>
+                {l.entries.length === 0 && <span className="odds-chip plain">Au hasard parmi les cartes restantes</span>}
+                {l.entries.map((o) => <span key={o.id} className="odds-chip" style={tone(rarityMap[o.id])}>{name(o.id)} <strong>{fmtOdds(o.p)}</strong></span>)}
+                {l.entries.length > 1 && (
+                  <span className="odds-bar" aria-hidden="true">
+                    {l.entries.map((o) => <i key={o.id} style={{ ...tone(rarityMap[o.id]), flex: `${o.p} 1 0` }} />)}
+                  </span>
+                )}
+              </div>
+            </li>
+          ))}
+        </ol>
       )}
       {specials.length > 0 && (
-        <p className="odds-special">
-          <strong>Par booster</strong> : {specials.map((r) => `${name(r.id)} ${fmtOdds(r.per_booster)}`).join(' · ')}
-        </p>
+        <div className="odds-special">
+          <span className="odds-special-label">Par booster</span>
+          {specials.map((r) => <span key={r.id} className="odds-chip" style={tone(rarityMap[r.id])}>{name(r.id)} <strong>{fmtOdds(r.per_booster)}</strong></span>)}
+        </div>
       )}
       {!compact && (
         <p className="odds-foot muted">
