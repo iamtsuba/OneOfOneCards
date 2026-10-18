@@ -3,6 +3,8 @@ import * as api from '../api'
 import { explain } from '../api'
 import { useGame, fmt, fmtDate } from '../game'
 import { IS_PREPROD } from '../env'
+import { fmtOdds } from './Odds'
+import { defaultPositions, pickableRarities, positionsToSlots, resizePositions, shares, slotsToPositions, validateBooster, MAX_CARDS } from '../boosterLogic'
 import TypeArt from './TypeArt'
 import Pack from './Pack'
 import Card from './Card'
@@ -27,6 +29,7 @@ export function useWide() {
 const TABS = [
   ['categories', 'Catégories'],
   ['types', 'Types'],
+  ['boosters', 'Boosters'],
   ['config', 'Réglages'],
   ['rarities', 'Raretés'],
   ['uniques', '1/1 gagnées'],
@@ -170,8 +173,8 @@ export default function Admin({ onClose }) {
 
 // Coque de la console (sans connexion ni appels réseau : testable seule). wide : mise en page PC.
 export function AdminShell({ data, tab, onTab, busy, error, notice, run, onChangePassword, onClose, wide = false }) {
-  const fill = wide && (tab === 'types' || tab === 'categories')   // ces écrans gèrent eux-mêmes le défilement de leurs colonnes
-  const count = { categories: data.categories.length, types: data.types.length }
+  const fill = wide && (tab === 'types' || tab === 'categories' || tab === 'boosters')   // ces écrans gèrent eux-mêmes le défilement de leurs colonnes
+  const count = { categories: data.categories.length, types: data.types.length, boosters: (data.booster_types ?? []).length }
   const players = `${fmt(data.players)} joueur${data.players > 1 ? 's' : ''} inscrit${data.players > 1 ? 's' : ''}.`
   return (
     <div className="legal-overlay" role="dialog" aria-modal="true" aria-label="Console admin">
@@ -205,6 +208,7 @@ export function AdminShell({ data, tab, onTab, busy, error, notice, run, onChang
 
           {tab === 'categories' && <CategoriesTab data={data} run={run} busy={busy} wide={wide} />}
           {tab === 'types' && <TypesTab data={data} run={run} busy={busy} wide={wide} />}
+          {tab === 'boosters' && <BoostersTab data={data} run={run} busy={busy} wide={wide} />}
           {tab === 'config' && <ConfigTab data={data} run={run} busy={busy} />}
           {tab === 'rarities' && <RaritiesTab data={data} run={run} busy={busy} />}
           {tab === 'uniques' && <UniqueWinsTab data={data} />}
@@ -1109,6 +1113,168 @@ function ConfigRow({ row, run, busy }) {
 }
 
 // ---------- Raretés ----------
+// ---------- Boosters paramétrables : liste, éditeur carte par carte, dons ----------
+function BoosterListItem({ b, on, onClick }) {
+  const sale = b.is_standard ? 'Standard : se recharge tout seul' : b.price_coins != null ? `${fmt(b.price_coins)} pièce${b.price_coins > 1 ? 's' : ''}` : 'hors vente'
+  return (
+    <button type="button" className={`md-item${on ? ' on' : ''}`} aria-current={on ? 'true' : undefined} onClick={onClick}>
+      <i className="cat-dot" style={{ '--cat1': b.color, '--cat2': b.color }} />
+      <span className="md-item-text">
+        <strong>{b.name}</strong>
+        <small>{b.cards} carte{b.cards > 1 ? 's' : ''} · {sale}{!b.enabled ? ' · désactivé' : ''}{b.holders > 0 ? ` · ${fmt(b.holders)} en stock` : ''}</small>
+      </span>
+    </button>
+  )
+}
+
+export function BoosterEditor({ booster, rarities, run, busy, onCreated, onDeleted, onDuplicate }) {
+  const isNew = !booster?.id
+  const std = !!booster?.is_standard
+  const choices = pickableRarities(rarities)
+  const names = Object.fromEntries(rarities.map((r) => [r.id, r.name]))
+  const [f, setF] = useState(() => ({
+    name: booster?.name ?? '', cards: booster?.cards ?? 5, color: booster?.color ?? '#e8452e',
+    price: booster?.price_coins == null ? '' : String(booster.price_coins), enabled: booster?.enabled ?? true,
+  }))
+  const [pos, setPos] = useState(() => (booster?.slots ? slotsToPositions(booster.slots, booster.cards) : defaultPositions(rarities, booster?.cards ?? 5)))
+  const [grant, setGrant] = useState({ qty: '1', who: '' })
+  const problem = validateBooster({ name: f.name, cards: f.cards, price: std ? '' : f.price, positions: pos }, names)
+
+  const setEntry = (i, j, patch) => setPos(pos.map((entries, k) => (k === i ? entries.map((e, m) => (m === j ? { ...e, ...patch } : e)) : entries)))
+  const removeEntry = (i, j) => setPos(pos.map((entries, k) => (k === i ? entries.filter((_, m) => m !== j) : entries)))
+  const addEntry = (i, id) => setPos(pos.map((entries, k) => (k === i ? [...entries, { rarity_id: id, weight: 1 }] : entries)))
+  const setCards = (n) => { setF({ ...f, cards: n }); setPos(resizePositions(pos, n)) }
+
+  const save = () => run(
+    (pw) => api.adminSaveBoosterType(pw, booster?.id ?? null, { name: f.name.trim(), cards: f.cards, color: f.color, price: std || f.price === '' ? null : Number(f.price), enabled: std ? true : f.enabled, slots: positionsToSlots(pos) }),
+    (res) => { if (isNew && res?.id != null) onCreated(res.id); return 'Booster enregistré.' },
+  )
+  const remove = () => {
+    if (!window.confirm(`Supprimer le booster « ${booster.name} » ?`)) return
+    run((pw) => api.adminDeleteBoosterType(pw, booster.id), () => { onDeleted(); return 'Booster supprimé.' })
+  }
+  const offer = () => {
+    const n = Number(grant.qty)
+    const who = grant.who.trim()
+    if (!window.confirm(who ? `Offrir ${n} « ${booster.name} » à ${who} ?` : `Offrir ${n} « ${booster.name} » à TOUS les joueurs ?`)) return
+    run((pw) => api.adminGrantBoosters(pw, booster.id, n, who || null), (res) => `${n} booster${n > 1 ? 's' : ''} offert${n > 1 ? 's' : ''} à ${res.players} joueur${res.players > 1 ? 's' : ''}.`)
+  }
+
+  return (
+    <div className="admin-card booster-editor">
+      <h3>{isNew ? 'Nouveau booster' : booster.name}{std && <span className="muted"> · se recharge tout seul</span>}</h3>
+      <div className="booster-fields">
+        <label>Nom<input value={f.name} maxLength={40} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+        <label>Nombre de cartes
+          <select value={f.cards} onChange={(e) => setCards(Number(e.target.value))}>
+            {Array.from({ length: MAX_CARDS }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </label>
+        <label>Couleur<input type="color" value={f.color} onChange={(e) => setF({ ...f, color: e.target.value })} /></label>
+        <label>Prix en pièces
+          <input type="number" min="0" step="1" inputMode="numeric" value={std ? '' : f.price} placeholder={std ? 'jamais en vente' : 'vide = hors vente'} disabled={std} onChange={(e) => setF({ ...f, price: e.target.value })} />
+        </label>
+        <label className="check inline">
+          <input type="checkbox" checked={std ? true : f.enabled} disabled={std} onChange={(e) => setF({ ...f, enabled: e.target.checked })} />
+          <span>Actif{std ? ' (toujours)' : ''}</span>
+        </label>
+      </div>
+      {std && <p className="fine">Le Standard est le booster qui se recharge tout seul (stock gratuit). Les autres s’achètent avec des pièces ou s’offrent.</p>}
+
+      <div className="booster-cards">
+        {pos.map((entries, i) => {
+          const pct = shares(entries)
+          const free = choices.filter((r) => !entries.some((e) => e.rarity_id === r.id))
+          return (
+            <fieldset key={i} className="booster-card">
+              <legend>Carte {i + 1}</legend>
+              {entries.map((e, j) => (
+                <div key={e.rarity_id} className="booster-row">
+                  <select aria-label={`Rareté de la carte ${i + 1}`} value={e.rarity_id} onChange={(ev) => setEntry(i, j, { rarity_id: ev.target.value })}>
+                    {choices.filter((r) => r.id === e.rarity_id || !entries.some((x) => x.rarity_id === r.id)).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                  </select>
+                  <input type="number" min="0" step="any" inputMode="decimal" aria-label={`Poids de ${names[e.rarity_id] ?? e.rarity_id}, carte ${i + 1}`} value={e.weight} onChange={(ev) => setEntry(i, j, { weight: ev.target.value })} />
+                  <span className="booster-pct" aria-label="chance">{fmtOdds(pct[j])}</span>
+                  <button type="button" className="btn ghost small" aria-label={`Retirer ${names[e.rarity_id] ?? e.rarity_id} de la carte ${i + 1}`} disabled={entries.length <= 1} onClick={() => removeEntry(i, j)}>×</button>
+                </div>
+              ))}
+              {free.length > 0 && (
+                <select className="booster-add" aria-label={`Ajouter une rareté à la carte ${i + 1}`} value="" onChange={(ev) => ev.target.value && addEntry(i, ev.target.value)}>
+                  <option value="">+ Ajouter une rareté</option>
+                  {free.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
+              )}
+            </fieldset>
+          )
+        })}
+      </div>
+      <p className="fine">Un poids de 80 et un de 20 donnent 80 % et 20 %. « Unique » : les cartes 1/1. Un booster ne contient jamais deux cartes identiques dans une même rareté.</p>
+      {problem && <p className="msg error" role="alert">{problem}</p>}
+      <div className="row">
+        <button type="button" className="btn" disabled={busy || !!problem} onClick={save}>{isNew ? 'Créer le booster' : 'Enregistrer'}</button>
+        {!isNew && <button type="button" className="btn ghost" disabled={busy} onClick={() => onDuplicate({ ...f, slots: positionsToSlots(pos) })}>Dupliquer</button>}
+        {!isNew && !std && <button type="button" className="btn ghost danger" disabled={busy} onClick={remove}>Supprimer</button>}
+      </div>
+
+      {!isNew && !std && (
+        <fieldset className="booster-grant">
+          <legend>Offrir des boosters</legend>
+          <div className="booster-fields">
+            <label>Quantité<input type="number" min="1" max="1000" value={grant.qty} onChange={(e) => setGrant({ ...grant, qty: e.target.value })} /></label>
+            <label>Pseudo (vide = tous les joueurs)<input value={grant.who} maxLength={30} autoComplete="off" onChange={(e) => setGrant({ ...grant, who: e.target.value })} /></label>
+          </div>
+          <div className="row">
+            <button type="button" className="btn ghost" disabled={busy || !(Number(grant.qty) >= 1)} onClick={offer}>Offrir</button>
+          </div>
+        </fieldset>
+      )}
+    </div>
+  )
+}
+
+export function BoostersTab({ data, run, busy, wide = false }) {
+  const list = data.booster_types ?? []
+  const [sel, setSel] = useState(list.find((b) => b.is_standard)?.id ?? list[0]?.id ?? 'new')
+  const [draft, setDraft] = useState(null)   // copie d'un booster en cours de création
+  const booster = typeof sel === 'number' ? list.find((b) => b.id === sel) ?? null : null
+  const isStd = list.find((b) => b.is_standard)?.id
+  const open = (id) => { setDraft(null); setSel(id) }
+  const items = (
+    <>
+      <button type="button" className={`btn ${sel === 'new' ? '' : 'ghost'}`} onClick={() => open('new')}>+ Nouveau booster</button>
+      <ul className="md-items">
+        {list.map((b) => <li key={b.id}><BoosterListItem b={b} on={b.id === sel} onClick={() => open(b.id)} /></li>)}
+      </ul>
+    </>
+  )
+  const editor = (
+    <BoosterEditor
+      key={`${sel}-${draft ? 'copie' : booster ? booster.id : 'new'}-${list.length}`}
+      booster={draft ? { name: `Copie de ${draft.name}`, cards: draft.cards, color: draft.color, price_coins: null, enabled: true, slots: draft.slots } : booster}
+      rarities={data.rarities} run={run} busy={busy}
+      onCreated={(id) => open(id)} onDeleted={() => open(isStd ?? 'new')} onDuplicate={(d) => { setDraft(d); setSel('new') }}
+    />
+  )
+  if (wide) {
+    return (
+      <div className="admin-md boosters-wide">
+        <aside className="md-list" aria-label="Boosters">
+          {items}
+          <p className="fine">Chaque booster définit, carte par carte, la répartition des raretés. Le Standard se recharge tout seul ; les autres s’achètent en pièces ou s’offrent.</p>
+        </aside>
+        <section className="md-detail">{editor}</section>
+      </div>
+    )
+  }
+  return (
+    <div className="admin-list">
+      <p className="muted">Chaque booster définit, carte par carte, la répartition des raretés. Le Standard se recharge tout seul ; les autres s’achètent en pièces ou s’offrent.</p>
+      <div className="booster-list">{items}</div>
+      {editor}
+    </div>
+  )
+}
+
 export function RaritiesTab({ data, run, busy }) {
   return (
     <div className="admin-list cols-2">
@@ -1130,10 +1296,6 @@ export function RaritiesTab({ data, run, busy }) {
 
 function RarityForm({ rarity, run, busy }) {
   const [f, setF] = useState({ name: rarity.name, max_series: rarity.max_series ?? '', color: rarity.color, color2: rarity.color2, text_color: rarity.text_color })
-  // Poids de tirage dans un booster : cartes 1 à 3, carte 4 et carte 5 (les cartes Alpha et Omega ne se tirent pas par poids)
-  const [w, setW] = useState({ a: String(rarity.weight_slots_1_3 ?? 0), b: String(rarity.weight_slot_4 ?? 0), c: String(rarity.weight_slot_5 ?? 0) })
-  const weighted = rarity.kind === 'range' || rarity.kind === 'unique'
-  const wValid = [w.a, w.b, w.c].every((x) => x !== '' && Number(x) >= 0 && Number.isFinite(Number(x)))
   const set = (k) => (v) => setF((cur) => ({ ...cur, [k]: v }))
   return (
     <div className="admin-card" style={{ '--cat1': f.color, '--cat2': f.color2 }}>
@@ -1149,20 +1311,6 @@ function RarityForm({ rarity, run, busy }) {
         <Color label="Couleur 2" value={f.color2} onChange={set('color2')} />
         <Color label="Texte" value={f.text_color} onChange={set('text_color')} />
       </div>
-      {weighted && (
-        <fieldset className="rarity-weights">
-          <legend>Tirage des boosters : poids</legend>
-          <div className="admin-grid three">
-            <label>Cartes 1 à 3<input type="number" min="0" step="any" value={w.a} onChange={(e) => setW({ ...w, a: e.target.value })} /></label>
-            <label>Carte 4<input type="number" min="0" step="any" value={w.b} onChange={(e) => setW({ ...w, b: e.target.value })} /></label>
-            <label>Carte 5<input type="number" min="0" step="any" value={w.c} onChange={(e) => setW({ ...w, c: e.target.value })} /></label>
-          </div>
-          <p className="fine">0 = jamais à cet emplacement. La chance d’une rareté est son poids divisé par la somme des poids des raretés qui ont encore des cartes.{rarity.kind === 'unique' ? ' Unique : les cartes 1/1.' : ''}</p>
-          <div className="row">
-            <button className="btn ghost" disabled={busy || !wValid} onClick={() => run((pw) => api.adminSetRarityWeights(pw, rarity.id, w.a, w.b, w.c), 'Poids enregistrés.')}>Enregistrer les poids</button>
-          </div>
-        </fieldset>
-      )}
       <div className="row">
         <button className="btn" disabled={busy || !f.name.trim()} onClick={() => run((pw) => api.adminSaveRarity(pw, { id: rarity.id, ...f }), 'Rareté enregistrée.')}>Enregistrer</button>
         {rarity.kind === 'range' && (

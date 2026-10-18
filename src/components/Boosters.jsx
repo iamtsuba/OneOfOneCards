@@ -8,9 +8,40 @@ import Pack from './Pack'
 import Fireworks from './Fireworks'
 import PurchaseConsent from './PurchaseConsent'
 import LegalSheet from './Legal'
-import Odds from './Odds'
+import Odds, { BoosterOddsSheet } from './Odds'
+import { InfoButton } from './Collection'
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// Autres types de boosters (Silver, Gold, Légende…) : en stock et/ou en vente contre des pièces ; « i » ouvre leurs chances
+export function ExtraBoosters({ items, coins, disabled, onOpen, onBuy, onInfo }) {
+  if (!items || items.length === 0) return null
+  return (
+    <section className="extra-boosters" aria-label="Autres boosters">
+      <h3>Autres boosters</h3>
+      <ul className="extra-list">
+        {items.map((it) => (
+          <li key={it.id} style={{ '--bt': it.color }}>
+            <i className="extra-dot" aria-hidden="true" />
+            <span className="extra-text">
+              <strong>{it.name}</strong>
+              <small>{it.cards} carte{it.cards > 1 ? 's' : ''}{it.quantity > 0 ? ` · ${fmt(it.quantity)} en stock` : ''}</small>
+            </span>
+            <span className="extra-actions">
+              <InfoButton onClick={() => onInfo(it)} label={`Chances du booster ${it.name}`} />
+              {it.quantity > 0 && <button type="button" className="btn small" disabled={disabled} onClick={() => onOpen(it)} aria-label={`Ouvrir un booster ${it.name}`}>Ouvrir</button>}
+              {it.price != null && (
+                <button type="button" className="btn small ghost" disabled={disabled || coins < it.price} onClick={() => onBuy(it)} aria-label={`Acheter un booster ${it.name} pour ${it.price} pièces`}>
+                  Acheter · {fmt(it.price)} 🪙
+                </button>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
 
 // Boosters Gold gagnés en complétant tous les emplacements d'une carte dans l'album (un par carte), à ouvrir un par un
 export function GoldRewardList({ rewards, typeMap, disabled, onOpen }) {
@@ -85,19 +116,36 @@ export default function Boosters({ goCollection }) {
   const goldenPacks = status?.golden_packs ?? 0
 
   const goldRewards = status?.gold_rewards ?? []
+  const [oddsFor, setOddsFor] = useState(null)
+  const coinsFree = Math.max(0, (status?.coins ?? 0) - (status?.coins_locked ?? 0))
+
+  async function buy(it) {
+    if (!window.confirm(`Acheter un booster ${it.name} pour ${it.price} pièces ?`)) return
+    setError('')
+    setNotice('')
+    try {
+      const res = await api.buyBooster(it.id, 1)
+      setStatus(res.status)
+      setNotice(`Un booster ${it.name} a été ajouté à ton stock.`)
+    } catch (e) {
+      setError(explain(e))
+    }
+  }
 
   // kind : 'normal' (un booster), 'golden' (un pack doré gagné en complétant une série) ou 'gold' (un booster Gold gagné en complétant une carte : rewardId)
   async function open(fromSummary = false, kind = 'normal', rewardId = null) {
     const isGold = kind === 'gold'
+    const isType = kind === 'type'
+    const typeInfo = isType ? (status?.booster_types ?? []).find((x) => x.id === rewardId) : null
     const isPack = kind === 'golden' || isGold
     const goldType = isGold ? catalog?.typeMap?.[goldRewards.find((g) => g.id === rewardId)?.type_id] : null
     const goldCategory = goldType ? catalog?.categoryMap?.[goldType.category_id] : null
-    if (!(status && (isGold ? goldCategory : category) && (isGold ? true : isPack ? goldenPacks > 0 : total > 0) && (fromSummary === true || !overlay))) return
+    if (!(status && (isGold ? goldCategory : category) && (isGold ? true : isType ? typeInfo?.quantity > 0 : isPack ? goldenPacks > 0 : total > 0) && (fromSummary === true || !overlay))) return
     setError('')
-    setOverlay({ phase: 'shake', categoryId: (goldCategory ?? category).id, golden: isPack, gold: isGold })
+    setOverlay({ phase: 'shake', categoryId: (goldCategory ?? category).id, golden: isPack, gold: isGold, label: typeInfo?.name })
     const t0 = Date.now()
     try {
-      const res = isGold ? await api.openGoldReward(rewardId) : isPack ? await api.openGoldenPack() : await api.openBooster()
+      const res = isType ? await api.openBoosterType(rewardId) : isGold ? await api.openGoldReward(rewardId) : isPack ? await api.openGoldenPack() : await api.openBooster()
       setStatus(res.status)
       // Les cartes les plus rares sont révélées en dernier
       const cards = [...res.cards].sort(
@@ -115,7 +163,7 @@ export default function Boosters({ goCollection }) {
       }
       setOverlay((o) => ({ ...o, phase: 'tear', golden }))
       await wait(700)
-      setOverlay({ phase: 'reveal', cards, idx: 0, golden, gold: isGold, categoryId: res.category_id, nextCategoryId: res.status.active_category_id })
+      setOverlay({ phase: 'reveal', cards, idx: 0, golden, gold: isGold, label: res.booster?.name, categoryId: res.category_id, nextCategoryId: res.status.active_category_id })
     } catch (e) {
       setOverlay(null)
       setError(explain(e))
@@ -152,6 +200,8 @@ export default function Boosters({ goCollection }) {
           Ouvrir un booster
         </button>
 
+        <ExtraBoosters items={status?.booster_types} coins={coinsFree} disabled={!!overlay} onOpen={(it) => open(false, 'type', it.id)} onBuy={buy} onInfo={setOddsFor} />
+        {oddsFor && category && <BoosterOddsSheet category={category} boosterType={oddsFor} rarityMap={rarityMap} onClose={() => setOddsFor(null)} />}
         <GoldRewardList rewards={goldRewards} typeMap={catalog?.typeMap} disabled={!!overlay} onOpen={(id) => open(false, 'gold', id)} />
         {goldenPacks > 0 && (
           <div className="golden-reward">
@@ -244,12 +294,12 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
     return (
       <div className="overlay" role="dialog" aria-modal="true" aria-label="Ouverture du booster">
         <Pack phase={overlay.phase} golden={overlay.golden} category={catalog?.categoryMap?.[overlay.categoryId]} />
-        <p className="overlay-hint">{overlay.gold ? 'Ton booster Gold !' : overlay.golden ? 'Un booster doré !' : 'Ouverture…'}</p>
+        <p className="overlay-hint">{overlay.gold ? 'Ton booster Gold !' : overlay.golden ? 'Un booster doré !' : overlay.label ? `Ton booster ${overlay.label} !` : 'Ouverture…'}</p>
       </div>
     )
   }
 
-  const { cards, idx, summary, revealAll, from, golden, gold } = overlay
+  const { cards, idx, summary, revealAll, from, golden, gold, label } = overlay
 
   if (summary) {
     const rarest = cards.reduce((best, c) => (rarityMap[c.rarity_id]?.sort_order < (rarityMap[best.rarity_id]?.sort_order ?? 99) ? c : best), cards[0])
@@ -266,7 +316,7 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
             {catalog.categoryMap[overlay.nextCategoryId] ? ` « ${catalog.categoryMap[overlay.nextCategoryId].name} » est maintenant ouverte.` : ' Toutes les catégories sont terminées.'}
           </p>
         )}
-        <h2 className={`overlay-title ${golden ? 'gold' : ''}`}>{gold ? 'Booster Gold' : golden ? 'Booster doré' : 'Ton booster'}</h2>
+        <h2 className={`overlay-title ${golden ? 'gold' : ''}`}>{gold ? 'Booster Gold' : golden ? 'Booster doré' : label ? `Booster ${label}` : 'Ton booster'}</h2>
         <ul className="summary-grid">
           {cards.map((c) => (
             <li key={`${c.type_id}-${c.series}-${c.number}`}>

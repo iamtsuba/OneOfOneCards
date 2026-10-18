@@ -12,7 +12,7 @@ const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const out = mkdtempSync(path.join(root, 'tests', '.out-admin-'))
 await build({
   stdin: {
-    contents: "export { AdminShell, CategoriesTab, TypesTab, ConfigTab, RaritiesTab, UniqueWinsTab, LegalTab, SecurityTab } from './src/components/Admin.jsx'; export { GameContext } from './src/game.js'; export { explain } from './src/api.js'",
+    contents: "export { AdminShell, CategoriesTab, TypesTab, ConfigTab, RaritiesTab, UniqueWinsTab, LegalTab, SecurityTab, BoostersTab, BoosterEditor } from './src/components/Admin.jsx'; export { GameContext } from './src/game.js'; export { explain } from './src/api.js'",
     resolveDir: root, loader: 'js',
   },
   bundle: true, format: 'esm', platform: 'node', jsx: 'automatic', outfile: path.join(out, 'bundle.mjs'),
@@ -112,7 +112,7 @@ ok('onglet Sécurité : s’affiche', clean(show(M.SecurityTab, { onChange: asyn
   const shell = (props) => show(M.AdminShell, { data, tab: 'types', onTab: () => {}, error: '', notice: '', onChangePassword: async () => true, onClose: () => {}, ...props })
   const wideHtml = shell({ wide: true })
   const narrowHtml = shell({ wide: false })
-  ok('PC : le panneau passe en mise en page large avec une navigation verticale (un onglet par module)', wideHtml !== null && /legal-panel admin wide/.test(wideHtml) && /<nav class="admin-nav"[^>]*aria-orientation="vertical"/.test(wideHtml) && (wideHtml.match(/class="admin-nav-item/g) || []).length === 7)
+  ok('PC : le panneau passe en mise en page large avec une navigation verticale (un onglet par module : 8, Boosters compris)', wideHtml !== null && /legal-panel admin wide/.test(wideHtml) && /<nav class="admin-nav"[^>]*aria-orientation="vertical"/.test(wideHtml) && (wideHtml.match(/class="admin-nav-item/g) || []).length === 8)
   ok('PC : l’onglet actif est marqué et les compteurs (catégories, types) sont affichés', /admin-nav-item on"[^>]*>Types<span class="nav-count">\d+<\/span>/.test(wideHtml) && /aria-selected="true"/.test(wideHtml) && /Catégories<span class="nav-count">/.test(wideHtml))
   ok('PC : les écrans à deux colonnes gèrent eux-mêmes leur défilement (admin-main fill) ; les autres défilent d’un bloc', /admin-main fill/.test(wideHtml) && !/admin-main fill/.test(shell({ wide: true, tab: 'config' })))
   ok('mobile : inchangé (pastilles horizontales, pas de navigation verticale ni de panneau large)', /class="chips admin-tabs"/.test(narrowHtml) && !/admin-nav/.test(narrowHtml) && !/legal-panel admin wide/.test(narrowHtml) && !/class="admin-md /.test(narrowHtml))
@@ -180,17 +180,46 @@ ok('onglet Sécurité : s’affiche', clean(show(M.SecurityTab, { onChange: asyn
   ok('erreurs de la copie : raretés manquantes listées, catégorie déjà en production, accès verrouillé', /legende, platine/.test(ex(new Error('prod_missing_rarities:legende,platine'))) && /Créer en production les raretés manquantes/.test(ex(new Error('prod_missing_rarities:platine'))) && /existe déjà en production/.test(ex(new Error('prod_category_exists'))) && /verrouillé/.test(ex(new Error('prod_admin_locked'))))
 }
 
-// ---------- Poids de tirage des boosters dans la fiche d'une rareté ----------
+
+// ---------- Boosters paramétrables (onglet Boosters) ----------
 {
-  const rt = show(M.RaritiesTab, { data })
-  const rangeKinds = data.rarities.filter((r) => r.kind === 'range' || r.kind === 'unique').length
-  ok('raretés : un bloc « Tirage des boosters : poids » (cartes 1 à 3, carte 4, carte 5) pour chaque rareté ordinaire et pour Unique', rt !== null && (rt.match(/<legend>Tirage des boosters : poids<\/legend>/g) || []).length === rangeKinds)
-  ok('raretés : les trois champs de poids sont des nombres, avec leur propre bouton « Enregistrer les poids »', (rt.match(/Cartes 1 à 3<input type="number"/g) || []).length === rangeKinds && (rt.match(/>Carte 4<input type="number"/g) || []).length === rangeKinds && (rt.match(/>Carte 5<input type="number"/g) || []).length === rangeKinds && (rt.match(/Enregistrer les poids/g) || []).length === rangeKinds)
-  ok('raretés : pas de poids pour Alpha et Omega (elles ne se tirent pas par poids)', (rt.match(/<legend>/g) || []).length === rangeKinds && data.rarities.some((r) => r.kind === 'alpha') && data.rarities.some((r) => r.kind === 'omega'))
-  const withW = { ...data, rarities: data.rarities.map((r) => (r.id === 'rare' ? { ...r, weight_slots_1_3: 0, weight_slot_4: 0, weight_slot_5: 35 } : r)) }
-  ok('raretés : le poids enregistré est affiché (Rare : 0 / 0 / 35)', /value="35"/.test(show(M.RaritiesTab, { data: withW })))
-  ok('raretés : l\'explication reste courte (0 = jamais, chance = poids / somme)', /0 = jamais à cet emplacement/.test(rt) && /poids divisé par la somme des poids/.test(rt))
-  ok('erreur de poids lisible', /Poids invalides/.test(M.explain(new Error('invalid_weight'))))
+  const std = data.booster_types.find((b) => b.is_standard)
+  const silver = { id: 9001, name: 'Silver', cards: 3, color: '#c0c0c0', price_coins: 50, enabled: true, is_standard: false, holders: 4,
+    slots: [{ position: 1, rarity_id: 'common', weight: 100 }, { position: 2, rarity_id: 'common', weight: 80 }, { position: 2, rarity_id: 'rare', weight: 20 }, { position: 3, rarity_id: 'rare', weight: 100 }] }
+  const withSilver = { ...data, booster_types: [...data.booster_types, silver] }
+  const bw = show(M.BoostersTab, { data: withSilver, wide: true })
+  const bn = show(M.BoostersTab, { data: withSilver, wide: false })
+  const shellTabs = show(M.AdminShell, { data: withSilver, tab: 'boosters', onTab: () => {}, busy: false, error: '', notice: '', run: () => {}, onChangePassword: () => {}, onClose: () => {}, wide: true })
+
+  ok('boosters : l\'onglet « Boosters » existe dans la console avec son compteur', />Boosters<span class="nav-count">2</.test(shellTabs) && show(M.AdminShell, { data: withSilver, tab: 'boosters', onTab: () => {}, busy: false, error: '', notice: '', run: () => {}, onChangePassword: () => {}, onClose: () => {}, wide: false }).includes('>Boosters</button>'))
+  ok('boosters (PC) : liste à gauche et éditeur à droite, bouton « + Nouveau booster »', /class="admin-md boosters-wide"/.test(bw) && /aria-label="Boosters"/.test(bw) && />\+ Nouveau booster</.test(bw) && /class="md-detail"/.test(bw))
+  ok('boosters : la liste annonce le Standard (se recharge tout seul) et Silver (prix, stock)', /<strong>Standard<\/strong><small>5 cartes · Standard : se recharge tout seul<\/small>/.test(bw) && /<strong>Silver<\/strong><small>3 cartes · 50 pièces · 4 en stock<\/small>/.test(bw))
+  ok('boosters : le Standard est ouvert par défaut, avec ses 5 cartes et leurs répartitions', /<h3>Standard<span class="muted"> · se recharge tout seul<\/span><\/h3>/.test(bw) && (bw.match(/<legend>Carte \d<\/legend>/g) || []).length === 5)
+  ok('boosters : chaque ligne montre la rareté, son poids et sa chance en pourcentage (carte 1 : 100 %)', /aria-label="Poids de [^"]*, carte 1"/.test(bw) && /<span class="booster-pct" aria-label="chance">100 %<\/span>/.test(bw))
+  ok('boosters : les chances de chaque carte totalisent 100 % (somme des pourcentages affichés, tolérance d\'arrondi)', (() => {
+    const cards = bw.split('<fieldset class="booster-card">').slice(1)
+    return cards.length === 5 && cards.every((c) => { const v = [...c.matchAll(/booster-pct" aria-label="chance">([\d,]+) %</g)].map((m) => Number(m[1].replace(',', '.'))); return Math.abs(v.reduce((a, x) => a + x, 0) - 100) < 0.6 })
+  })())
+  ok('boosters : Standard — prix et activation verrouillés, pas de suppression ni de don, mais « Dupliquer » et « Enregistrer »', /placeholder="jamais en vente" disabled=""/.test(bw) && /Actif \(toujours\)/.test(bw) && !/>Supprimer</.test(bw) && !/Offrir des boosters/.test(bw) && />Dupliquer</.test(bw) && />Enregistrer</.test(bw))
+  const ed = (booster, extra = {}) => show(M.BoosterEditor, { booster, rarities: data.rarities, run: () => {}, busy: false, onCreated: () => {}, onDeleted: () => {}, onDuplicate: () => {}, ...extra })
+  const es = ed(silver)
+  ok('boosters : un booster ordinaire a un prix modifiable, un bouton Supprimer et un panneau « Offrir des boosters »', /<input type="number" min="0" step="1" inputMode="numeric" placeholder="vide = hors vente" value="50"\/>/.test(es) && />Supprimer</.test(es) && /Offrir des boosters/.test(es) && /Pseudo \(vide = tous les joueurs\)/.test(es))
+  ok('boosters : Silver — 3 cartes, carte 2 à 80 % et 20 %', (es.match(/<legend>Carte \d<\/legend>/g) || []).length === 3 && (es.split('<fieldset class="booster-card">')[2].match(/booster-pct" aria-label="chance">(80|20) %</g) || []).length === 2)
+  ok('boosters : Silver valide : « Enregistrer » actif, aucun message d\'erreur', !/role="alert"/.test(es) && />Enregistrer<\/button>/.test(es) && !/disabled="">Enregistrer/.test(es))
+  const broken = ed({ ...silver, slots: silver.slots.filter((s) => s.position !== 2) })
+  ok('boosters : une carte sans rareté bloque l\'enregistrement et dit laquelle', /role="alert">La carte 2 n’a aucune rareté\./.test(broken) && /<button type="button" class="btn" disabled="">Enregistrer<\/button>/.test(broken))
+  const empty = ed({ ...silver, name: '' })
+  ok('boosters : un nom vide bloque l\'enregistrement', /Donne un nom au booster\./.test(empty) && /disabled="">Enregistrer/.test(empty))
+  const nouveau = ed(null)
+  ok('boosters : nouveau booster : « Créer le booster », 5 cartes à 100 % de la rareté la plus répandue, ni copie, ni suppression, ni don', />Créer le booster</.test(nouveau) && (nouveau.match(/<legend>Carte \d<\/legend>/g) || []).length === 5 && !/Dupliquer|Supprimer|Offrir des boosters/.test(nouveau)
+    && /Nouveau booster/.test(nouveau) && (nouveau.match(/booster-pct" aria-label="chance">100 %</g) || []).length === 5)
+  ok('boosters : seules les raretés ordinaires et Unique sont proposées (jamais Alpha ni Omega)', (() => { const opts = [...es.matchAll(/<option value="([a-z_0-9]+)"/g)].map((m) => m[1]); return opts.includes('unique') && opts.includes('common') && !opts.includes('alpha') && !opts.includes('omega') })())
+  ok('boosters : une rareté déjà utilisée sur une carte n\'est plus proposée à l\'ajout sur cette carte', (() => { const c1 = es.split('<fieldset class="booster-card">')[1]; const add = (c1.match(/booster-add[\s\S]*?<\/select>/) || [''])[0]; return !add.includes('value="common"') && add.includes('value="rare"') })())
+  ok('boosters (mobile) : liste puis éditeur l\'un sous l\'autre, sans mise en page à deux colonnes', bn !== null && !/admin-md/.test(bn) && /class="booster-list"/.test(bn) && /<h3>Standard/.test(bn))
+  ok('boosters : sans aucun type (ancienne base), l\'onglet affiche un nouveau booster sans planter', show(M.BoostersTab, { data: { ...data, booster_types: undefined }, wide: false }) !== null)
+  const ex = M.explain
+  ok('erreurs des boosters : messages clairs', /porte déjà ce nom/.test(ex(new Error('duplicate_booster_name'))) && /au moins une rareté/.test(ex(new Error('invalid_booster_slots'))) && /Standard ne peut pas/.test(ex(new Error('booster_is_standard')))
+    && /désactive-le/.test(ex(new Error('booster_has_holders'))) && /pas en vente/.test(ex(new Error('not_for_sale'))) && /pas assez de pièces/.test(ex(new Error('not_enough_coins'))) && /1 à 10 cartes/.test(ex(new Error('invalid_booster'))))
 }
 
 if (bad) { console.error(`\n${bad} contrôle(s) en échec`); process.exit(1) }

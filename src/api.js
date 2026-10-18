@@ -13,10 +13,13 @@ async function rpc(fn, args) {
 
 export const getStatus = () => rpc('status')
 export const openBooster = () => rpc('open_booster')
+// Boosters paramétrables : ouvrir un booster d'un autre type que le Standard (stock du joueur), en acheter avec des pièces
+export const openBoosterType = (typeId) => rpc('open_booster_of_type', { p_type: typeId })
+export const buyBooster = (typeId, quantity = 1) => rpc('buy_booster', { p_type: typeId, p_quantity: quantity })
 export const openGoldenPack = () => rpc('open_golden_pack')
 export const ackRewards = () => rpc('ack_rewards')
 export const getStats = (category = null) => rpc('my_stats', { p_category: category })
-export const getOdds = (category = null) => rpc('draw_odds', { p_category: category })
+export const getOdds = (category = null, boosterType = null) => rpc('draw_odds', { p_category: category, p_booster_type: boosterType })
 export const typeState = (type, series) => rpc('type_state', { p_type: type, p_series: series })
 export const setUsername = (name) => rpc('set_username', { p_username: name })
 export const listCollection = ({ category = null, type = null, rarity = null, sort = 'series', limit = 60, offset = 0 } = {}) =>
@@ -138,9 +141,12 @@ export const adminSaveRarity = (pw, r) =>
     p_password: pw, p_id: r.id, p_name: r.name, p_max_series: r.max_series === null || r.max_series === '' ? null : Number(r.max_series),
     p_color: r.color, p_color2: r.color2, p_text_color: r.text_color,
   })
-// Poids de tirage d'une rareté : cartes 1 à 3, carte 4, carte 5 (0 = jamais tirée à cet emplacement)
-export const adminSetRarityWeights = (pw, id, w13, w4, w5) =>
-  rpc('admin_set_rarity_weights', { p_password: pw, p_id: id, p_w13: Number(w13), p_w4: Number(w4), p_w5: Number(w5) })
+// Types de boosters (admin) : créer ou modifier (id nul = création), supprimer, offrir (pseudo vide = tous les joueurs)
+export const adminSaveBoosterType = (pw, id, b) =>
+  rpc('admin_save_booster_type', { p_password: pw, p_id: id, p_name: b.name, p_cards: b.cards, p_color: b.color, p_price: b.price, p_enabled: b.enabled, p_slots: b.slots })
+export const adminDeleteBoosterType = (pw, id) => rpc('admin_delete_booster_type', { p_password: pw, p_id: id })
+export const adminGrantBoosters = (pw, typeId, quantity, username = null) =>
+  rpc('admin_grant_boosters', { p_password: pw, p_type: typeId, p_quantity: quantity, p_username: username })
 export const adminCreateRarity = (pw, r) =>
   rpc('admin_create_rarity', {
     p_password: pw, p_id: r.id, p_name: r.name, p_max_series: Number(r.max_series),
@@ -215,7 +221,15 @@ export function explain(e) {
   if (m.includes('has_bids')) return 'Des offres ont été faites : l’annonce ne peut plus être retirée.'
   if (m.includes('listing_unavailable')) return 'Cette annonce n’est plus disponible.'
   if (m.includes('invalid_price')) return 'Prix invalide : entre un nombre entier de pièces, minimum 1.'
-  if (m.includes('invalid_weight')) return 'Poids invalides : un nombre positif ou nul.'
+  if (m.includes('duplicate_booster_name')) return 'Un booster porte déjà ce nom.'
+  if (m.includes('invalid_booster_slots')) return 'Répartition invalide : chaque carte a au moins une rareté, avec un poids positif, sans doublon.'
+  if (m.includes('invalid_booster')) return 'Booster invalide : nom de 1 à 40 caractères, 1 à 10 cartes, couleur, prix entier ou vide.'
+  if (m.includes('booster_is_standard')) return 'Le booster Standard ne peut pas être supprimé.'
+  if (m.includes('booster_has_holders')) return 'Des joueurs possèdent encore ce booster : désactive-le plutôt que de le supprimer.'
+  if (m.includes('not_for_sale')) return 'Ce booster n’est pas en vente.'
+  if (m.includes('unknown_booster')) return 'Ce booster n’existe pas ou n’est plus disponible.'
+  if (m.includes('not_enough_coins')) return 'Tu n’as pas assez de pièces.'
+  if (m.includes('invalid_quantity')) return 'Quantité invalide.'
   if (m.includes('invalid_type_rarities')) return 'Raretés du type invalides : une même rareté une seule fois, séries entre 0 et 5000 (au moins une rareté avec des séries), « numérotées » au plus égal au nombre de séries, style Simple ou FullArt.'
   if (m.includes('id_taken')) return 'Cet identifiant de rareté existe déjà.'
   if (m.includes('invalid_id')) return 'Identifiant invalide : minuscules, chiffres et _ uniquement, 2 à 20 caractères, débute par une lettre.'

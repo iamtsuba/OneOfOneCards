@@ -38,8 +38,10 @@ const slot_mix = {
   uncommon: [{ id: 'peu_commune', p: 0.9996 }, { id: 'unique', p: 0.0002 }, { id: 'alpha', p: 0.0001 }, { id: 'omega', p: 0.0001 }],
   premium: [{ id: 'rare', p: 0.55 }, { id: 'super', p: 0.29 }, { id: 'peu_commune', p: 0.0998 }, { id: 'ultra', p: 0.05 }, { id: 'artrare', p: 0.008 }, { id: 'unique', p: 0.002 }],
 }
-const data = { category_id: 1, exponent: 0, cards_per_booster: 5, pool_left: 11876561, slots: { common: 3, uncommon: 1, premium: 1 }, slot_mix, by_rarity,
-  golden: { chance: 0.00000001, unique_chance: 0.005, contents: [{ rarity_id: 'alpha', quantity: 1 }] } }
+// serveur récent : une répartition par carte du booster
+const positions = [1, 2, 3].map((n) => ({ n, mix: slot_mix.common })).concat([{ n: 4, mix: slot_mix.uncommon }, { n: 5, mix: slot_mix.premium }])
+const golden = { chance: 0.00000001, unique_chance: 0.005, contents: [{ rarity_id: 'alpha', quantity: 1 }] }
+const data = { category_id: 1, exponent: 0, cards_per_booster: 5, pool_left: 11876561, booster: { id: 1, name: 'Standard', cards: 5, is_standard: true }, positions, by_rarity, golden }
 const render = (d, props = {}) => renderToStaticMarkup(React.createElement(OddsBody, { data: d, category: { name: 'Chat’trapez les tous !' }, rarityMap, ...props }))
 const html = render(data)
 const lines = [...((html.match(/<ul class="odds-slots"[\s\S]*?<\/ul>/) || [''])[0]).matchAll(/<li><strong>([^<]*)<\/strong><span>([^<]*)<\/span><\/li>/g)].map((m) => [m[1], m[2]])
@@ -58,11 +60,14 @@ const detail = render(data, { initialInfo: true })
 ok('détail (bouton « i ») : parts par rareté avec stock, règle, booster doré', /role="dialog"[^>]*aria-label="Chances de tirage"/.test(detail) && /restantes sur/.test(detail) && (detail.match(/class="odds-name"/g) || []).length === 9 && /chaque carte restante a la même chance/.test(detail) && /Booster doré : 0,000001 % par booster, il contient 1 Alpha/.test(detail))
 ok('détail : pas de booster doré annoncé quand il est désactivé', !/Booster doré/.test(render({ ...data, golden: { chance: 0, unique_chance: 0, contents: [] } }, { initialInfo: true })))
 ok('exposant différent de 0 : la mention des petites séries (dans le détail)', /petites séries ont moins de chances/.test(render({ ...data, exponent: 1 }, { initialInfo: true })))
-const four = render({ ...data, cards_per_booster: 4, slots: { common: 3, uncommon: 0, premium: 1 }, slot_mix: { common: slot_mix.common, premium: slot_mix.premium } })
-ok('sans carte 4 de type « Peu Commune » : 4 cartes, la dernière suit les chances Premium', (four.match(/<li><strong>Carte/g) || []).length === 4 && /<strong>Carte 4<\/strong><span>Rare 55 %/.test(four))
-ok('une carte sans rareté possible : tirée au hasard parmi les cartes restantes', /<strong>Carte 4<\/strong><span>au hasard parmi les cartes restantes/.test(render({ ...data, slot_mix: { common: slot_mix.common, premium: slot_mix.premium } })))
-ok('serveur de la version précédente (slot_options sans slot_mix) : les lignes restent affichées', (() => { const { slot_mix: _m, ...old } = data; const h = render({ ...old, slot_options: { common: [{ id: 'common', p: 1 }], uncommon: [{ id: 'peu_commune', p: 1 }], premium: [{ id: 'rare', p: 0.6 }, { id: 'super', p: 0.4 }] } }); return /<strong>Carte 1<\/strong><span>Commune 100 %/.test(h) && /<strong>Carte 5<\/strong><span>Rare 60 % · Super Rare 40 %/.test(h) })())
-ok('tout premier serveur (sans emplacements) : pas de lignes, pas de plantage', (() => { const { slots: _s, slot_mix: _m, ...old } = data; const h = render(old); return !/odds-slots/.test(h) && /cartes encore disponibles/.test(h) })())
+const four = render({ ...data, cards_per_booster: 4, positions: [1, 2, 3].map((n) => ({ n, mix: slot_mix.common })).concat([{ n: 4, mix: slot_mix.premium }]) })
+ok('booster à 4 cartes : 4 lignes, la dernière suit sa propre répartition', (four.match(/<li><strong>Carte/g) || []).length === 4 && /<strong>Carte 4<\/strong><span>Rare 55 %/.test(four) && !/Carte 5/.test(four))
+ok('un booster de 10 cartes : 10 lignes', (render({ ...data, cards_per_booster: 10, positions: Array.from({ length: 10 }, (_, i) => ({ n: i + 1, mix: slot_mix.common })) }).match(/<li><strong>Carte/g) || []).length === 10)
+ok('une carte sans rareté possible : tirée au hasard parmi les cartes restantes', /<strong>Carte 4<\/strong><span>au hasard parmi les cartes restantes/.test(render({ ...data, positions: data.positions.map((p) => (p.n === 4 ? { n: 4, mix: [] } : p)) })))
+ok('chances d\'un autre booster (Silver) : la fenêtre « compact » n\'affiche que les lignes par carte', (() => { const h = render({ ...data, booster: { id: 2, name: 'Silver', cards: 5, is_standard: false }, golden: null }, { compact: true }); return /<strong>Carte 5<\/strong>/.test(h) && !/cartes encore disponibles/.test(h) && !/info-btn/.test(h) && !/Booster doré/.test(render({ ...data, golden: null }, { initialInfo: true })) })())
+ok('serveur de la version précédente (slot_mix par type d\'emplacement) : les lignes restent affichées', (() => { const { positions: _p, ...old } = data; const h = render({ ...old, slots: { common: 3, uncommon: 1, premium: 1 }, slot_mix }); return (h.match(/<li><strong>Carte/g) || []).length === 5 && /<strong>Carte 1<\/strong><span>Commune 100 %/.test(h) && /<strong>Carte 5<\/strong><span>Rare 55 %/.test(h) })())
+ok('serveur de deux versions avant (slot_options seulement) : les lignes restent affichées', (() => { const { positions: _p, ...old } = data; const h = render({ ...old, slots: { common: 3, uncommon: 1, premium: 1 }, slot_options: { common: [{ id: 'common', p: 1 }], uncommon: [{ id: 'peu_commune', p: 1 }], premium: [{ id: 'rare', p: 0.6 }, { id: 'super', p: 0.4 }] } }); return /<strong>Carte 1<\/strong><span>Commune 100 %/.test(h) && /<strong>Carte 5<\/strong><span>Rare 60 % · Super Rare 40 %/.test(h) })())
+ok('tout premier serveur (sans emplacements ni positions) : pas de lignes, pas de plantage', (() => { const { positions: _p, ...old } = data; const h = render(old); return !/odds-slots/.test(h) && /cartes encore disponibles/.test(h) })())
 ok('aucune donnée parasite (undefined, NaN)', !/undefined|NaN|null/.test(html + detail))
 
 if (bad) { console.error(`\n${bad} ÉCHEC(S)`); process.exit(1) }

@@ -14,7 +14,7 @@
     "test:sql": "bash tests/run-sql.sh",
     "test:functions": "node tests/functions.test.mjs",
     "test:front": "node tests/front.test.mjs",
-    "test": "npm run build:all && npm run test:build && npm run test:seo && npm run test:front && npm run test:import && npm run test:bands && npm run test:albumlogic && npm run test:album && npm run test:cardpack && npm run test:css && npm run test:odds && npm run test:friends && npm run test:gold && npm run test:admin && npm run test:functions && npm run test:sql",
+    "test": "npm run build:all && npm run test:build && npm run test:seo && npm run test:front && npm run test:import && npm run test:bands && npm run test:albumlogic && npm run test:album && npm run test:cardpack && npm run test:css && npm run test:odds && npm run test:friends && npm run test:gold && npm run test:extra && npm run test:boosterlogic && npm run test:admin && npm run test:functions && npm run test:sql",
     "test:build": "node tests/build.test.mjs",
     "test:seo": "node tests/seo.test.mjs",
     "test:import": "node tests/import-types.test.mjs",
@@ -26,7 +26,9 @@
     "test:css": "node tests/css.test.mjs",
     "test:odds": "node tests/odds-view.test.mjs",
     "test:friends": "node tests/friends-view.test.mjs",
-    "test:gold": "node tests/gold-view.test.mjs"
+    "test:gold": "node tests/gold-view.test.mjs",
+    "test:extra": "node tests/extra-boosters.test.mjs",
+    "test:boosterlogic": "node tests/booster-logic.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

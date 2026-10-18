@@ -41,7 +41,13 @@ do $$ declare bad text; begin
 end $$;
 select 'les 600 boosters ont tiré exactement 3 000 cartes', (select count(*) from public.{{P}}cards) = 3000 as ok;
 -- composition d'un booster : les chances du serveur annoncent 3 Communes, 1 Peu commune, 1 Premium
-select 'composition annoncée', public.{{P}}draw_odds()->'slots' as emplacements, jsonb_array_length(public.{{P}}draw_odds()->'premium') as paliers_premium;
+select 'composition annoncée : une répartition par carte du booster Standard', jsonb_array_length(public.{{P}}draw_odds()->'positions') as cartes, public.{{P}}draw_odds()->'booster'->>'name' as booster;
+do $$ begin
+  if jsonb_array_length(public.{{P}}draw_odds()->'positions') <> (public.{{P}}draw_odds()->>'cards_per_booster')::int then raise exception 'ATTENDU : une répartition par carte du booster'; end if;
+  if (select count(*) from jsonb_array_elements(public.{{P}}draw_odds()->'positions') p where abs((select sum((o->>'p')::float) from jsonb_array_elements(p->'mix') o) - 1) > 0.000001) > 0 then
+    raise exception 'ATTENDU : la somme des chances de chaque carte vaut 1';
+  end if;
+end $$;
 
 \echo '=== 3. après les tirages : le pool restant et les chances évoluent'
 select r->>'id' as rarete, r->>'remaining' as restantes, round((r->>'share')::numeric * 100, 4) as pct_par_carte

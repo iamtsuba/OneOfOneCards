@@ -16,24 +16,25 @@ const SPECIAL = ['unique', 'alpha', 'omega']
 
 // Encart concis : une ligne par carte du booster avec la chance de chaque rareté (calculée sur les cartes réellement restantes), les cartes spéciales
 // par booster, le stock. Le détail (parts par rareté, règles, booster doré) est derrière le bouton « i ». Sans appel réseau : testable seul.
-export function OddsBody({ data, category, rarityMap, initialInfo = false }) {
+export function OddsBody({ data, category, rarityMap, initialInfo = false, compact = false }) {
   const [info, setInfo] = useState(initialInfo)
   const slots = data.slots
   const name = (id) => rarityMap[id]?.name ?? id
   // chance par rareté AFFICHÉE et par type d'emplacement (serveur récent) ; sinon, par rareté de tirage (ancien serveur)
+  // chance par rareté AFFICHÉE pour chaque carte du booster (serveur récent : data.positions) ; sinon par type d'emplacement (serveurs précédents)
+  const textOf = (mix) => {
+    const shown = (mix ?? []).filter((o) => o.p >= 0.001)   // en dessous de 0,1 %, la rareté est dans la ligne « cartes spéciales »
+    return shown.length ? shown.map((o) => `${name(o.id)} ${fmtOdds(o.p)}`).join(' · ') : 'au hasard parmi les cartes restantes'
+  }
   const mixOf = (cls) => data.slot_mix?.[cls] ?? data.slot_options?.[cls] ?? []
-
-  // une ligne par carte, dans l'ordre du tirage : cartes 1 à 3, carte 4, carte 5
-  const positions = []
-  if (slots) {
+  let lines = []
+  if (data.positions) {
+    lines = data.positions.map((p) => ({ n: p.n, text: textOf(p.mix) }))
+  } else if (slots) {
     for (const [cls, n] of [['common', slots.common], ['uncommon', slots.uncommon], ['premium', slots.premium]]) {
-      for (let i = 0; i < n; i++) positions.push(cls)
+      for (let i = 0; i < n; i++) lines.push({ n: lines.length + 1, text: textOf(mixOf(cls)) })
     }
   }
-  const lines = positions.map((cls, i) => {
-    const shown = mixOf(cls).filter((o) => o.p >= 0.001)   // en dessous de 0,1 %, la rareté est dans la ligne « cartes spéciales »
-    return { n: i + 1, text: shown.length ? shown.map((o) => `${name(o.id)} ${fmtOdds(o.p)}`).join(' · ') : 'au hasard parmi les cartes restantes' }
-  })
 
   // cartes spéciales : chance d'en avoir au moins une dans un booster
   const specials = data.by_rarity.filter((r) => SPECIAL.includes(rarityMap[r.id]?.kind) && r.remaining > 0 && r.per_booster > 0)
@@ -53,11 +54,13 @@ export function OddsBody({ data, category, rarityMap, initialInfo = false }) {
           <strong>Par booster</strong> : {specials.map((r) => `${name(r.id)} ${fmtOdds(r.per_booster)}`).join(' · ')}
         </p>
       )}
-      <p className="odds-foot muted">
-        {fmt(data.pool_left)} cartes encore disponibles
-        <InfoButton onClick={() => setInfo(true)} label="Détail des chances de tirage" />
-      </p>
-      {info && (
+      {!compact && (
+        <p className="odds-foot muted">
+          {fmt(data.pool_left)} cartes encore disponibles
+          <InfoButton onClick={() => setInfo(true)} label="Détail des chances de tirage" />
+        </p>
+      )}
+      {info && !compact && (
         <InfoSheet title="Chances de tirage" onClose={() => setInfo(false)}>
           <p>Chances calculées sur les cartes encore disponibles de « {category.name} » : elles évoluent à mesure que les cartes sont tirées. Les Alpha, Omega et Unique sont des cartes spéciales tirées dans les mêmes emplacements que leur rareté d’origine.</p>
           <ul className="odds-list">
@@ -109,5 +112,23 @@ export default function Odds({ category }) {
       {open && !data && !error && <p className="muted">Chargement…</p>}
       {data && <OddsBody data={data} category={category} rarityMap={rarityMap} />}
     </details>
+  )
+}
+
+// Chances d'un type de booster (hors Standard) dans la catégorie en cours, dans une fenêtre
+export function BoosterOddsSheet({ category, boosterType, rarityMap, onClose }) {
+  const [data, setData] = useState(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let cancelled = false
+    api.getOdds(category.id, boosterType.id).then((d) => !cancelled && setData(d)).catch((e) => !cancelled && setError(explain(e)))
+    return () => { cancelled = true }
+  }, [category.id, boosterType.id])
+  return (
+    <InfoSheet title={`Chances : ${boosterType.name}`} onClose={onClose}>
+      {error && <p className="msg error" role="alert">{error}</p>}
+      {!data && !error && <p className="muted">Chargement…</p>}
+      {data && <OddsBody data={data} category={category} rarityMap={rarityMap} compact />}
+    </InfoSheet>
   )
 }

@@ -777,3 +777,43 @@ ul.odds-slots li span { color: var(--ink-soft); }
 /* Chances de tirage concises */
 .odds-special { margin: 4px 0 0; }
 .odds-foot { margin: 8px 0 0; font-size: 13px; }
+
+/* Console admin : boosters paramétrables */
+.booster-list { display: grid; gap: 8px; }
+.booster-list .md-items { overflow: visible; }
+.booster-editor { display: grid; gap: 12px; }
+.booster-editor h3 { margin: 0; }
+.booster-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; align-items: end; }
+.booster-fields label { display: grid; gap: 4px; font-size: 12px; font-weight: 600; }
+.booster-fields input[type="color"] { width: 100%; height: 38px; padding: 2px; }
+.booster-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; }
+.booster-card { display: grid; gap: 6px; margin: 0; padding: 8px 10px 10px; border: 1.5px solid var(--line); border-radius: 12px; align-content: start; }
+.booster-card legend { padding: 0 6px; font-size: 13px; font-weight: 700; }
+.booster-row { display: grid; grid-template-columns: minmax(0, 1fr) 76px 58px 34px; gap: 6px; align-items: center; }
+.booster-row select, .booster-row input { min-width: 0; }
+.booster-pct { text-align: right; font-weight: 700; font-size: 13px; white-space: nowrap; }
+.booster-add { color: var(--ink-soft); }
+.booster-grant { display: grid; gap: 8px; margin: 0; padding: 10px 12px; border: 1.5px dashed var(--line); border-radius: 12px; }
+.booster-grant legend { padding: 0 6px; font-size: 13px; font-weight: 700; }
+.btn.danger { color: #b42318; border-color: #f0b4ae; }
+
+/* Boosters hors Standard (page Boosters) */
+.extra-boosters { display: grid; gap: 8px; width: 100%; }
+.extra-boosters h3 { margin: 0; font-size: 16px; }
+.extra-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.extra-list > li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1.5px solid var(--line); border-left: 6px solid var(--bt, #e8452e); border-radius: 14px; background: var(--surface); }
+.extra-dot { display: none; }
+.extra-text { display: grid; min-width: 0; flex: 1; }
+.extra-text small { color: var(--ink-soft); }
+.extra-actions { display: inline-flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; align-items: center; }
+
+.extra-list > li { flex-wrap: wrap; text-align: left; row-gap: 8px; }
+.extra-text { flex: 1 1 150px; text-align: left; }
+.extra-actions { flex: 0 1 auto; margin-left: auto; }
+
+/* Éditeur de boosters : la rareté sur sa propre ligne sur téléphone, case à cocher alignée avec son texte */
+.booster-fields label.check { display: flex; align-items: center; gap: 8px; }
+@media (max-width: 560px) {
+  .booster-row { grid-template-columns: minmax(0, 1fr) 58px 34px; }
+  .booster-row select { grid-column: 1 / -1; }
+}

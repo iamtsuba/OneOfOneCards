@@ -18,9 +18,6 @@ create table if not exists public.pp_o1ocards_config (
 );
 
 insert into public.pp_o1ocards_config (key, value, description) values
-  ('cards_per_booster',      5,    'Nombre de cartes par booster'),
-  ('booster_common_slots',   3,    'Composition d''un booster : nombre de premières cartes tirées avec les poids « cartes 1 à 3 » (en principe les Communes)'),
-  ('booster_uncommon_slots', 1,    'Composition d''un booster : nombre de cartes de la 2e catégorie (4e carte, juste après les premières). Les cartes suivantes sont tirées selon les poids de la 5e carte. Les poids de chaque rareté se règlent dans l''onglet Raretés'),
   ('gold_reward_weight_numbered', 1, 'Booster Gold (carte complétée dans l''album) : poids d''une carte à numéro visible du type complété pour la 5e carte'),
   ('gold_reward_weight_artrare',   1, 'Booster Gold : poids d''une carte Art Rare pour la 5e carte'),
   ('gold_reward_weight_alpha',     1, 'Booster Gold : poids d''une carte Alpha pour la 5e carte'),
@@ -1044,6 +1041,12 @@ begin
     'coins',               p.coins,
     'coins_locked',        v_locked,
     'friend_requests',     (select count(*) from public.pp_o1ocards_friendships f where f.addressee_id = p.id and f.status = 'pending'),
+    'standard_booster',    (select jsonb_build_object('id', bt.id, 'name', bt.name, 'cards', bt.cards, 'color', bt.color) from public.pp_o1ocards_booster_types bt where bt.is_standard),
+    'booster_types',       (select coalesce(jsonb_agg(jsonb_build_object('id', bt.id, 'name', bt.name, 'cards', bt.cards, 'color', bt.color, 'price', bt.price_coins,
+                                                                          'quantity', coalesce(ub.quantity, 0)) order by bt.position, bt.id), '[]'::jsonb)
+                            from public.pp_o1ocards_booster_types bt
+                            left join public.pp_o1ocards_user_boosters ub on ub.booster_type_id = bt.id and ub.user_id = p.id
+                            where bt.enabled and not bt.is_standard and (bt.price_coins is not null or coalesce(ub.quantity, 0) > 0)),
     'gold_rewards',        (select coalesce(jsonb_agg(jsonb_build_object('id', g.id, 'type_id', g.type_id, 'seen', g.seen) order by g.id), '[]'::jsonb)
                             from public.pp_o1ocards_gold_rewards g where g.user_id = p.id and g.opened_at is null),
     'active_category_id',  v_cat,
@@ -1137,80 +1140,81 @@ end $$;
 -- la seule de son espèce, et elle est à toi. Quand la catégorie est épuisée, la suivante prend le relais.
 -- (jit = off : le plan de ces requêtes est jugé coûteux par PostgreSQL, qui le compilerait à chaque appel pour ~35 ms de plus)
 
--- Tirage d'un booster : poids de chaque rareté pour les premières cartes (booster_common_slots : « cartes 1 à 3 »), pour la carte suivante
--- (booster_uncommon_slots : « carte 4 ») et pour toutes les autres (« carte 5 »). Une rareté à 0 n'est jamais tirée à cet emplacement. Ces
--- poids sont réglables dans l'onglet Raretés de l'admin ; l'identifiant d'une rareté n'a aucune importance.
-alter table public.pp_o1ocards_rarities add column if not exists weight_slots_1_3 double precision not null default 0 check (weight_slots_1_3 >= 0);
-alter table public.pp_o1ocards_rarities add column if not exists weight_slot_4    double precision not null default 0 check (weight_slot_4 >= 0);
-alter table public.pp_o1ocards_rarities add column if not exists weight_slot_5    double precision not null default 0 check (weight_slot_5 >= 0);
--- Poids de départ selon le NOM de la rareté (jamais selon son identifiant) : Commune : cartes 1 à 3 ; Peu commune : carte 4 et 10 sur la carte 5 ;
--- Rare 55, Super Rare 29, Ultra Rare 5, Art Rare 0,8, Unique 0,2 sur la carte 5 (total 100) ; toute autre rareté ordinaire 0,5. N'agit que tant
--- qu'AUCUN poids n'est réglé. Seule exception : les poids de départ de la toute première version (Peu commune 50, Rare 35, Super Rare 11, Ultra Rare 3)
--- sont remplacés par les nouveaux, mais uniquement si ces quatre raretés ont encore EXACTEMENT ces anciennes valeurs (un réglage de l'admin n'est
--- jamais écrasé).
-create or replace function public.pp_o1ocards_seed_rarity_weights()
-returns void language plpgsql security definer set search_path = public as $$
-declare v_old boolean;
-begin
-  if not exists (select 1 from public.pp_o1ocards_rarities where weight_slots_1_3 > 0 or weight_slot_4 > 0 or weight_slot_5 > 0) then
-    update public.pp_o1ocards_rarities r set
-      weight_slots_1_3 = case when n.k = 'commune' then 1 else 0 end,
-      weight_slot_4    = case when n.k = 'peu commune' then 1 else 0 end,
-      weight_slot_5    = case
-        when r.kind = 'unique' then 0.2
-        when r.kind <> 'range' then 0
-        when n.k = 'commune' then 0
-        when n.k = 'peu commune' then 10
-        when n.k = 'rare' then 55
-        when n.k = 'super rare' then 29
-        when n.k = 'ultra rare' then 5
-        when n.k in ('art rare', 'full art', 'fullart') then 0.8
-        else 0.5 end
-    from (select id, regexp_replace(lower(translate(trim(name), 'éèêëàâîïôöùûüç', 'eeeeaaiioouuuc')), '\s+', ' ', 'g') as k from public.pp_o1ocards_rarities) n
-    where n.id = r.id;
-  end if;
+-- =====================================================================================================================
+-- BOOSTERS PARAMÉTRABLES : des types de boosters (Standard, Silver, Gold, Légende…) créés dans l'admin. Chaque type a un nombre de cartes, une couleur, un prix
+-- en pièces facultatif et, POUR CHAQUE CARTE, la répartition des raretés (poids : 80 et 20 = 80 % et 20 %). La rareté « Unique » est une option comme les autres
+-- (ses cartes sont les 1/1). Le Standard est le booster qui se recharge tout seul ; les autres sont en stock (achat en pièces ou don de l'admin).
+-- Un booster ne contient jamais deux cartes de la MÊME rareté qui soient de la même carte (type), sauf s'il n'y en a plus d'autres.
+-- Les colonnes weight_* de rarities (ancien réglage) ne servent plus.
+-- =====================================================================================================================
+create table if not exists public.pp_o1ocards_booster_types (
+  id          int generated always as identity primary key,
+  name        text not null check (char_length(trim(name)) between 1 and 40),
+  cards       int not null default 5 check (cards between 1 and 10),
+  color       text not null default '#e8452e' check (color ~ '^#[0-9a-fA-F]{6}$'),
+  price_coins int check (price_coins is null or price_coins >= 0),   -- null : pas en vente
+  enabled     boolean not null default true,
+  is_standard boolean not null default false,
+  position    int not null default 0,
+  created_at  timestamptz not null default now()
+);
+create unique index if not exists pp_o1ocards_booster_types_name_uq on public.pp_o1ocards_booster_types (lower(trim(name)));
+create unique index if not exists pp_o1ocards_booster_types_standard_uq on public.pp_o1ocards_booster_types (is_standard) where is_standard;
+create table if not exists public.pp_o1ocards_booster_type_slots (
+  booster_type_id int not null references public.pp_o1ocards_booster_types (id) on delete cascade,
+  position        int not null check (position >= 1),
+  rarity_id       text not null references public.pp_o1ocards_rarities (id) on delete cascade,
+  weight          double precision not null check (weight > 0),
+  primary key (booster_type_id, position, rarity_id)
+);
+create table if not exists public.pp_o1ocards_user_boosters (
+  user_id         uuid not null references public.pp_o1ocards_profiles (id) on delete cascade,
+  booster_type_id int not null references public.pp_o1ocards_booster_types (id) on delete cascade,
+  quantity        int not null default 0 check (quantity >= 0),
+  primary key (user_id, booster_type_id)
+);
+alter table public.pp_o1ocards_booster_types enable row level security;
+alter table public.pp_o1ocards_booster_type_slots enable row level security;
+alter table public.pp_o1ocards_user_boosters enable row level security;
+revoke all on public.pp_o1ocards_booster_types, public.pp_o1ocards_booster_type_slots, public.pp_o1ocards_user_boosters from anon, authenticated;
 
-  -- anciens poids de départ (50 / 35 / 11 / 3) jamais modifiés : on passe aux nouveaux (10 / 55 / 29 / 5)
-  select bool_and(
-           (n.k = 'peu commune' and r.weight_slots_1_3 = 0 and r.weight_slot_4 = 1 and r.weight_slot_5 = 50)
-        or (n.k = 'rare'        and r.weight_slots_1_3 = 0 and r.weight_slot_4 = 0 and r.weight_slot_5 = 35)
-        or (n.k = 'super rare'  and r.weight_slots_1_3 = 0 and r.weight_slot_4 = 0 and r.weight_slot_5 = 11)
-        or (n.k = 'ultra rare'  and r.weight_slots_1_3 = 0 and r.weight_slot_4 = 0 and r.weight_slot_5 = 3))
-    into v_old
-  from public.pp_o1ocards_rarities r
-  join (select id, regexp_replace(lower(translate(trim(name), 'éèêëàâîïôöùûüç', 'eeeeaaiioouuuc')), '\s+', ' ', 'g') as k from public.pp_o1ocards_rarities) n on n.id = r.id
-  where r.kind = 'range' and n.k in ('peu commune', 'rare', 'super rare', 'ultra rare');
-  if coalesce(v_old, false) then
-    update public.pp_o1ocards_rarities r set weight_slot_5 = case n.k when 'peu commune' then 10 when 'rare' then 55 when 'super rare' then 29 when 'ultra rare' then 5 end
-    from (select id, regexp_replace(lower(translate(trim(name), 'éèêëàâîïôöùûüç', 'eeeeaaiioouuuc')), '\s+', ' ', 'g') as k from public.pp_o1ocards_rarities) n
-    where n.id = r.id and r.kind = 'range' and n.k in ('peu commune', 'rare', 'super rare', 'ultra rare');
+-- Les anciens mécanismes (poids par rareté, nombre de cartes en réglage) disparaissent au profit des types de boosters
+drop function if exists public.pp_o1ocards_seed_rarity_weights();
+drop function if exists public.pp_o1ocards_admin_set_rarity_weights(text, text, double precision, double precision, double precision);
+drop function if exists public.pp_o1ocards_slot_class(int);
+drop function if exists public.pp_o1ocards_pick_series(int, text, double precision, int[]);
+drop function if exists public.pp_o1ocards_pick_series(int, text, double precision);
+drop function if exists public.pp_o1ocards_draw_odds(int);
+delete from public.pp_o1ocards_config where key in ('cards_per_booster', 'booster_common_slots', 'booster_uncommon_slots') or key like 'premium_weight_%';
+
+-- Booster Standard de départ (une seule fois, tant qu'aucun type n'existe) : les raretés sont reconnues par leur NOM, jamais par leur identifiant.
+--  Carte 1 : Commune 100 % ; carte 2 : Commune 100 % ; carte 3 : Commune 80 %, Peu Commune 20 % ; carte 4 : Peu Commune 80 %, Rare 20 % ;
+--  carte 5 : Rare 60 %, Super Rare 30 %, Ultra Rare 9 %, Art Rare 0,8 %, Unique 0,2 %. Une rareté qui n'existe pas est ignorée (les autres se répartissent).
+create or replace function public.pp_o1ocards_seed_standard_booster()
+returns void language plpgsql security definer set search_path = public as $$
+declare v_id int; v_fallback text; n int;
+begin
+  if exists (select 1 from public.pp_o1ocards_booster_types) then return; end if;
+  insert into public.pp_o1ocards_booster_types (name, cards, is_standard, position) values ('Standard', 5, true, 1) returning id into v_id;
+  insert into public.pp_o1ocards_booster_type_slots (booster_type_id, position, rarity_id, weight)
+  select v_id, d.pos, r.id, d.w
+  from (values (1, 'commune', 100.0), (2, 'commune', 100.0), (3, 'commune', 80.0), (3, 'peu commune', 20.0), (4, 'peu commune', 80.0), (4, 'rare', 20.0),
+               (5, 'rare', 60.0), (5, 'super rare', 30.0), (5, 'ultra rare', 9.0), (5, 'art rare', 0.8), (5, 'unique', 0.2)) d(pos, k, w)
+  join (select id, case when kind = 'unique' then 'unique'
+                        else regexp_replace(lower(translate(trim(name), 'éèêëàâîïôöùûüç', 'eeeeaaiioouuuc')), '\s+', ' ', 'g') end as k
+        from public.pp_o1ocards_rarities where kind in ('range', 'unique')) r on r.k = d.k;
+  -- une carte sans aucune rareté connue (base sans les raretés habituelles) : la rareté ordinaire la plus répandue
+  select id into v_fallback from public.pp_o1ocards_rarities where kind = 'range' order by sort_order desc limit 1;
+  if v_fallback is not null then
+    for n in 1 .. 5 loop
+      if not exists (select 1 from public.pp_o1ocards_booster_type_slots where booster_type_id = v_id and position = n) then
+        insert into public.pp_o1ocards_booster_type_slots (booster_type_id, position, rarity_id, weight) values (v_id, n, v_fallback, 100);
+      end if;
+    end loop;
   end if;
 end $$;
-revoke all on function public.pp_o1ocards_seed_rarity_weights() from public, anon, authenticated;
-select public.pp_o1ocards_seed_rarity_weights();
-delete from public.pp_o1ocards_config where key like 'premium_weight_%';
-
--- ---------- Composition d'un booster : emplacements et poids par rareté ----------
--- Un booster est tiré carte après carte, dans l'ordre : les booster_common_slots premières cartes suivent les poids « cartes 1 à 3 » des raretés
--- (les Communes), les booster_uncommon_slots suivantes les poids « carte 4 » (les Peu communes), toutes les autres les poids « carte 5 ».
--- Pour chaque carte, on tire d'abord une RARETÉ selon ces poids, parmi celles qui ont encore des cartes dans la catégorie, puis une carte au hasard
--- parmi les cartes restantes de cette rareté (poids d'une série = cartes restantes x taille^exposant). La rareté « Unique » est une option comme les
--- autres : ses cartes sont les 1/1 (série 1), qui ne sortent donc que par ce poids (ou par le repli). Si aucune rareté n'est possible à un
--- emplacement, la carte est tirée parmi toutes les cartes encore disponibles.
-drop function if exists public.pp_o1ocards_booster_tier(text, text);
-drop function if exists public.pp_o1ocards_premium_weight(text);
-drop function if exists public.pp_o1ocards_series_pool(int, double precision);
-drop function if exists public.pp_o1ocards_pick_series(int, text, double precision);
-
--- Type d'emplacement de la carte numéro p_slot (1, 2, 3…) d'un booster : common, uncommon ou premium
-create or replace function public.pp_o1ocards_slot_class(p_slot int)
-returns text language sql stable set search_path = public as $$
-  select case
-    when p_slot <= coalesce(public.pp_o1ocards_cfg('booster_common_slots'), 3)::int then 'common'
-    when p_slot <= coalesce(public.pp_o1ocards_cfg('booster_common_slots'), 3)::int + coalesce(public.pp_o1ocards_cfg('booster_uncommon_slots'), 1)::int then 'uncommon'
-    else 'premium'
-  end
-$$;
+revoke all on function public.pp_o1ocards_seed_standard_booster() from public, anon, authenticated;
+select public.pp_o1ocards_seed_standard_booster();
 
 -- Toutes les séries d'une catégorie qui ont encore des cartes : (type, rareté de base, série), cartes restantes et poids de tirage
 create or replace function public.pp_o1ocards_series_pool(p_cat int, p_e double precision)
@@ -1225,26 +1229,28 @@ language sql stable security definer set search_path = public as $$
   where ty.category_id = p_cat and g > coalesce(t.taken, 0)
 $$;
 
--- Tire une série (type, rareté de base, numéro de série) pour un emplacement : p_class = common, uncommon, premium ou any (toutes les cartes).
--- Ne renvoie aucune ligne si l'emplacement n'a plus de carte.
--- p_exclude : cartes (types) à ne pas tirer ; sert aux Communes d'un booster, qui doivent être des cartes différentes
-create or replace function public.pp_o1ocards_pick_series(p_cat int, p_class text, p_e double precision, p_exclude int[] default '{}')
+-- Tire une série (type, rareté de base, numéro de série) pour la carte numéro p_pos du booster p_btype ; p_btype nul = toutes les cartes restantes.
+-- p_seen = les cartes déjà tirées dans ce booster par rareté ({"rare": [3, 8]}) : elles sont écartées pour les cartes de la même rareté.
+-- Ne renvoie aucune ligne s'il n'y a plus de carte possible.
+create or replace function public.pp_o1ocards_pick_series(p_cat int, p_btype int, p_pos int, p_e double precision, p_seen jsonb default '{}'::jsonb)
 returns table (type_id int, base text, g int)
 language plpgsql volatile security definer set search_path = public set jit = off as $$
 declare v_opt text; v_uid text;
 begin
   select id into v_uid from public.pp_o1ocards_rarities where kind = 'unique' limit 1;
-  if p_class <> 'any' then
-    with sp as materialized (select * from public.pp_o1ocards_series_pool(p_cat, p_e) x where x.type_id <> all (coalesce(p_exclude, '{}'))),
+  if p_btype is not null then
+    with sp as materialized (
+      select x.* from public.pp_o1ocards_series_pool(p_cat, p_e) x
+      where not (coalesce(p_seen -> (case when x.g = 1 then v_uid else x.base end), '[]'::jsonb) @> to_jsonb(x.type_id))
+    ),
     pool as (
       select sp.base as opt, sum(sp.remaining)::bigint as rem from sp where sp.g > 1 group by sp.base
       union all
       select v_uid, count(*)::bigint from sp where sp.g = 1 and v_uid is not null
     ),
     wts as (
-      select pool.opt,
-             case p_class when 'common' then r.weight_slots_1_3 when 'uncommon' then r.weight_slot_4 else r.weight_slot_5 end as wt
-      from pool join public.pp_o1ocards_rarities r on r.id = pool.opt
+      select pool.opt, bs.weight as wt
+      from pool join public.pp_o1ocards_booster_type_slots bs on bs.booster_type_id = p_btype and bs.position = p_pos and bs.rarity_id = pool.opt
       where pool.rem > 0
     ),
     pos as (select wts.opt, wts.wt, sum(wts.wt) over (order by wts.opt) as cs from wts where wts.wt > 0),
@@ -1260,8 +1266,8 @@ begin
   with s as materialized (
     select sp.type_id, sp.base, sp.g, sp.w
     from public.pp_o1ocards_series_pool(p_cat, p_e) sp
-    where sp.type_id <> all (coalesce(p_exclude, '{}'))
-      and case when p_class = 'any' then true
+    where not (coalesce(p_seen -> (case when sp.g = 1 then v_uid else sp.base end), '[]'::jsonb) @> to_jsonb(sp.type_id))
+      and case when p_btype is null then true
                when v_opt = v_uid then sp.g = 1
                else sp.base = v_opt and sp.g > 1 end
   ),
@@ -1284,27 +1290,69 @@ begin
   perform public.pp_o1ocards_check_type_reward(p_uid, p_type);   -- la carte est peut-être maintenant complète : booster Gold
 end $$;
 
-revoke all on function public.pp_o1ocards_slot_class(int) from public, anon, authenticated;
-revoke all on function public.pp_o1ocards_series_pool(int, double precision) from public, anon, authenticated;
-revoke all on function public.pp_o1ocards_pick_series(int, text, double precision, int[]) from public, anon, authenticated;
-revoke all on function public.pp_o1ocards_auto_place_album(uuid, int, text, int, int) from public, anon, authenticated;
-
--- Réglage des poids de tirage d'une rareté (onglet Raretés de l'admin)
-create or replace function public.pp_o1ocards_admin_set_rarity_weights(p_password text, p_id text, p_w13 double precision, p_w4 double precision, p_w5 double precision)
-returns jsonb language plpgsql security definer set search_path = public as $$
-declare err text := public.pp_o1ocards_admin_guard(p_password);
+-- Tire les cartes d'un booster du type p_btype dans la catégorie p_cat. Renvoie {cards: [...], exhausted: plus aucune carte à tirer}.
+create or replace function public.pp_o1ocards_draw_booster_cards(p_uid uuid, p_cat int, p_btype int)
+returns jsonb language plpgsql security definer set search_path = public set jit = off as $$
+declare
+  n_cards   int;
+  e         double precision := coalesce(public.pp_o1ocards_cfg('rarity_exponent'), 0)::double precision;
+  v_uid     text;
+  v_seen    jsonb := '{}'::jsonb;
+  v_key     text;
+  res       jsonb := '[]'::jsonb;
+  got       int := 0;
+  tries     int := 0;
+  exhausted boolean := false;
+  tid int; m int; v_base text; avail int; k int; num int; rows int; v_new boolean;
 begin
-  if err is not null then return jsonb_build_object('error', err); end if;
-  if p_w13 is null or p_w4 is null or p_w5 is null or least(p_w13, p_w4, p_w5) < 0 or greatest(p_w13, p_w4, p_w5) > 1000000 then
-    raise exception 'invalid_weight';
-  end if;
-  update public.pp_o1ocards_rarities set weight_slots_1_3 = p_w13, weight_slot_4 = p_w4, weight_slot_5 = p_w5
-  where id = p_id and kind in ('range', 'unique');
-  if not found then raise exception 'not_found'; end if;
-  return jsonb_build_object('ok', true);
+  select bt.cards into n_cards from public.pp_o1ocards_booster_types bt where bt.id = p_btype;
+  if n_cards is null then raise exception 'unknown_booster'; end if;
+  select id into v_uid from public.pp_o1ocards_rarities where kind = 'unique' limit 1;
+
+  while got < n_cards and tries < n_cards * 25 loop
+    tries := tries + 1;
+    tid := null; v_base := null; m := null;
+    -- La carte numéro got+1 suit la répartition du booster ; une carte déjà tirée de la même rareté est écartée
+    select ps.type_id, ps.base, ps.g into tid, v_base, m from public.pp_o1ocards_pick_series(p_cat, p_btype, got + 1, e, v_seen) ps;
+    if tid is null and v_seen <> '{}'::jsonb then   -- plus assez de cartes différentes dans cette rareté : un doublon plutôt qu'un booster incomplet
+      select ps.type_id, ps.base, ps.g into tid, v_base, m from public.pp_o1ocards_pick_series(p_cat, p_btype, got + 1, e) ps;
+    end if;
+    if tid is null then   -- aucune rareté possible à cette place : n'importe quelle carte encore disponible
+      select ps.type_id, ps.base, ps.g into tid, v_base, m from public.pp_o1ocards_pick_series(p_cat, null, 0, e) ps;
+      if tid is null then exhausted := true; exit; end if;
+    end if;
+
+    select m - coalesce((select taken from public.pp_o1ocards_series_taken where type_id = tid and base_rarity = v_base and series = m), 0) into avail;
+    continue when avail <= 0;
+
+    -- Une des cartes encore disponibles de cette série de cette rareté de ce type, au hasard
+    k := floor(random() * avail)::int;
+    select x into num
+    from generate_series(1, m) x
+    where not exists (select 1 from public.pp_o1ocards_cards c where c.type_id = tid and c.base_rarity = v_base and c.series = m and c.number = x)
+    order by x offset k limit 1;
+    continue when num is null;
+
+    v_new := not public.pp_o1ocards_owns_card_rarity(p_uid, tid, public.pp_o1ocards_rarity_id(num, m, tid, v_base));
+    insert into public.pp_o1ocards_cards (type_id, base_rarity, series, number, owner_id) values (tid, v_base, m, num, p_uid)
+    on conflict (type_id, base_rarity, series, number) do nothing;
+    get diagnostics rows = row_count;
+    continue when rows = 0;               -- quelqu'un d'autre vient de la tirer : on retente
+    if v_new then perform public.pp_o1ocards_auto_place_album(p_uid, tid, v_base, m, num); end if;   -- nouvelle carte : directement dans l'album
+
+    got := got + 1;
+    v_key := coalesce(case when m = 1 then v_uid else v_base end, '');
+    v_seen := jsonb_set(v_seen, array[v_key], coalesce(v_seen -> v_key, '[]'::jsonb) || to_jsonb(tid), true);
+    res := res || jsonb_build_array(jsonb_build_object(
+      'type_id', tid, 'base_rarity', v_base, 'series', m, 'number', num, 'rarity_id', public.pp_o1ocards_rarity_id(num, m, tid, v_base), 'is_new', v_new));
+  end loop;
+  return jsonb_build_object('cards', res, 'exhausted', exhausted);
 end $$;
-revoke all on function public.pp_o1ocards_admin_set_rarity_weights(text, text, double precision, double precision, double precision) from public, anon;
-grant execute on function public.pp_o1ocards_admin_set_rarity_weights(text, text, double precision, double precision, double precision) to authenticated;
+
+revoke all on function public.pp_o1ocards_series_pool(int, double precision) from public, anon, authenticated;
+revoke all on function public.pp_o1ocards_pick_series(int, int, int, double precision, jsonb) from public, anon, authenticated;
+revoke all on function public.pp_o1ocards_auto_place_album(uuid, int, text, int, int) from public, anon, authenticated;
+revoke all on function public.pp_o1ocards_draw_booster_cards(uuid, int, int) from public, anon, authenticated;
 
 create or replace function public.pp_o1ocards_open_booster()
 returns jsonb language plpgsql security definer set search_path = public set jit = off as $$
@@ -1315,27 +1363,12 @@ declare
   was_full  boolean;
   use_bonus boolean;
   v_cat     int;
-  n_cards   int;
-  e         double precision;
-  v_class   text;
-  v_seen    int[] := '{}';   -- cartes déjà tirées parmi les Communes de ce booster
-  tid       int;
-  m         int;
-  avail     int;
-  k         int;
-  num       int;
+  v_std     int;
   got       int;
-  tries     int;
-  rows      int;
   exhausted boolean;
   res       jsonb;
+  d         jsonb;
   v_golden  boolean := false;
-  gc        record;
-  q         int;
-  t2        int;
-  d         record;
-  v_new     boolean;
-  v_base    text;
 begin
   if uid is null then raise exception 'not_authenticated'; end if;
 
@@ -1345,16 +1378,16 @@ begin
 
   v_max    := public.pp_o1ocards_cfg('max_boosters')::int;
   was_full := p.boosters >= v_max;
-  n_cards  := public.pp_o1ocards_cfg('cards_per_booster')::int;
-  e        := public.pp_o1ocards_cfg('rarity_exponent')::double precision;
+  select id into v_std from public.pp_o1ocards_booster_types where is_standard;
+  if v_std is null then raise exception 'unknown_booster'; end if;
 
   <<category_loop>>
   loop
     v_cat := public.pp_o1ocards_active_category();
     if v_cat is null then raise exception 'pool_empty'; end if;
-    got := 0; tries := 0; exhausted := false; res := '[]'::jsonb; v_golden := false;
+    got := 0; exhausted := false; res := '[]'::jsonb; v_golden := false;
 
-    -- Booster doré : chance très faible, contenu défini dans pp_o1ocards_golden_contents
+    -- Booster doré : chance très faible, contenu défini dans golden_contents
     if random() < coalesce(public.pp_o1ocards_cfg('golden_booster_chance'), 0)::double precision then
       v_golden := true;
       res := public.pp_o1ocards_draw_golden(uid, v_cat);
@@ -1362,47 +1395,12 @@ begin
       if got = 0 then v_golden := false; end if;   -- contenu doré indisponible : booster normal
     end if;
 
-    while not v_golden and got < n_cards and tries < n_cards * 25 loop
-      tries := tries + 1;
-
-      -- Emplacement de cette carte : les premières sont Communes, puis Peu communes, les suivantes Premium (voir pick_series)
-      v_class := public.pp_o1ocards_slot_class(got + 1);
-      tid := null; v_base := null; m := null;
-      -- Les Communes d'un booster sont des cartes DIFFÉRENTES : jamais de doublon ni de triplon d'une même carte
-      select ps.type_id, ps.base, ps.g into tid, v_base, m from public.pp_o1ocards_pick_series(v_cat, v_class, e, case when v_class = 'common' then v_seen else '{}'::int[] end) ps;
-      if tid is null and v_class = 'common' and cardinality(v_seen) > 0 then   -- plus assez de cartes différentes avec des Communes : un doublon plutôt qu'un booster incomplet
-        select ps.type_id, ps.base, ps.g into tid, v_base, m from public.pp_o1ocards_pick_series(v_cat, v_class, e) ps;
-      end if;
-      if tid is null then   -- plus de carte dans ce palier : on tire parmi toutes les cartes encore disponibles
-        select ps.type_id, ps.base, ps.g into tid, v_base, m from public.pp_o1ocards_pick_series(v_cat, 'any', e) ps;
-        if tid is null then exhausted := true; exit; end if;
-      end if;
-
-      select m - coalesce((select taken from public.pp_o1ocards_series_taken where type_id = tid and base_rarity = v_base and series = m), 0) into avail;
-      continue when avail <= 0;
-
-      -- Une des cartes encore disponibles de cette série de cette rareté de ce type, au hasard
-      k := floor(random() * avail)::int;
-      select x into num
-      from generate_series(1, m) x
-      where not exists (select 1 from public.pp_o1ocards_cards c where c.type_id = tid and c.base_rarity = v_base and c.series = m and c.number = x)
-      order by x
-      offset k limit 1;
-      continue when num is null;
-
-      v_new := not public.pp_o1ocards_owns_card_rarity(uid, tid, public.pp_o1ocards_rarity_id(num, m, tid, v_base));
-      insert into public.pp_o1ocards_cards (type_id, base_rarity, series, number, owner_id) values (tid, v_base, m, num, uid)
-      on conflict (type_id, base_rarity, series, number) do nothing;
-      get diagnostics rows = row_count;
-      continue when rows = 0;               -- quelqu'un d'autre vient de la tirer : on retente
-      if v_new then perform public.pp_o1ocards_auto_place_album(uid, tid, v_base, m, num); end if;   -- nouvelle carte : directement dans l'album
-
-      got := got + 1;
-      if v_class = 'common' then v_seen := array_append(v_seen, tid); end if;
-      res := res || jsonb_build_array(jsonb_build_object(
-        'type_id', tid, 'base_rarity', v_base, 'series', m, 'number', num, 'rarity_id', public.pp_o1ocards_rarity_id(num, m, tid, v_base), 'is_new', v_new
-      ));
-    end loop;
+    if not v_golden then
+      d := public.pp_o1ocards_draw_booster_cards(uid, v_cat, v_std);
+      res := d -> 'cards';
+      got := jsonb_array_length(res);
+      exhausted := (d ->> 'exhausted')::boolean;
+    end if;
 
     exit category_loop when got > 0;
     if exhausted then
@@ -1426,6 +1424,144 @@ begin
 
   return jsonb_build_object('cards', res, 'golden', v_golden, 'category_id', v_cat, 'status', public.pp_o1ocards_status_json(p));
 end $$;
+
+-- Ouvrir un booster d'un autre type que le Standard (stock du joueur : achat en pièces ou don de l'admin)
+create or replace function public.pp_o1ocards_open_booster_of_type(p_type int)
+returns jsonb language plpgsql security definer set search_path = public set jit = off as $$
+declare
+  uid uuid := auth.uid(); p public.pp_o1ocards_profiles; bt public.pp_o1ocards_booster_types; v_qty int; v_cat int; got int; exhausted boolean; res jsonb; d jsonb;
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  p := public.pp_o1ocards_sync(uid);
+  select * into bt from public.pp_o1ocards_booster_types where id = p_type and enabled and not is_standard;
+  if not found then raise exception 'unknown_booster'; end if;
+  select quantity into v_qty from public.pp_o1ocards_user_boosters where user_id = uid and booster_type_id = p_type for update;
+  if coalesce(v_qty, 0) <= 0 then raise exception 'no_boosters'; end if;
+
+  <<category_loop>>
+  loop
+    v_cat := public.pp_o1ocards_active_category();
+    if v_cat is null then raise exception 'pool_empty'; end if;
+    d := public.pp_o1ocards_draw_booster_cards(uid, v_cat, p_type);
+    res := d -> 'cards';
+    got := jsonb_array_length(res);
+    exhausted := (d ->> 'exhausted')::boolean;
+    exit category_loop when got > 0;
+    if exhausted then
+      update public.pp_o1ocards_categories set closed = true where id = v_cat;
+      continue category_loop;
+    end if;
+    raise exception 'try_again';
+  end loop category_loop;
+
+  if public.pp_o1ocards_category_taken(v_cat) >= public.pp_o1ocards_category_total(v_cat) then
+    update public.pp_o1ocards_categories set closed = true where id = v_cat;
+  end if;
+  update public.pp_o1ocards_user_boosters set quantity = quantity - 1 where user_id = uid and booster_type_id = p_type;
+  update public.pp_o1ocards_profiles set boosters_opened = boosters_opened + 1 where id = uid returning * into p;
+  return jsonb_build_object('cards', res, 'golden', false, 'category_id', v_cat, 'booster', jsonb_build_object('id', bt.id, 'name', bt.name, 'color', bt.color),
+                            'status', public.pp_o1ocards_status_json(p));
+end $$;
+
+-- Acheter des boosters d'un type en vente avec ses pièces (hors pièces bloquées par des enchères)
+create or replace function public.pp_o1ocards_buy_booster(p_type int, p_quantity int default 1)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); p public.pp_o1ocards_profiles; bt public.pp_o1ocards_booster_types; v_total bigint; v_locked bigint;
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  if p_quantity is null or p_quantity < 1 or p_quantity > 50 then raise exception 'invalid_quantity'; end if;
+  select * into bt from public.pp_o1ocards_booster_types where id = p_type and enabled and not is_standard and price_coins is not null;
+  if not found then raise exception 'not_for_sale'; end if;
+  p := public.pp_o1ocards_sync(uid);
+  v_total := bt.price_coins::bigint * p_quantity;
+  select coalesce(sum(current_bid), 0) into v_locked from public.pp_o1ocards_listings where current_bidder = uid and status = 'active';
+  if p.coins - v_locked < v_total then raise exception 'not_enough_coins'; end if;
+  update public.pp_o1ocards_profiles set coins = coins - v_total where id = uid returning * into p;
+  insert into public.pp_o1ocards_user_boosters (user_id, booster_type_id, quantity) values (uid, p_type, p_quantity)
+  on conflict (user_id, booster_type_id) do update set quantity = public.pp_o1ocards_user_boosters.quantity + excluded.quantity;
+  return jsonb_build_object('ok', true, 'status', public.pp_o1ocards_status_json(p));
+end $$;
+revoke all on function public.pp_o1ocards_open_booster_of_type(int) from public, anon;
+revoke all on function public.pp_o1ocards_buy_booster(int, int) from public, anon;
+grant execute on function public.pp_o1ocards_open_booster_of_type(int) to authenticated;
+grant execute on function public.pp_o1ocards_buy_booster(int, int) to authenticated;
+
+-- ---------- Admin : créer, modifier, supprimer un type de booster ; offrir des boosters ----------
+-- p_slots = [{position, rarity_id, weight}] : chaque carte de 1 à p_cards a au moins une rareté (ordinaire ou Unique), chaque couple une seule fois.
+create or replace function public.pp_o1ocards_admin_save_booster_type(p_password text, p_id int, p_name text, p_cards int, p_color text, p_price int, p_enabled boolean, p_slots jsonb)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare err text := public.pp_o1ocards_admin_guard(p_password); v_id int; v_std boolean := false; v_name text := trim(coalesce(p_name, '')); r record;
+begin
+  if err is not null then return jsonb_build_object('error', err); end if;
+  if char_length(v_name) not between 1 and 40 then raise exception 'invalid_booster'; end if;
+  if p_cards is null or p_cards not between 1 and 10 then raise exception 'invalid_booster'; end if;
+  if p_color is null or p_color !~ '^#[0-9a-fA-F]{6}$' then raise exception 'invalid_booster'; end if;
+  if p_price is not null and (p_price < 0 or p_price > 1000000000) then raise exception 'invalid_booster'; end if;
+  if p_slots is null or jsonb_typeof(p_slots) <> 'array' then raise exception 'invalid_booster_slots'; end if;
+  for r in select (e ->> 'position')::int as pos, e ->> 'rarity_id' as rid, (e ->> 'weight')::double precision as w from jsonb_array_elements(p_slots) e loop
+    if r.pos is null or r.pos < 1 or r.pos > p_cards or r.rid is null or r.w is null or r.w <= 0 or r.w > 1000000
+       or not exists (select 1 from public.pp_o1ocards_rarities x where x.id = r.rid and x.kind in ('range', 'unique')) then
+      raise exception 'invalid_booster_slots';
+    end if;
+  end loop;
+  if exists (select 1 from jsonb_array_elements(p_slots) e group by (e ->> 'position'), (e ->> 'rarity_id') having count(*) > 1) then raise exception 'invalid_booster_slots'; end if;
+  if (select count(distinct (e ->> 'position')::int) from jsonb_array_elements(p_slots) e) <> p_cards then raise exception 'invalid_booster_slots'; end if;
+
+  if p_id is null then
+    insert into public.pp_o1ocards_booster_types (name, cards, color, price_coins, enabled, position)
+    values (v_name, p_cards, p_color, p_price, coalesce(p_enabled, true), coalesce((select max(position) from public.pp_o1ocards_booster_types), 0) + 1) returning id into v_id;
+  else
+    select is_standard into v_std from public.pp_o1ocards_booster_types where id = p_id for update;
+    if not found then raise exception 'not_found'; end if;
+    -- le Standard se recharge tout seul : toujours actif, jamais en vente
+    update public.pp_o1ocards_booster_types set name = v_name, cards = p_cards, color = p_color,
+           price_coins = case when v_std then null else p_price end, enabled = case when v_std then true else coalesce(p_enabled, true) end
+    where id = p_id;
+    v_id := p_id;
+    delete from public.pp_o1ocards_booster_type_slots where booster_type_id = v_id;
+  end if;
+  insert into public.pp_o1ocards_booster_type_slots (booster_type_id, position, rarity_id, weight)
+  select v_id, (e ->> 'position')::int, e ->> 'rarity_id', (e ->> 'weight')::double precision from jsonb_array_elements(p_slots) e;
+  return jsonb_build_object('ok', true, 'id', v_id);
+exception when unique_violation then
+  raise exception 'duplicate_booster_name';
+end $$;
+
+create or replace function public.pp_o1ocards_admin_delete_booster_type(p_password text, p_id int)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare err text := public.pp_o1ocards_admin_guard(p_password); bt public.pp_o1ocards_booster_types;
+begin
+  if err is not null then return jsonb_build_object('error', err); end if;
+  select * into bt from public.pp_o1ocards_booster_types where id = p_id;
+  if not found then raise exception 'not_found'; end if;
+  if bt.is_standard then raise exception 'booster_is_standard'; end if;
+  if exists (select 1 from public.pp_o1ocards_user_boosters where booster_type_id = p_id and quantity > 0) then raise exception 'booster_has_holders'; end if;
+  delete from public.pp_o1ocards_booster_types where id = p_id;
+  return jsonb_build_object('ok', true);
+end $$;
+
+-- Offrir p_quantity boosters d'un type à un joueur (son pseudo, sans tenir compte de la casse) ou, sans pseudo, à tous les joueurs
+create or replace function public.pp_o1ocards_admin_grant_boosters(p_password text, p_type int, p_quantity int, p_username text default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare err text := public.pp_o1ocards_admin_guard(p_password); n int;
+begin
+  if err is not null then return jsonb_build_object('error', err); end if;
+  if p_quantity is null or p_quantity < 1 or p_quantity > 1000 then raise exception 'invalid_quantity'; end if;
+  if not exists (select 1 from public.pp_o1ocards_booster_types where id = p_type and not is_standard) then raise exception 'unknown_booster'; end if;
+  insert into public.pp_o1ocards_user_boosters (user_id, booster_type_id, quantity)
+  select pr.id, p_type, p_quantity from public.pp_o1ocards_profiles pr
+  where p_username is null or lower(pr.username) = lower(trim(p_username))
+  on conflict (user_id, booster_type_id) do update set quantity = public.pp_o1ocards_user_boosters.quantity + excluded.quantity;
+  get diagnostics n = row_count;
+  if p_username is not null and n = 0 then raise exception 'user_not_found'; end if;
+  return jsonb_build_object('ok', true, 'players', n);
+end $$;
+revoke all on function public.pp_o1ocards_admin_save_booster_type(text, int, text, int, text, int, boolean, jsonb) from public, anon;
+revoke all on function public.pp_o1ocards_admin_delete_booster_type(text, int) from public, anon;
+revoke all on function public.pp_o1ocards_admin_grant_boosters(text, int, int, text) from public, anon;
+grant execute on function public.pp_o1ocards_admin_save_booster_type(text, int, text, int, text, int, boolean, jsonb) to authenticated;
+grant execute on function public.pp_o1ocards_admin_delete_booster_type(text, int) to authenticated;
+grant execute on function public.pp_o1ocards_admin_grant_boosters(text, int, int, text) to authenticated;
 
 -- Ouvre un pack doré gagné en complétant une série (catégorie en cours). Ne consomme aucun booster.
 create or replace function public.pp_o1ocards_open_golden_pack()
@@ -1656,15 +1792,12 @@ end $$;
 
 -- Chances de tirage de la catégorie (en cours par défaut), calculées sur les cartes ENCORE disponibles.
 -- Pour chaque rareté : cartes restantes, part des tirages, chance qu'un booster en contienne au moins une.
-create or replace function public.pp_o1ocards_draw_odds(p_category int default null)
+create or replace function public.pp_o1ocards_draw_odds(p_category int default null, p_booster_type int default null)
 returns jsonb language plpgsql stable security definer set search_path = public as $$
 declare
   v_cat     int := coalesce(p_category, public.pp_o1ocards_active_category());
-  e         double precision := public.pp_o1ocards_cfg('rarity_exponent')::double precision;
-  n_cards   int := public.pp_o1ocards_cfg('cards_per_booster')::int;
-  n_com     int;
-  n_unc     int;
-  n_pre     int;
+  e         double precision := coalesce(public.pp_o1ocards_cfg('rarity_exponent'), 0)::double precision;
+  v_bt      public.pp_o1ocards_booster_types;
   v_unique  text;
   v_alpha   text;
   v_omega   text;
@@ -1674,14 +1807,15 @@ begin
   if v_cat is null or not exists (select 1 from public.pp_o1ocards_categories where id = v_cat) then
     return jsonb_build_object('category_id', null, 'by_rarity', '[]'::jsonb);
   end if;
+  if p_booster_type is null then
+    select * into v_bt from public.pp_o1ocards_booster_types where is_standard;
+  else
+    select * into v_bt from public.pp_o1ocards_booster_types where id = p_booster_type;
+  end if;
+  if v_bt.id is null then return jsonb_build_object('category_id', v_cat, 'by_rarity', '[]'::jsonb); end if;
   select id into v_unique from public.pp_o1ocards_rarities where kind = 'unique' limit 1;
   select id into v_alpha  from public.pp_o1ocards_rarities where kind = 'alpha'  limit 1;
   select id into v_omega  from public.pp_o1ocards_rarities where kind = 'omega'  limit 1;
-
-  -- Composition d'un booster : premières cartes, carte suivante, le reste (mêmes règles que open_booster)
-  n_com := least(greatest(coalesce(public.pp_o1ocards_cfg('booster_common_slots'), 3)::int, 0), n_cards);
-  n_unc := least(greatest(coalesce(public.pp_o1ocards_cfg('booster_uncommon_slots'), 1)::int, 0), n_cards - n_com);
-  n_pre := n_cards - n_com - n_unc;
 
   -- s = une ligne par (type, rareté de base, série) avec le nombre de cartes restantes ; vis = numéro visible (séries 1..numbered) :
   -- Alpha (1/m) et Omega (m/m) existent seulement alors. parts = les cartes par rareté AFFICHÉE ; is_first = carte 1/1 (rareté Unique).
@@ -1726,28 +1860,29 @@ begin
     select v_unique as opt, id, sum(w) from parts where is_first group by id having sum(w) > 0
   ),
   opt_tot as (select opt, sum(w) as tw from opt_pool group by opt),
-  cls(class, n) as (values ('common', n_com), ('uncommon', n_unc), ('premium', n_pre)),
+  pos as (select generate_series(1, v_bt.cards) as n),
+  -- poids de chaque rareté pour chaque carte du booster
   slot_w as (
-    select c.class, c.n, o.opt,
-           case c.class when 'common' then r.weight_slots_1_3 when 'uncommon' then r.weight_slot_4 else r.weight_slot_5 end as wt
-    from cls c cross join opt_tot o join public.pp_o1ocards_rarities r on r.id = o.opt
+    select p.n, o.opt, coalesce(bs.weight, 0) as wt
+    from pos p cross join opt_tot o
+    left join public.pp_o1ocards_booster_type_slots bs on bs.booster_type_id = v_bt.id and bs.position = p.n and bs.rarity_id = o.opt
   ),
-  cls_tot as (select class, n, sum(wt) as sw from slot_w group by class, n),
-  -- chance qu'UNE carte d'un emplacement de ce type soit de cette rareté affichée
+  pos_tot as (select n, sum(wt) as sw from slot_w group by n),
+  -- chance que la carte numéro n soit de cette rareté affichée (avec le repli sur toutes les cartes si aucune rareté n'est possible)
   mix as (
-    select c.class, c.n, p.id,
-           case when coalesce(ct.sw, 0) > 0
-                then coalesce((select sum(sw2.wt / ct.sw * op.w / ot.tw)
+    select p.n, a.id,
+           case when coalesce(pt.sw, 0) > 0
+                then coalesce((select sum(sw2.wt / pt.sw * op.w / ot.tw)
                                from slot_w sw2
-                               join opt_pool op on op.opt = sw2.opt and op.id = p.id
+                               join opt_pool op on op.opt = sw2.opt and op.id = a.id
                                join opt_tot ot on ot.opt = sw2.opt
-                               where sw2.class = c.class), 0)
-                else p.w / nullif(at.tw, 0)
+                               where sw2.n = p.n), 0)
+                else a.w / nullif(at.tw, 0)
            end as p
-    from cls c cross join any_pool p cross join any_tot at left join cls_tot ct on ct.class = c.class
+    from pos p cross join any_pool a cross join any_tot at left join pos_tot pt on pt.n = p.n
   ),
   expd as (
-    select id, sum(n * p) as expected, 1 - exp(sum(n * ln(greatest(1 - least(p, 1), 1e-12)))) as at_least
+    select id, sum(p) as expected, 1 - exp(sum(ln(greatest(1 - least(p, 1), 1e-12)))) as at_least
     from mix group by id
   ),
   agg as (select id, sum(remaining)::bigint as remaining, sum(total)::bigint as total from parts group by id)
@@ -1757,23 +1892,17 @@ begin
                'id', r.id,
                'remaining', coalesce(a.remaining, 0),
                'total', coalesce(a.total, 0),
-               'share', case when n_cards > 0 then coalesce(x.expected, 0) / n_cards else 0 end,
+               'share', coalesce(x.expected, 0) / v_bt.cards,
                'per_booster', coalesce(x.at_least, 0)
              ) order by r.sort_order)
       from public.pp_o1ocards_rarities r
       left join agg a on a.id = r.id
       left join expd x on x.id = r.id), '[]'::jsonb),
-    -- pour chaque type d'emplacement, la répartition RÉELLE par rareté affichée sur les cartes restantes (Alpha, Omega et Unique comprises ; somme = 1)
-    'slot_mix', coalesce((
-      select jsonb_object_agg(z.class, z.opts) from (
-        select m.class, jsonb_agg(jsonb_build_object('id', m.id, 'p', m.p) order by m.p desc, m.id) as opts
-        from mix m where m.p > 0 group by m.class) z), '{}'::jsonb),
-    -- pour chaque type d'emplacement, les raretés possibles et leur chance (somme = 1)
-    'slot_options', (
-      select jsonb_object_agg(z.class, z.opts) from (
-        select sw.class, coalesce(jsonb_agg(jsonb_build_object('id', sw.opt, 'p', sw.wt / ct.sw) order by sw.wt desc, sw.opt), '[]'::jsonb) as opts
-        from slot_w sw join cls_tot ct on ct.class = sw.class and ct.sw > 0
-        where sw.wt > 0 group by sw.class) z)
+    -- pour chaque carte du booster, la répartition RÉELLE par rareté affichée sur les cartes restantes (somme = 1)
+    'positions', coalesce((
+      select jsonb_agg(jsonb_build_object('n', z.n, 'mix', z.opts) order by z.n)
+      from (select m.n, coalesce(jsonb_agg(jsonb_build_object('id', m.id, 'p', m.p) order by m.p desc, m.id) filter (where m.p > 0), '[]'::jsonb) as opts
+            from mix m group by m.n) z), '[]'::jsonb)
   ) into v_res;
 
   select jsonb_build_object(
@@ -1786,13 +1915,12 @@ begin
   return jsonb_build_object(
     'category_id',       v_cat,
     'exponent',          e,
-    'cards_per_booster', n_cards,
+    'booster',           jsonb_build_object('id', v_bt.id, 'name', v_bt.name, 'cards', v_bt.cards, 'is_standard', v_bt.is_standard),
+    'cards_per_booster', v_bt.cards,
     'pool_left',         public.pp_o1ocards_category_total(v_cat) - public.pp_o1ocards_category_taken(v_cat),
-    'slots',             jsonb_build_object('common', n_com, 'uncommon', n_unc, 'premium', n_pre),
     'by_rarity',         v_res -> 'by_rarity',
-    'slot_mix',          coalesce(v_res -> 'slot_mix', '{}'::jsonb),
-    'slot_options',      coalesce(v_res -> 'slot_options', '{}'::jsonb),
-    'golden',            v_golden
+    'positions',         v_res -> 'positions',
+    'golden',            case when v_bt.is_standard then v_golden else null end
   );
 end $$;
 
@@ -3103,6 +3231,11 @@ begin
     'legal', (select coalesce(jsonb_agg(jsonb_build_object('key', key, 'value', value) order by key), '[]'::jsonb)
               from public.pp_o1ocards_legal),
     'players', (select count(*) from public.pp_o1ocards_profiles),
+    'booster_types', (select coalesce(jsonb_agg(to_jsonb(bt) || jsonb_build_object(
+      'slots', (select coalesce(jsonb_agg(jsonb_build_object('position', sl.position, 'rarity_id', sl.rarity_id, 'weight', sl.weight) order by sl.position, sl.weight desc, sl.rarity_id), '[]'::jsonb)
+                from public.pp_o1ocards_booster_type_slots sl where sl.booster_type_id = bt.id),
+      'holders', (select coalesce(sum(ub.quantity), 0) from public.pp_o1ocards_user_boosters ub where ub.booster_type_id = bt.id)) order by bt.position, bt.id), '[]'::jsonb)
+      from public.pp_o1ocards_booster_types bt),
     'unique_wins', (select coalesce(jsonb_agg(jsonb_build_object(
         'id', x.id, 'email', x.email, 'username', x.username,
         'type_id', x.type_id, 'type_name', x.type_name, 'category_id', x.category_id, 'won_at', x.won_at
@@ -3529,7 +3662,7 @@ revoke all on function public.pp_o1ocards_open_golden_pack()                    
 revoke all on function public.pp_o1ocards_ack_rewards()                                     from public, anon;
 revoke all on function public.pp_o1ocards_list_collection(int, int, text, text, int, int)   from public, anon;
 revoke all on function public.pp_o1ocards_my_stats(int)                                     from public, anon;
-revoke all on function public.pp_o1ocards_draw_odds(int)                                    from public, anon;
+revoke all on function public.pp_o1ocards_draw_odds(int, int)                               from public, anon;
 revoke all on function public.pp_o1ocards_set_username(text)                                from public, anon;
 revoke all on function public.pp_o1ocards_sell_direct(int, text, int, int)                        from public, anon;
 revoke all on function public.pp_o1ocards_list_card(int, text, int, int, text, int)               from public, anon;
@@ -3575,7 +3708,7 @@ grant execute on function public.pp_o1ocards_open_golden_pack()                 
 grant execute on function public.pp_o1ocards_ack_rewards()                                     to authenticated;
 grant execute on function public.pp_o1ocards_list_collection(int, int, text, text, int, int)   to authenticated;
 grant execute on function public.pp_o1ocards_my_stats(int)                                     to authenticated;
-grant execute on function public.pp_o1ocards_draw_odds(int)                                    to authenticated;
+grant execute on function public.pp_o1ocards_draw_odds(int, int)                               to authenticated;
 grant execute on function public.pp_o1ocards_set_username(text)                                to authenticated;
 grant execute on function public.pp_o1ocards_sell_direct(int, text, int, int)                        to authenticated;
 grant execute on function public.pp_o1ocards_list_card(int, text, int, int, text, int)               to authenticated;
@@ -3662,8 +3795,8 @@ begin
     if not coalesce(p_create_missing_rarities, false) then
       return jsonb_build_object('error', 'prod_missing_rarities:' || array_to_string(v_missing, ','));
     end if;
-    insert into public.o1ocards_rarities (id, name, kind, max_series, sort_order, color, color2, text_color, weight_slots_1_3, weight_slot_4, weight_slot_5)
-    select id, name, kind, max_series, sort_order, color, color2, text_color, weight_slots_1_3, weight_slot_4, weight_slot_5
+    insert into public.o1ocards_rarities (id, name, kind, max_series, sort_order, color, color2, text_color)
+    select id, name, kind, max_series, sort_order, color, color2, text_color
     from public.pp_o1ocards_rarities where id = any (v_missing);
   end if;
 
