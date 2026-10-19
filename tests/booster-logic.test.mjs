@@ -1,6 +1,6 @@
 // Teste src/boosterLogic.js : répartitions par carte, pourcentages, contrôles de l'éditeur de boosters.
 //   node tests/booster-logic.test.mjs
-import { slotsToPositions, positionsToSlots, shares, resizePositions, validateBooster, defaultPositions, pickableRarities, MAX_CARDS } from '../src/boosterLogic.js'
+import { slotsToPositions, positionsToSlots, shares, resizePositions, validateBooster, defaultPositions, pickableRarities, ROLES, roleLabel, NUMBERED, MAX_CARDS } from '../src/boosterLogic.js'
 
 let bad = 0
 const ok = (name, cond) => { console.log(cond ? 'OK  ' : 'FAIL', name); if (!cond) bad++ }
@@ -50,6 +50,20 @@ const rarities = [
 ok('pickableRarities : ordinaires et Unique seulement (ni Alpha ni Omega), de la plus répandue à la plus rare', eq(pickableRarities(rarities).map((r) => r.id), ['common', 'rare', 'super', 'unique']))
 ok('defaultPositions : un booster neuf = 100 % de la rareté ordinaire la plus répandue sur chaque carte', eq(defaultPositions(rarities, 3), [[{ rarity_id: 'common', weight: 100 }], [{ rarity_id: 'common', weight: 100 }], [{ rarity_id: 'common', weight: 100 }]]) && defaultPositions(rarities).length === 5)
 ok('defaultPositions : sans rareté ordinaire, des cartes vides (pas de plantage)', eq(defaultPositions([{ id: 'unique', kind: 'unique', sort_order: 1 }], 2), [[], []]))
+
+// ---- rôles des boosters et choix du booster de récompense (Gold)
+ok('rôles : ordinaire, abonnés, cadeau des abonnés, récompense de carte complétée (dans cet ordre, avec une aide chacun)', eq(ROLES.map((r) => r.id), ['', 'subscriber', 'subscription_gift', 'card_reward']) && ROLES.every((r) => r.label && r.help))
+ok('roleLabel : libellé du rôle, vide pour un booster ordinaire ou un rôle inconnu', roleLabel('card_reward') === 'Récompense : carte complétée' && roleLabel('') === 'Booster ordinaire' && roleLabel(null) === 'Booster ordinaire' && roleLabel('vip') === '')
+ok('pickableRarities (booster ordinaire, des abonnés ou cadeau) : toujours sans Alpha, Omega ni carte numérotée', ['', 'subscriber', 'subscription_gift'].every((role) => eq(pickableRarities(rarities, role).map((r) => r.id), ['common', 'super', 'rare', 'unique'].filter(() => true).length ? pickableRarities(rarities).map((r) => r.id) : [])) && !pickableRarities(rarities, 'subscriber').some((r) => ['alpha', 'omega', 'numbered'].includes(r.id)))
+const reward = pickableRarities(rarities, 'card_reward').map((r) => r.id)
+ok('pickableRarities (récompense) : ordinaires, Unique, Alpha, Omega, puis « carte numérotée » en dernier', reward.includes('alpha') && reward.includes('omega') && reward.includes('unique') && reward.at(-1) === 'numbered' && reward.indexOf('common') < reward.indexOf('rare'))
+ok('la carte numérotée a un nom lisible pour l\'admin', NUMBERED.id === 'numbered' && /numérotée/.test(NUMBERED.name) && /carte complétée/.test(NUMBERED.name))
+const kinds = { alpha: 'alpha', omega: 'omega', common: 'range', unique: 'unique' }
+const names2 = { alpha: 'Alpha', omega: 'Omega', numbered: NUMBERED.name, common: 'Commune' }
+const withEntry = (id, role) => validateBooster({ name: 'X', cards: 1, price: '', positions: [[{ rarity_id: id, weight: 1 }]], role }, names2, kinds)
+ok('validation : Alpha, Omega et « numbered » refusés pour un booster ordinaire, des abonnés ou cadeau, avec un message qui dit pourquoi', ['', 'subscriber', 'subscription_gift'].every((role) => /n’est possible que dans le booster de récompense/.test(withEntry('alpha', role)) && /Omega/.test(withEntry('omega', role)) && /numérotée/.test(withEntry('numbered', role))))
+ok('validation : acceptés pour le booster de récompense', withEntry('alpha', 'card_reward') === '' && withEntry('omega', 'card_reward') === '' && withEntry('numbered', 'card_reward') === '')
+ok('validation : une rareté ordinaire reste valable partout ; sans rôle précisé (appel ancien), comme un booster ordinaire', withEntry('common', '') === '' && withEntry('common', 'card_reward') === '' && validateBooster({ name: 'X', cards: 1, price: '', positions: [[{ rarity_id: 'alpha', weight: 1 }]] }, names2, kinds) !== '')
 
 if (bad) { console.error(`\n${bad} ÉCHEC(S)`); process.exit(1) }
 console.log('\nLogique des boosters : tous les contrôles sont passés.')

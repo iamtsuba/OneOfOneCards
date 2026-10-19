@@ -12,6 +12,19 @@ update public.{{P}}categories set closed = true;
 update public.{{P}}config set value = 0 where key in ('rarity_exponent', 'series_reward_min_size');
 select exists (select 1 from public.{{P}}rarities where id = 'artrare') as had_art \gset
 insert into public.{{P}}rarities (id, name, kind, max_series, sort_order, color, color2, text_color) values ('artrare', 'Art Rare', 'range', 50, 4, '#fc0', '#a80', '#000') on conflict (id) do nothing;
+-- Le contenu du booster Gold vient du module Boosters (rôle « card_reward ») : on règle ses répartitions comme l'admin le ferait
+select id as gold from public.{{P}}booster_types where role = 'card_reward' \gset
+create temp table gold_backup as select * from public.{{P}}booster_type_slots where booster_type_id = :gold;
+create or replace function pg_temp.gold_slots(gid int, w_num float, w_art float, w_alpha float, w_omega float, w_unique float) returns void language plpgsql as $$
+begin
+  delete from public.{{P}}booster_type_slots where booster_type_id = gid;
+  insert into public.{{P}}booster_type_slots (booster_type_id, position, rarity_id, weight) values (gid, 1, 'rare', 100), (gid, 2, 'rare', 100), (gid, 3, 'rare', 100), (gid, 4, 'super', 100);
+  if w_num > 0 then insert into public.{{P}}booster_type_slots values (gid, 5, 'numbered', w_num); end if;
+  if w_art > 0 then insert into public.{{P}}booster_type_slots values (gid, 5, 'artrare', w_art); end if;
+  if w_alpha > 0 then insert into public.{{P}}booster_type_slots values (gid, 5, 'alpha', w_alpha); end if;
+  if w_omega > 0 then insert into public.{{P}}booster_type_slots values (gid, 5, 'omega', w_omega); end if;
+  if w_unique > 0 then insert into public.{{P}}booster_type_slots values (gid, 5, 'unique', w_unique); end if;
+end $$;
 
 \echo '--- une catégorie : deux cartes complètes en rareté (X, Z), une carte courte (Y), toutes à numéros visibles'
 insert into public.{{P}}categories (name, position, series_count, color, color2, text_color, enabled) values ('Gold Test', 1, 100, '#fff', '#ccc', '#000', false) returning id as cat \gset
@@ -59,7 +72,7 @@ select pg_temp.expect('deux boosters Gold à ouvrir dans le statut', jsonb_array
 select pg_temp.expect('un autre joueur n''a rien (B n''a aucune récompense)', (select count(*) from public.{{P}}gold_rewards where user_id = :B) = 0);
 
 \echo '--- composition : 150 boosters Gold tirés pour la carte X'
-update public.{{P}}config set value = 1 where key like 'gold_reward_weight_%';
+select pg_temp.gold_slots(:gold, 1, 1, 1, 1, 1);
 create temp table gd as
 select x.i, t.ord::int as ord, (t.c ->> 'type_id')::int as type_id, t.c ->> 'base_rarity' as base, t.c ->> 'rarity_id' as rid, (t.c ->> 'series')::int as series, (t.c ->> 'number')::int as number
 from (select i, public.{{P}}draw_gold_reward(:A, :x) as j from generate_series(1, 150) i offset 0) x, jsonb_array_elements(x.j) with ordinality as t(c, ord);
@@ -77,15 +90,13 @@ select pg_temp.expect('aucune carte tirée deux fois', (select count(*) from gd)
 
 \echo '--- les poids de la 5e carte se règlent'
 delete from public.{{P}}cards where owner_id = :A and number not in (1, 5, 10) or (owner_id = :A and series > 10);
-update public.{{P}}config set value = 0 where key like 'gold_reward_weight_%';
-update public.{{P}}config set value = 1 where key = 'gold_reward_weight_alpha';
+select pg_temp.gold_slots(:gold, 0, 0, 1, 0, 0);
 create temp table g5a as select (t.c ->> 'rarity_id') as rid from (select public.{{P}}draw_gold_reward(:A, :z) as j from generate_series(1, 25)) x, jsonb_array_elements(x.j) with ordinality as t(c, ord) where t.ord = 5;
 select pg_temp.expect('seul le poids Alpha est positif : la 5e carte est toujours une Alpha (25 sur 25)', (select count(*) from g5a where rid = 'alpha') = 25);
-update public.{{P}}config set value = 0 where key = 'gold_reward_weight_alpha';
-update public.{{P}}config set value = 1 where key = 'gold_reward_weight_artrare';
+select pg_temp.gold_slots(:gold, 0, 1, 0, 0, 0);
 create temp table g5b as select (t.c ->> 'rarity_id') as rid from (select public.{{P}}draw_gold_reward(:A, :z) as j from generate_series(1, 25)) x, jsonb_array_elements(x.j) with ordinality as t(c, ord) where t.ord = 5;
 select pg_temp.expect('seul le poids Art Rare est positif : la 5e carte est toujours une Art Rare (25 sur 25)', (select count(*) from g5b where rid = 'artrare') = 25);
-update public.{{P}}config set value = 1 where key like 'gold_reward_weight_%';
+select pg_temp.gold_slots(:gold, 1, 1, 1, 1, 1);
 
 \echo '--- ouvrir le booster Gold de X : une seule fois, par son propriétaire'
 delete from public.{{P}}cards k where k.owner_id = :A and k.type_id in (:x, :z) and not exists (select 1 from public.{{P}}album_picks p where p.user_id = :A and p.type_id = k.type_id and p.series = k.series and p.number = k.number and p.base_rarity = k.base_rarity);
@@ -141,6 +152,7 @@ select public.{{P}}gold_rewards_backfill() as recrees2 \gset
 select pg_temp.expect('rattrapage idempotent : rien de plus au second passage', :recrees2 = 0 and (select count(*) from public.{{P}}gold_rewards) = :nb_avant);
 
 \echo '--- droits'
+select pg_temp.expect('les anciens réglages de poids du Gold ont disparu : tout se règle dans le module Boosters', not exists (select 1 from public.{{P}}config where key like 'gold_reward_weight_%'));
 select pg_temp.expect('joueur connecté : peut ouvrir et acquitter ; ni tirer, ni créer une récompense, ni lire la table',
   has_function_privilege('authenticated', 'public.{{P}}open_gold_reward(bigint)', 'execute') and has_function_privilege('authenticated', 'public.{{P}}ack_gold_rewards()', 'execute')
   and not has_function_privilege('authenticated', 'public.{{P}}draw_gold_reward(uuid, int)', 'execute') and not has_function_privilege('authenticated', 'public.{{P}}check_type_reward(uuid, int)', 'execute')
@@ -148,6 +160,8 @@ select pg_temp.expect('joueur connecté : peut ouvrir et acquitter ; ni tirer, n
   and not has_function_privilege('anon', 'public.{{P}}open_gold_reward(bigint)', 'execute') and not has_table_privilege('authenticated', 'public.{{P}}gold_rewards', 'select'));
 
 -- nettoyage
+delete from public.{{P}}booster_type_slots where booster_type_id = :gold;
+insert into public.{{P}}booster_type_slots select * from gold_backup;
 delete from public.{{P}}gold_rewards; delete from public.{{P}}album_picks; delete from public.{{P}}cards;
 delete from public.{{P}}categories where name in ('Gold Test', 'Gold Mini', 'Gold Vide');
 \if :had_art

@@ -4,7 +4,7 @@ import { explain } from '../api'
 import { useGame, fmt, fmtDate } from '../game'
 import { IS_PREPROD } from '../env'
 import { fmtOdds } from './Odds'
-import { defaultPositions, pickableRarities, positionsToSlots, resizePositions, shares, slotsToPositions, validateBooster, MAX_CARDS } from '../boosterLogic'
+import { defaultPositions, pickableRarities, positionsToSlots, resizePositions, shares, slotsToPositions, validateBooster, roleLabel, ROLES, NUMBERED, MAX_CARDS } from '../boosterLogic'
 import TypeArt from './TypeArt'
 import Pack from './Pack'
 import Card from './Card'
@@ -1090,7 +1090,26 @@ export function ConfigTab({ data, run, busy }) {
   return (
     <div className="admin-list cols-2">
       <p className="muted">Réglages du jeu et de la boutique. Les modifications s’appliquent tout de suite.</p>
+      {(data.text_config ?? []).map((row) => <TextConfigRow key={row.key} row={row} run={run} busy={busy} />)}
       {data.config.map((row) => <ConfigRow key={row.key} row={row} run={run} busy={busy} />)}
+    </div>
+  )
+}
+
+// Réglage texte (ex. nom de l'abonnement) : 1 à 60 caractères
+function TextConfigRow({ row, run, busy }) {
+  const [v, setV] = useState(row.value)
+  const changed = v.trim() !== row.value
+  return (
+    <div className="admin-card slim">
+      <div>
+        <strong className="config-key">{row.key}</strong>
+        <p className="fine">{row.description}</p>
+      </div>
+      <div className="row nowrap">
+        <input type="text" value={v} maxLength={60} onChange={(e) => setV(e.target.value)} aria-label={row.description || row.key} />
+        <button className="btn" disabled={busy || !changed || v.trim() === ''} onClick={() => run((pw) => api.adminSetTextConfig(pw, row.key, v.trim()), 'Réglage enregistré.')}>OK</button>
+      </div>
     </div>
   )
 }
@@ -1115,7 +1134,7 @@ function ConfigRow({ row, run, busy }) {
 // ---------- Raretés ----------
 // ---------- Boosters paramétrables : liste, éditeur carte par carte, dons ----------
 function BoosterListItem({ b, on, onClick }) {
-  const sale = b.is_standard ? 'Standard : se recharge tout seul' : b.price_coins != null ? `${fmt(b.price_coins)} pièce${b.price_coins > 1 ? 's' : ''}` : 'hors vente'
+  const sale = b.is_standard ? 'Standard : se recharge tout seul' : b.role ? roleLabel(b.role) : b.price_coins != null ? `${fmt(b.price_coins)} pièce${b.price_coins > 1 ? 's' : ''}` : 'hors vente'
   return (
     <button type="button" className={`md-item${on ? ' on' : ''}`} aria-current={on ? 'true' : undefined} onClick={onClick}>
       <i className="cat-dot" style={{ '--cat1': b.color, '--cat2': b.color }} />
@@ -1130,15 +1149,18 @@ function BoosterListItem({ b, on, onClick }) {
 export function BoosterEditor({ booster, rarities, run, busy, onCreated, onDeleted, onDuplicate }) {
   const isNew = !booster?.id
   const std = !!booster?.is_standard
-  const choices = pickableRarities(rarities)
-  const names = Object.fromEntries(rarities.map((r) => [r.id, r.name]))
+  const names = { ...Object.fromEntries(rarities.map((r) => [r.id, r.name])), [NUMBERED.id]: NUMBERED.name }
+  const kinds = Object.fromEntries(rarities.map((r) => [r.id, r.kind]))
   const [f, setF] = useState(() => ({
+    role: booster?.role ?? '',
     name: booster?.name ?? '', cards: booster?.cards ?? 5, color: booster?.color ?? '#e8452e',
     price: booster?.price_coins == null ? '' : String(booster.price_coins), enabled: booster?.enabled ?? true,
   }))
   const [pos, setPos] = useState(() => (booster?.slots ? slotsToPositions(booster.slots, booster.cards) : defaultPositions(rarities, booster?.cards ?? 5)))
   const [grant, setGrant] = useState({ qty: '1', who: '' })
-  const problem = validateBooster({ name: f.name, cards: f.cards, price: std ? '' : f.price, positions: pos }, names)
+  const choices = pickableRarities(rarities, f.role)
+  const noSale = std || f.role === 'subscriber' || f.role === 'card_reward'   // jamais en vente
+  const problem = validateBooster({ name: f.name, cards: f.cards, price: noSale ? '' : f.price, positions: pos, role: f.role }, names, kinds)
 
   const setEntry = (i, j, patch) => setPos(pos.map((entries, k) => (k === i ? entries.map((e, m) => (m === j ? { ...e, ...patch } : e)) : entries)))
   const removeEntry = (i, j) => setPos(pos.map((entries, k) => (k === i ? entries.filter((_, m) => m !== j) : entries)))
@@ -1146,7 +1168,7 @@ export function BoosterEditor({ booster, rarities, run, busy, onCreated, onDelet
   const setCards = (n) => { setF({ ...f, cards: n }); setPos(resizePositions(pos, n)) }
 
   const save = () => run(
-    (pw) => api.adminSaveBoosterType(pw, booster?.id ?? null, { name: f.name.trim(), cards: f.cards, color: f.color, price: std || f.price === '' ? null : Number(f.price), enabled: std ? true : f.enabled, slots: positionsToSlots(pos) }),
+    (pw) => api.adminSaveBoosterType(pw, booster?.id ?? null, { name: f.name.trim(), cards: f.cards, color: f.color, price: noSale || f.price === '' ? null : Number(f.price), enabled: std || f.role === 'card_reward' ? true : f.enabled, slots: positionsToSlots(pos), role: std ? null : f.role || null }),
     (res) => { if (isNew && res?.id != null) onCreated(res.id); return 'Booster enregistré.' },
   )
   const remove = () => {
@@ -1165,6 +1187,13 @@ export function BoosterEditor({ booster, rarities, run, busy, onCreated, onDelet
       <h3>{isNew ? 'Nouveau booster' : booster.name}{std && <span className="muted"> · se recharge tout seul</span>}</h3>
       <div className="booster-fields">
         <label>Nom<input value={f.name} maxLength={40} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+        {!std && (
+          <label>Rôle
+            <select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>
+              {ROLES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+            </select>
+          </label>
+        )}
         <label>Nombre de cartes
           <select value={f.cards} onChange={(e) => setCards(Number(e.target.value))}>
             {Array.from({ length: MAX_CARDS }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n}</option>)}
@@ -1172,14 +1201,15 @@ export function BoosterEditor({ booster, rarities, run, busy, onCreated, onDelet
         </label>
         <label>Couleur<input type="color" value={f.color} onChange={(e) => setF({ ...f, color: e.target.value })} /></label>
         <label>Prix en pièces
-          <input type="number" min="0" step="1" inputMode="numeric" value={std ? '' : f.price} placeholder={std ? 'jamais en vente' : 'vide = hors vente'} disabled={std} onChange={(e) => setF({ ...f, price: e.target.value })} />
+          <input type="number" min="0" step="1" inputMode="numeric" value={noSale ? '' : f.price} placeholder={noSale ? 'jamais en vente' : 'vide = hors vente'} disabled={noSale} onChange={(e) => setF({ ...f, price: e.target.value })} />
         </label>
         <label className="check inline">
-          <input type="checkbox" checked={std ? true : f.enabled} disabled={std} onChange={(e) => setF({ ...f, enabled: e.target.checked })} />
-          <span>Actif{std ? ' (toujours)' : ''}</span>
+          <input type="checkbox" checked={std || f.role === 'card_reward' ? true : f.enabled} disabled={std || f.role === 'card_reward'} onChange={(e) => setF({ ...f, enabled: e.target.checked })} />
+          <span>Actif{std || f.role === 'card_reward' ? ' (toujours)' : ''}</span>
         </label>
       </div>
       {std && <p className="fine">Le Standard est le booster qui se recharge tout seul (stock gratuit). Les autres s’achètent avec des pièces ou s’offrent.</p>}
+      {!std && f.role && <p className="fine">{ROLES.find((r) => r.id === f.role)?.help} Un seul booster par rôle : en choisir ce rôle le retire à l’ancien.</p>}
 
       <div className="booster-cards">
         {pos.map((entries, i) => {
@@ -1213,10 +1243,10 @@ export function BoosterEditor({ booster, rarities, run, busy, onCreated, onDelet
       <div className="row">
         <button type="button" className="btn" disabled={busy || !!problem} onClick={save}>{isNew ? 'Créer le booster' : 'Enregistrer'}</button>
         {!isNew && <button type="button" className="btn ghost" disabled={busy} onClick={() => onDuplicate({ ...f, slots: positionsToSlots(pos) })}>Dupliquer</button>}
-        {!isNew && !std && <button type="button" className="btn ghost danger" disabled={busy} onClick={remove}>Supprimer</button>}
+        {!isNew && !std && booster.role !== 'card_reward' && <button type="button" className="btn ghost danger" disabled={busy} onClick={remove}>Supprimer</button>}
       </div>
 
-      {!isNew && !std && (
+      {!isNew && !std && booster.role !== 'subscriber' && booster.role !== 'card_reward' && (
         <fieldset className="booster-grant">
           <legend>Offrir des boosters</legend>
           <div className="booster-fields">

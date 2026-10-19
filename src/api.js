@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import { PREFIX, CHECKOUT_FUNCTION } from './env'
+import { PREFIX, CHECKOUT_FUNCTION, SUBSCRIBE_FUNCTION, SUBSCRIPTION_PORTAL_FUNCTION } from './env'
 
 // Tous les noms de tables et de fonctions de la base portent le préfixe de l'environnement (o1ocards_ ou pp_o1ocards_)
 const table = (name) => PREFIX + name
@@ -87,6 +87,24 @@ export async function startCheckout(consent) {
   return data.url
 }
 
+// Appelle une fonction serveur qui répond { url } (page Stripe) ; les erreurs deviennent « checkout:<code> »
+async function urlFunction(name, body) {
+  const { data, error } = await supabase.functions.invoke(name, { body })
+  if (error) {
+    let code = ''
+    const res = error.context
+    try { code = (await res.json()).error || '' } catch { /* réponse non lisible */ }
+    if (!code) code = res?.status ? `http_${res.status}` : error.name || 'network'
+    throw new Error(`checkout:${code}`)
+  }
+  if (!data?.url) throw new Error('checkout:no_url')
+  return data.url
+}
+// Abonnement : demande la page de paiement mensuel de Stripe (les trois consentements sont exigés par le serveur)
+export const startSubscription = (consent) => urlFunction(SUBSCRIBE_FUNCTION, { consent })
+// Abonnement : adresse du portail de Stripe pour résilier, changer de carte ou voir les factures
+export const openSubscriptionPortal = () => urlFunction(SUBSCRIPTION_PORTAL_FUNCTION, {})
+
 // Infos légales du vendeur, textes de consentement et réglages de la boutique (lisibles sans être connecté)
 export async function getLegal() {
   const [legal, config] = await Promise.all([
@@ -136,6 +154,8 @@ export const adminSaveType = (pw, t) =>
 export const adminDeleteType = (pw, id) => rpc('admin_delete_type', { p_password: pw, p_id: id })
 export const adminImportTypes = (pw, categoryId, types) =>
   rpc('admin_import_types', { p_password: pw, p_category: categoryId, p_types: types })
+// Réglages texte (nom de l'abonnement…)
+export const adminSetTextConfig = (pw, key, value) => rpc('admin_set_text_config', { p_password: pw, p_key: key, p_value: value })
 export const adminSetConfig = (pw, key, value) => rpc('admin_set_config', { p_password: pw, p_key: key, p_value: Number(value) })
 export const adminSaveRarity = (pw, r) =>
   rpc('admin_save_rarity', {
@@ -144,7 +164,7 @@ export const adminSaveRarity = (pw, r) =>
   })
 // Types de boosters (admin) : créer ou modifier (id nul = création), supprimer, offrir (pseudo vide = tous les joueurs)
 export const adminSaveBoosterType = (pw, id, b) =>
-  rpc('admin_save_booster_type', { p_password: pw, p_id: id, p_name: b.name, p_cards: b.cards, p_color: b.color, p_price: b.price, p_enabled: b.enabled, p_slots: b.slots })
+  rpc('admin_save_booster_type', { p_password: pw, p_id: id, p_name: b.name, p_cards: b.cards, p_color: b.color, p_price: b.price, p_enabled: b.enabled, p_slots: b.slots, p_role: b.role || null })
 export const adminDeleteBoosterType = (pw, id) => rpc('admin_delete_booster_type', { p_password: pw, p_id: id })
 export const adminGrantBoosters = (pw, typeId, quantity, username = null) =>
   rpc('admin_grant_boosters', { p_password: pw, p_type: typeId, p_quantity: quantity, p_username: username })
@@ -171,7 +191,10 @@ export function explain(e) {
   const m = e?.message || String(e)
   const low = m.match(/bid_too_low:(\d+)/)
   if (low) return `Mise trop basse : minimum ${low[1]} pièce${Number(low[1]) > 1 ? 's' : ''}.`
-  if (m.includes('checkout:consent_required')) return 'Pour payer, coche les deux cases : conditions de vente et exécution immédiate.'
+  if (m.includes('checkout:consent_required')) return 'Pour payer, coche toutes les cases : conditions de vente, exécution immédiate (et renouvellement pour un abonnement).'
+  if (m.includes('checkout:subscription_disabled')) return 'L’abonnement n’est pas disponible pour le moment.'
+  if (m.includes('checkout:already_subscribed')) return 'Tu es déjà abonné : utilise « Gérer mon abonnement ».'
+  if (m.includes('checkout:no_subscription')) return 'Aucun abonnement à gérer pour ce compte.'
   if (m.includes('checkout:cgv_outdated')) return 'Les conditions de vente ont changé : recharge la page puis réessaie.'
   if (m.includes('checkout:legal_incomplete')) return 'Les informations légales du vendeur ne sont pas encore renseignées : le paiement est indisponible.'
   if (m.startsWith('checkout:'))
@@ -227,6 +250,7 @@ export function explain(e) {
   if (m.includes('invalid_booster_slots')) return 'Répartition invalide : chaque carte a au moins une rareté, avec un poids positif, sans doublon.'
   if (m.includes('invalid_booster')) return 'Booster invalide : nom de 1 à 40 caractères, 1 à 10 cartes, couleur, prix entier ou vide.'
   if (m.includes('booster_is_standard')) return 'Le booster Standard ne peut pas être supprimé.'
+  if (m.includes('booster_protected')) return 'Ce booster est la récompense d’une carte complétée : il ne peut ni être supprimé ni perdre ce rôle (donne ce rôle à un autre booster à la place).'
   if (m.includes('booster_has_holders')) return 'Des joueurs possèdent encore ce booster : désactive-le plutôt que de le supprimer.'
   if (m.includes('not_for_sale')) return 'Ce booster n’est pas en vente.'
   if (m.includes('unknown_booster')) return 'Ce booster n’existe pas ou n’est plus disponible.'
@@ -237,7 +261,7 @@ export function explain(e) {
   if (m.includes('invalid_id')) return 'Identifiant invalide : minuscules, chiffres et _ uniquement, 2 à 20 caractères, débute par une lettre.'
   if (m.includes('invalid_max_series')) return 'Taille de série maximale invalide : un nombre entier d’au moins 1 (pas de plafond ouvert pour une nouvelle rareté).'
   if (m.includes('rarity_protected')) return 'Unique, Alpha et Omega ne peuvent pas être supprimées.'
-  if (m.includes('rarity_in_use')) return 'Cette rareté est utilisée (cartes déjà classées ou contenu de booster doré) : elle ne peut pas être supprimée.'
+  if (m.includes('rarity_in_use')) return 'Cette rareté est utilisée (cartes déjà classées, booster doré ou répartition d’un booster) : elle ne peut pas être supprimée.'
   if (m.includes('name_mismatch')) return 'Le nom tapé ne correspond pas exactement au nom de la catégorie : rien n’a été supprimé.'
   if (m.includes('card_in_album')) return 'Cette carte est dans ton album : elle ne peut pas être vendue. Retire-la de l’album pour la vendre.'
   if (m.includes('not_enough_cards')) return 'Il n’y a pas assez de cartes vendables dans cette pile (celles de l’album ou en vente sont exclues).'

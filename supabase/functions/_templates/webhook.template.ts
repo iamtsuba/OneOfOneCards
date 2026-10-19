@@ -1,10 +1,13 @@
-// 1/1 Cards, environnement __ENV__ : reçoit les notifications de Stripe et crédite les boosters après un paiement réussi.
+// 1/1 Cards, environnement __ENV__ : reçoit les notifications de Stripe : crédite les boosters après un paiement réussi
+// et tient à jour l'abonnement des joueurs (événements customer.subscription.created / updated / deleted).
 // GÉNÉRÉ par scripts/build-functions.mjs à partir de supabase/functions/_templates/ : ne pas modifier à la main.
 // Cette fonction doit être déployée SANS vérification JWT (c'est Stripe qui appelle) :
 // l'authenticité est garantie par la signature Stripe, vérifiée ci-dessous.
 //
 // Secrets requis (Supabase > Edge Functions > Secrets) :
 //   __SP__STRIPE_WEBHOOK_SECRET : secret de signature du webhook (whsec_...)
+// Événements à cocher dans Stripe (Développeurs > Webhooks) : checkout.session.completed, checkout.session.async_payment_succeeded,
+//   customer.subscription.created, customer.subscription.updated, customer.subscription.deleted
 // SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY sont fournis automatiquement par Supabase.
 import { createClient } from 'npm:@supabase/supabase-js@2'
 
@@ -60,6 +63,35 @@ Deno.serve(async (req) => {
     event = JSON.parse(payload)
   } catch {
     return new Response('invalid_payload', { status: 400 })
+  }
+
+  // Abonnement : état du joueur (statut, période, résiliation programmée) ; le cadeau mensuel est donné par la base, une fois par période
+  if (['customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted'].includes(event.type)) {
+    const sub = event.data?.object
+    const userId = sub?.metadata?.user_id
+    // Abonnement qui ne vient pas de notre application (ou identifiant illisible) : on ignore
+    if (!sub || typeof userId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
+      return Response.json({ received: true, ignored: true })
+    }
+    // Selon la version de l'API Stripe, les dates de période sont sur l'abonnement ou sur sa première ligne
+    const item = sub.items?.data?.[0]
+    const iso = (t: unknown) => (typeof t === 'number' ? new Date(t * 1000).toISOString() : null)
+    const admin2 = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } })
+    const { data, error } = await admin2.rpc(PREFIX + 'subscription_sync', {
+      p_user: userId,
+      p_customer: typeof sub.customer === 'string' ? sub.customer : sub.customer?.id ?? null,
+      p_subscription: sub.id ?? null,
+      p_status: event.type === 'customer.subscription.deleted' ? 'canceled' : sub.status,
+      p_period_start: iso(sub.current_period_start ?? item?.current_period_start),
+      p_period_end: iso(sub.current_period_end ?? item?.current_period_end),
+      p_cancel_at_period_end: sub.cancel_at_period_end === true || (sub.cancel_at ?? null) !== null,
+      p_event_created: iso(event.created) ?? new Date().toISOString(),
+    })
+    if (error) {
+      console.error('Mise à jour de l’abonnement impossible', error.message)
+      return new Response('subscription_failed', { status: 500 }) // Stripe réessaiera
+    }
+    return Response.json({ received: true, subscription: data ?? null })
   }
 
   const handled = ['checkout.session.completed', 'checkout.session.async_payment_succeeded']

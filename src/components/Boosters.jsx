@@ -7,6 +7,7 @@ import Card from './Card'
 import Pack from './Pack'
 import Fireworks from './Fireworks'
 import PurchaseConsent from './PurchaseConsent'
+import { SubscriptionPanel, SubscribeConsent } from './Subscription'
 import LegalSheet from './Legal'
 import Odds, { BoosterOddsSheet } from './Odds'
 import { InfoButton } from './Collection'
@@ -85,17 +86,17 @@ export function ExtraBoosters({ items, coins, disabled, onOpen, onBuy, onInfo })
 }
 
 // Boosters Gold gagnés en complétant tous les emplacements d'une carte dans l'album (un par carte), à ouvrir un par un
-export function GoldRewardList({ rewards, typeMap, disabled, onOpen }) {
+export function GoldRewardList({ rewards, typeMap, name = 'Gold', disabled, onOpen }) {
   if (!rewards || rewards.length === 0) return null
   return (
-    <div className="golden-reward gold-rewards" aria-label="Boosters Gold à ouvrir">
-      <strong>{rewards.length > 1 ? `${rewards.length} boosters Gold à ouvrir` : 'Un booster Gold à ouvrir'}</strong>
-      <p className="muted">Gagné en complétant tous les emplacements d’une carte dans l’album : 3 Rares, 1 Super Rare et une carte spéciale.</p>
+    <div className="golden-reward gold-rewards" aria-label={`Boosters ${name} à ouvrir`}>
+      <strong>{rewards.length > 1 ? `${rewards.length} boosters ${name} à ouvrir` : `Un booster ${name} à ouvrir`}</strong>
+      <p className="muted">Gagné en complétant tous les emplacements d’une carte dans l’album.</p>
       <ul className="gold-list">
         {rewards.map((g) => (
           <li key={g.id}>
             <span>{typeMap?.[g.type_id]?.name ?? 'Carte'}</span>
-            <button type="button" className="btn gold small" onClick={() => onOpen(g.id)} disabled={disabled} aria-label={`Ouvrir le booster Gold de ${typeMap?.[g.type_id]?.name ?? 'cette carte'}`}>Ouvrir</button>
+            <button type="button" className="btn gold small" onClick={() => onOpen(g.id)} disabled={disabled} aria-label={`Ouvrir le booster ${name} de ${typeMap?.[g.type_id]?.name ?? 'cette carte'}`}>Ouvrir</button>
           </li>
         ))}
       </ul>
@@ -128,6 +129,15 @@ export default function Boosters({ goCollection }) {
   const nextCategory = status?.next_category
   const canOpen = status && total > 0 && !overlay && !!category
   const [consentOpen, setConsentOpen] = useState(false)
+  const [subOpen, setSubOpen] = useState(false)
+  const [subBusy, setSubBusy] = useState(false)
+  const [subError, setSubError] = useState('')
+  // « Gérer mon abonnement » : portail Stripe (résilier, changer de carte, factures)
+  async function manageSubscription() {
+    setSubBusy(true)
+    setSubError('')
+    try { window.location.href = await api.openSubscriptionPortal() } catch (e) { setSubError(explain(e)); setSubBusy(false) }
+  }
   const [termsOpen, setTermsOpen] = useState(false)
   const [notice, setNotice] = useState('')
   const returned = useRef(false)
@@ -138,10 +148,23 @@ export default function Boosters({ goCollection }) {
     returned.current = true
     const params = new URLSearchParams(window.location.search)
     const pay = params.get('payment')
-    if (!pay) return
+    const subReturn = params.get('subscription')
+    if (!pay && !subReturn) return
     params.delete('payment')
+    params.delete('subscription')
     const qs = params.toString()
     window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash)
+    // Retour de la page d'abonnement ou du portail de gestion : l'état arrive par Stripe quelques secondes plus tard
+    if (subReturn) {
+      if (subReturn === 'cancel') { setNotice('Abonnement annulé : tu n’as pas été débité.'); return }
+      setNotice(subReturn === 'success' ? 'Merci ! Ton abonnement s’active dans quelques secondes.' : 'Modifications enregistrées chez Stripe : elles s’affichent dans quelques secondes.')
+      let tries = 0
+      const id = setInterval(() => {
+        refreshStatus().catch(() => {})
+        if (++tries >= 10) clearInterval(id)
+      }, 2500)
+      return
+    }
     if (pay === 'cancel') { setNotice('Paiement annulé : tu n’as pas été débité.'); return }
     if (pay === 'success') {
       setNotice('Merci ! Ton paiement est confirmé : tes boosters s’affichent dans quelques secondes.')
@@ -183,7 +206,9 @@ export default function Boosters({ goCollection }) {
     const goldCategory = goldType ? catalog?.categoryMap?.[goldType.category_id] : null
     if (!(status && (isGold ? goldCategory : category) && (isGold ? true : isType ? typeInfo?.quantity > 0 : isPack ? goldenPacks > 0 : total > 0) && (fromSummary === true || !overlay))) return
     setError('')
-    setOverlay({ phase: 'shake', categoryId: (goldCategory ?? category).id, golden: isPack, gold: isGold, label: typeInfo?.name })
+    // nom du booster pendant l'ouverture : celui du module Boosters (Gold, type choisi, booster des abonnés pour un abonné)
+    const shakeLabel = isGold ? status?.reward_booster?.name : isType ? typeInfo?.name : kind === 'normal' && status?.subscription?.active && status?.subscription?.booster_name ? status?.standard_booster?.name : undefined
+    setOverlay({ phase: 'shake', categoryId: (goldCategory ?? category).id, golden: isPack, gold: isGold, label: shakeLabel })
     const t0 = Date.now()
     try {
       const res = isType ? await api.openBoosterType(rewardId) : isGold ? await api.openGoldReward(rewardId) : isPack ? await api.openGoldenPack() : await api.openBooster()
@@ -243,7 +268,7 @@ export default function Boosters({ goCollection }) {
 
         <ExtraBoosters items={status?.booster_types} coins={coinsFree} disabled={!!overlay} onOpen={(it) => open(false, 'type', it.id)} onBuy={buy} onInfo={setOddsFor} />
         {oddsFor && category && <BoosterOddsSheet category={category} boosterType={oddsFor} rarityMap={rarityMap} onClose={() => setOddsFor(null)} />}
-        <GoldRewardList rewards={goldRewards} typeMap={catalog?.typeMap} disabled={!!overlay} onOpen={(id) => open(false, 'gold', id)} />
+        <GoldRewardList rewards={goldRewards} typeMap={catalog?.typeMap} name={status?.reward_booster?.name} disabled={!!overlay} onOpen={(id) => open(false, 'gold', id)} />
         {goldenPacks > 0 && (
           <div className="golden-reward">
             <strong>{goldenPacks > 1 ? `${goldenPacks} packs dorés à ouvrir` : 'Un pack doré à ouvrir'}</strong>
@@ -283,6 +308,8 @@ export default function Boosters({ goCollection }) {
           <p className="msg info">Toutes les catégories de boosters ont été entièrement tirées. De nouvelles arriveront bientôt.</p>
         )}
 
+        <SubscriptionPanel sub={status?.subscription} baseMinutes={status?.subscription?.active ? null : status?.regen_minutes} onSubscribe={() => setSubOpen(true)} onManage={manageSubscription} busy={subBusy} error={subError} />
+
         {status?.shop_enabled && (
           <div className="shop">
             <div>
@@ -304,6 +331,7 @@ export default function Boosters({ goCollection }) {
       </div>
 
       {consentOpen && <PurchaseConsent status={status} onClose={() => setConsentOpen(false)} />}
+      {subOpen && <SubscribeConsent status={status} onClose={() => setSubOpen(false)} />}
       {termsOpen && <LegalSheet onClose={() => setTermsOpen(false)} />}
 
       {overlay && (
@@ -349,7 +377,7 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
     return (
       <div className="overlay" role="dialog" aria-modal="true" aria-label="Ouverture du booster">
         <Pack phase={overlay.phase} golden={overlay.golden} category={catalog?.categoryMap?.[overlay.categoryId]} />
-        <p className="overlay-hint">{overlay.gold ? 'Ton booster Gold !' : overlay.golden ? 'Un booster doré !' : overlay.label ? `Ton booster ${overlay.label} !` : 'Ouverture…'}</p>
+        <p className="overlay-hint">{overlay.gold ? `Ton booster ${overlay.label ?? 'Gold'} !` : overlay.golden ? 'Un booster doré !' : overlay.label ? `Ton booster ${overlay.label} !` : 'Ouverture…'}</p>
       </div>
     )
   }
@@ -371,7 +399,7 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
             {catalog.categoryMap[overlay.nextCategoryId] ? ` « ${catalog.categoryMap[overlay.nextCategoryId].name} » est maintenant ouverte.` : ' Toutes les catégories sont terminées.'}
           </p>
         )}
-        <h2 className={`overlay-title ${golden ? 'gold' : ''}`}>{gold ? 'Booster Gold' : golden ? 'Booster doré' : label ? `Booster ${label}` : 'Ton booster'}</h2>
+        <h2 className={`overlay-title ${golden ? 'gold' : ''}`}>{gold ? `Booster ${label ?? 'Gold'}` : golden ? 'Booster doré' : label ? `Booster ${label}` : 'Ton booster'}</h2>
         <SummaryGrid cards={cards} rarityMap={rarityMap} catalog={catalog} revealAll={revealAll} onZoom={setZoom} />
         {zoom != null && <CardZoom cards={cards} index={zoom} rarityMap={rarityMap} catalog={catalog} onClose={() => setZoom(null)} onMove={(d) => setZoom((z) => Math.max(0, Math.min(cards.length - 1, (z ?? 0) + d)))} />}
         <p className="overlay-hint">
@@ -405,7 +433,7 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
       {/* Tout le contenu d'une carte (légende, carte, feux d'artifice, texte) sous une seule clé : remplacé
           d'un seul bloc d'une carte à l'autre, jamais de morceau de la carte précédente qui traîne à l'écran. */}
       <div className="reveal-step" key={idx}>
-        <p className="overlay-hint">{gold ? 'Booster Gold : ' : golden ? 'Booster doré : ' : ''}carte {idx + 1} sur {cards.length}</p>
+        <p className="overlay-hint">{gold ? `Booster ${label ?? 'Gold'} : ` : golden ? 'Booster doré : ' : ''}carte {idx + 1} sur {cards.length}</p>
 
         <div
           className="reveal-card"

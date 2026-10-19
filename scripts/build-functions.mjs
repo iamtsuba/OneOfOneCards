@@ -1,6 +1,6 @@
 // Génère les fonctions Edge Supabase de chaque environnement à partir des modèles de supabase/functions/_templates/.
-//   prod    : o1ocards-checkout, o1ocards-stripe-webhook         (secrets STRIPE_SECRET_KEY, SITE_URL, STRIPE_WEBHOOK_SECRET)
-//   préprod : pp-o1ocards-checkout, pp-o1ocards-stripe-webhook   (secrets PP_STRIPE_SECRET_KEY, PP_SITE_URL, PP_STRIPE_WEBHOOK_SECRET)
+//   prod    : o1ocards-checkout, o1ocards-stripe-webhook, o1ocards-subscribe, o1ocards-subscription-portal            (secrets STRIPE_SECRET_KEY, SITE_URL, STRIPE_WEBHOOK_SECRET)
+//   préprod : pp-o1ocards-checkout, pp-o1ocards-stripe-webhook, pp-o1ocards-subscribe, pp-o1ocards-subscription-portal (secrets PP_STRIPE_SECRET_KEY, PP_SITE_URL, PP_STRIPE_WEBHOOK_SECRET)
 //   node scripts/build-functions.mjs           écrit les fonctions et met à jour supabase/config.toml
 //   node scripts/build-functions.mjs --check   échoue si elles ne sont pas à jour
 import fs from 'node:fs'
@@ -22,7 +22,7 @@ const ENVS = {
     fallbackNote: '\n//   (les réglages facultatifs retombent sur ceux de la production s\'ils ne sont pas définis ; jamais les clés Stripe)',
   },
 }
-const TEMPLATES = { checkout: 'checkout.template.ts', 'stripe-webhook': 'webhook.template.ts' }
+const TEMPLATES = { checkout: 'checkout.template.ts', 'stripe-webhook': 'webhook.template.ts', subscribe: 'subscribe.template.ts', 'subscription-portal': 'subscription-portal.template.ts' }
 
 const render = (tpl, env, c) =>
   tpl.replaceAll('__ENV__', env).replaceAll('__PREFIX__', c.prefix).replaceAll('__KEYHINT__', c.keyHint)

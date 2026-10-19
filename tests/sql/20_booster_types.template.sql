@@ -114,14 +114,14 @@ select pg_temp.expect('plus de détenteur : supprimé, répartitions et stocks a
 \echo '--- droits'
 select pg_temp.expect('joueur connecté : acheter, ouvrir, administrer (avec le mot de passe) ; anonyme : rien ; tables fermées',
   has_function_privilege('authenticated', 'public.{{P}}buy_booster(int, int)', 'execute') and has_function_privilege('authenticated', 'public.{{P}}open_booster_of_type(int)', 'execute')
-  and has_function_privilege('authenticated', 'public.{{P}}admin_save_booster_type(text, int, text, int, text, int, boolean, jsonb)', 'execute')
+  and has_function_privilege('authenticated', 'public.{{P}}admin_save_booster_type(text, int, text, int, text, int, boolean, jsonb, text)', 'execute')
   and not has_function_privilege('anon', 'public.{{P}}buy_booster(int, int)', 'execute') and not has_function_privilege('anon', 'public.{{P}}admin_grant_boosters(text, int, int, text)', 'execute')
   and not has_function_privilege('authenticated', 'public.{{P}}draw_booster_cards(uuid, int, int)', 'execute') and not has_function_privilege('authenticated', 'public.{{P}}pick_series(int, int, int, double precision, jsonb)', 'execute')
   and not has_table_privilege('authenticated', 'public.{{P}}booster_types', 'select') and not has_table_privilege('authenticated', 'public.{{P}}user_boosters', 'select') and not has_table_privilege('authenticated', 'public.{{P}}booster_type_slots', 'select'));
 
 -- nettoyage : on laisse la base comme on l'a trouvée
 delete from public.{{P}}cards where owner_id in (:A, :B); delete from public.{{P}}album_picks where user_id in (:A, :B);
-delete from public.{{P}}booster_types where not is_standard;
+delete from public.{{P}}booster_types where id not in (select id from bt_backup);   -- seulement ceux créés par ce test (les boosters de rôle restent)
 delete from public.{{P}}booster_type_slots where booster_type_id = :std;
 insert into public.{{P}}booster_type_slots select * from sl_backup where booster_type_id = :std;
 update public.{{P}}booster_types b set name = o.name, cards = o.cards, color = o.color, price_coins = o.price_coins, enabled = o.enabled from bt_backup o where o.id = b.id and b.id = :std;

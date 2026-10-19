@@ -19,7 +19,7 @@ let totalBad = 0
 const waitUp = async (port) => { for (let i = 0; i < 160; i++) { try { await fetch(`http://127.0.0.1:${port}/`, { method: 'OPTIONS' }); return } catch { await new Promise((r) => setTimeout(r, 500)) } } throw new Error('fonction non démarrée ' + port) }
 
 async function runEnv(E) {
-  const state = { cfg: { shop_enabled: 1, stripe_pack_boosters: 10, stripe_pack_price_cents: 199, cgv_version: 1 }, legal: { seller_name: 'Thomas Test', seller_address: '1 rue du Test, 69000 Lyon', seller_email: 'contact@example.com', consent_cgv_text: 'CGV OK', consent_withdrawal_text: 'Je renonce' }, consents: [], consentFail: false, rpcCalls: [], paths: [], stripeCalls: [], seen: new Set(), stripeFail: false, rpcFail: false }
+  const state = { subName: 'OneMore', subscription: null, subCalls: [], portalCalls: [], cfg: { shop_enabled: 1, stripe_pack_boosters: 10, stripe_pack_price_cents: 199, cgv_version: 1, subscription_enabled: 0, subscription_price_cents: 499 }, legal: { seller_name: 'Thomas Test', seller_address: '1 rue du Test, 69000 Lyon', seller_email: 'contact@example.com', consent_cgv_text: 'CGV OK', consent_withdrawal_text: 'Je renonce' }, consents: [], consentFail: false, rpcCalls: [], paths: [], stripeCalls: [], seen: new Set(), stripeFail: false, rpcFail: false }
 
   // ---- faux Supabase + faux Stripe
   const mock = http.createServer((req, res) => {
@@ -48,6 +48,18 @@ async function runEnv(E) {
         state.seen.add(b.p_session_id)
         return send(200, first)
       }
+      if (req.url.startsWith(`/rest/v1/${E.prefix}text_config`)) return send(200, [{ key: 'subscription_name', value: state.subName }])
+      if (req.url.startsWith(`/rest/v1/${E.prefix}subscriptions`)) return send(200, state.subscription ? [state.subscription] : [])
+      if (req.url.startsWith(`/rest/v1/rpc/${E.prefix}subscription_sync`)) {
+        const b = JSON.parse(body); state.subCalls.push(b)
+        if (state.rpcFail) return send(500, { message: 'boom' })
+        return send(200, { ok: true, active: true, gift_granted: true })
+      }
+      if (req.url.startsWith('/v1/billing_portal/sessions')) {
+        state.portalCalls.push({ auth: req.headers.authorization, form: Object.fromEntries(new URLSearchParams(body)) })
+        if (state.stripeFail) return send(400, { error: { message: 'portal not configured' } })
+        return send(200, { id: 'bps_1', url: 'https://billing.stripe.test/p/session_1' })
+      }
       if (req.url.startsWith('/v1/checkout/sessions')) {
         state.stripeCalls.push({ auth: req.headers.authorization, form: Object.fromEntries(new URLSearchParams(body)) })
         if (state.stripeFail) return send(400, { error: { message: 'invalid' } })
@@ -75,8 +87,10 @@ async function runEnv(E) {
     start(ck, E.port + 4, E.sp ? { STRIPE_SECRET_KEY: 'sk_live_prod_key' } : { PP_STRIPE_SECRET_KEY: 'sk_test_preprod_key' }, [E.sp + 'STRIPE_SECRET_KEY']),
     // réglage non sensible défini seulement sur l'autre jeu de noms
     start(ck, E.port + 5, E.sp ? { STRIPE_TAX_CODE: 'txcd_fallback' } : { PP_STRIPE_TAX_CODE: 'txcd_pp_only' }),
+    start(`${E.dir}-subscribe`, E.port + 6), start(`${E.dir}-subscription-portal`, E.port + 7),
+    start(`${E.dir}-subscribe`, E.port + 8, { [E.sp + 'STRIPE_SECRET_KEY']: 'sk_live_fake' }),
   ]
-  for (let i = 0; i <= 5; i++) await waitUp(E.port + i)
+  for (let i = 0; i <= 8; i++) await waitUp(E.port + i)
 
   let bad = 0
   const ok = (name, cond, extra = '') => { console.log(cond ? 'OK  ' : 'FAIL', name, cond ? '' : extra); if (!cond) bad++ }
@@ -177,6 +191,121 @@ async function runEnv(E) {
   ok('session étrangère à l’application -> ignorée', r.status === 200 && j.ignored === true && state.rpcCalls.length === n1)
   state.rpcFail = true; p = event({ id: 'cs_fail' }); r = await hook(p, sign(p)); ok('erreur base de données -> 500 (Stripe réessaiera)', r.status === 500); state.rpcFail = false
   r = await fetch(WH); ok('GET -> 405', r.status === 405)
+
+  console.log(`--- [${E.name}] abonnement (${E.dir}-subscribe)`)
+  const SU = `http://127.0.0.1:${E.port + 6}/`, SULIVE = `http://127.0.0.1:${E.port + 8}/`
+  const SCONSENT = JSON.stringify({ consent: { cgv: true, withdrawal: true, recurring: true, version: 1 } })
+  const subPost = (url = SU, headers = A, body = SCONSENT) => post(url, headers, body)
+  r = await fetch(SU, { method: 'OPTIONS' }); ok('préflight CORS', r.status === 200 && r.headers.get('access-control-allow-origin') === '*')
+  r = await subPost(SU, {}); ok('sans jeton -> 401', r.status === 401)
+  r = await subPost(SU, { Authorization: 'Bearer faux' }); ok('mauvais jeton -> 401', r.status === 401)
+  r = await subPost(); ok('abonnement fermé (réglage à 0) -> 403 subscription_disabled', r.status === 403 && (await r.json()).error === 'subscription_disabled')
+  state.cfg.subscription_enabled = 1
+  const n0s = state.stripeCalls.length
+  r = await subPost(SU, A, '{}'); ok('sans consentement -> 400 consent_required', r.status === 400 && (await r.json()).error === 'consent_required')
+  r = await subPost(SU, A, JSON.stringify({ consent: { cgv: true, withdrawal: true, version: 1 } })); ok('sans la reconnaissance du renouvellement automatique -> 400', r.status === 400)
+  r = await subPost(SU, A, JSON.stringify({ consent: { cgv: true, withdrawal: false, recurring: true, version: 1 } })); ok('sans la renonciation à la rétractation -> 400', r.status === 400)
+  r = await subPost(SU, A, JSON.stringify({ consent: { cgv: false, withdrawal: true, recurring: true, version: 1 } })); ok('sans les CGV -> 400', r.status === 400)
+  r = await subPost(SU, A, JSON.stringify({ consent: { cgv: true, withdrawal: true, recurring: 'true', version: 1 } })); ok('valeurs non booléennes refusées -> 400', r.status === 400)
+  r = await subPost(SU, A, JSON.stringify({ consent: { cgv: true, withdrawal: true, recurring: true, version: 0 } })); ok('ancienne version des CGV -> 409 cgv_outdated', r.status === 409 && (await r.json()).error === 'cgv_outdated')
+  ok('aucune session Stripe créée pour ces refus', state.stripeCalls.length === n0s)
+  const ncs = state.consents.length
+  r = await fetch(SU, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer good-token', 'x-forwarded-for': '203.0.113.9, 10.0.0.1', 'user-agent': 'SubAgent/2.0' }, body: SCONSENT }); j = await r.json()
+  ok('consentement complet -> url de paiement', r.status === 200 && j.url.includes('checkout.stripe.test'), JSON.stringify(j))
+  let sc = state.stripeCalls.at(-1)
+  ok('clé secrète envoyée à Stripe', sc.auth === 'Bearer sk_test_fake')
+  ok('mode abonnement, paiement mensuel de 4,99 EUR (prix du réglage, envoyé à Stripe à chaque souscription)', sc.form.mode === 'subscription' && sc.form['line_items[0][price_data][unit_amount]'] === '499' && sc.form['line_items[0][price_data][currency]'] === 'eur' && sc.form['line_items[0][price_data][recurring][interval]'] === 'month')
+  ok('le joueur est identifié sur la session ET sur l\'abonnement (c\'est ce qui revient dans les notifications)', sc.form['metadata[user_id]'] === 'aaaaaaaa-1111-2222-3333-444444444444' && sc.form['subscription_data[metadata][user_id]'] === 'aaaaaaaa-1111-2222-3333-444444444444' && sc.form.client_reference_id === 'aaaaaaaa-1111-2222-3333-444444444444' && sc.form['metadata[kind]'] === 'subscription')
+  ok('retour vers le site avec subscription=success / cancel', sc.form.success_url === E.site + '?subscription=success' && sc.form.cancel_url === E.site + '?subscription=cancel', sc.form.success_url)
+  ok('code fiscal par défaut, email prérempli, aucun client Stripe connu', sc.form['line_items[0][price_data][product_data][tax_code]'] === 'txcd_10201000' && sc.form.customer_email === 'thomas@example.com' && !('customer' in sc.form))
+  ok(`produit affiché : « ${sc.form['line_items[0][price_data][product_data][name]']} »`, sc.form['line_items[0][price_data][product_data][name]'] === (E.name === 'preprod' ? 'Abonnement OneMore – 1/1 Cards (test)' : 'Abonnement OneMore – 1/1 Cards'))
+  const rec2 = state.consents.at(-1)
+  ok('preuve de consentement enregistrée (une de plus), liée à la session Stripe', state.consents.length === ncs + 1 && rec2.stripe_session_id === 'cs_test_abc' && rec2.cgv_version === 1 && rec2.user_id === 'aaaaaaaa-1111-2222-3333-444444444444')
+  ok('preuve : textes acceptés dont le renouvellement automatique, IP, navigateur, prix, aucun booster', /CGV OK\nJe renonce\nAbonnement mensuel renouvelé automatiquement/.test(rec2.statement) && rec2.ip === '203.0.113.9' && rec2.user_agent === 'SubAgent/2.0' && rec2.amount_cents === 499 && rec2.boosters === null && rec2.currency === 'eur')
+  state.subName = 'Premium'; await subPost()
+  ok('le nom vient du réglage texte de l\'admin (« Premium »)', state.stripeCalls.at(-1).form['line_items[0][price_data][product_data][name]'].includes('Abonnement Premium'))
+  state.subName = 'OneMore'
+  state.cfg.subscription_price_cents = 799; await subPost()
+  ok('le prix suit le réglage (7,99 EUR)', state.stripeCalls.at(-1).form['line_items[0][price_data][unit_amount]'] === '799')
+  state.cfg.subscription_price_cents = 10; r = await subPost(); ok('prix absurde (< 0,50 EUR) refusé -> 503', r.status === 503)
+  state.cfg.subscription_price_cents = 500000; r = await subPost(); ok('prix absurde (> 1 000 EUR) refusé -> 503', r.status === 503)
+  state.cfg.subscription_price_cents = 499
+  state.subscription = { status: 'canceled', stripe_customer_id: 'cus_old' }; await subPost()
+  sc = state.stripeCalls.at(-1)
+  ok('ancien abonné : son client Stripe est réutilisé (pas de second client ni d\'email prérempli)', sc.form.customer === 'cus_old' && !('customer_email' in sc.form))
+  for (const st of ['active', 'trialing']) {
+    state.subscription = { status: st, stripe_customer_id: 'cus_old' }
+    const nn = state.stripeCalls.length
+    r = await subPost(); ok(`déjà abonné (${st}) -> 409 already_subscribed, aucune session`, r.status === 409 && (await r.json()).error === 'already_subscribed' && state.stripeCalls.length === nn)
+  }
+  state.subscription = { status: 'past_due', stripe_customer_id: 'cus_old' }
+  r = await subPost(); ok('paiement en retard : peut se réabonner', r.status === 200)
+  state.subscription = null
+  state.stripeFail = true; r = await subPost(); ok('refus de Stripe -> 502', r.status === 502); state.stripeFail = false
+  state.consentFail = true; r = await subPost(); ok('preuve non enregistrable -> pas de paiement proposé (500)', r.status === 500); state.consentFail = false
+  if (E.name === 'prod') {
+    Object.assign(state.legal, { seller_address: '' })
+    r = await subPost(SULIVE); ok('clé live + adresse du vendeur vide -> 403 legal_incomplete', r.status === 403 && (await r.json()).error === 'legal_incomplete')
+    r = await subPost(); ok('clé test + adresse vide : les essais restent possibles', r.status === 200)
+    Object.assign(state.legal, { seller_address: '1 rue du Test, 69000 Lyon' })
+    r = await subPost(SULIVE); ok('clé live + infos légales complètes -> paiement', r.status === 200)
+  } else {
+    const nn = state.stripeCalls.length
+    r = await subPost(SULIVE); ok('PRÉPROD : une clé Stripe live (sk_live_) est refusée (503)', r.status === 503 && state.stripeCalls.length === nn)
+  }
+  r = await fetch(SU); ok('GET -> 405', r.status === 405)
+
+  console.log(`--- [${E.name}] gestion de l'abonnement (${E.dir}-subscription-portal)`)
+  const PO = `http://127.0.0.1:${E.port + 7}/`
+  r = await post(PO, {}, '{}'); ok('sans jeton -> 401', r.status === 401)
+  r = await post(PO, A, '{}'); ok('aucun abonnement connu -> 404 no_subscription', r.status === 404 && (await r.json()).error === 'no_subscription')
+  state.subscription = { status: 'active', stripe_customer_id: 'cus_9' }
+  r = await post(PO, A, JSON.stringify({ customer: 'cus_evil' })); j = await r.json()
+  ok('abonné -> adresse du portail Stripe', r.status === 200 && j.url.includes('billing.stripe.test'), JSON.stringify(j))
+  const pc = state.portalCalls.at(-1)
+  ok('le client est retrouvé côté serveur : celui envoyé par le navigateur (cus_evil) est ignoré', pc.form.customer === 'cus_9' && pc.auth === 'Bearer sk_test_fake')
+  ok('retour vers le site avec subscription=portal', pc.form.return_url === E.site + '?subscription=portal', pc.form.return_url)
+  state.subscription = { status: 'canceled', stripe_customer_id: 'cus_9' }
+  r = await post(PO, A, '{}'); ok('ancien abonné : peut encore consulter ses factures (portail)', r.status === 200)
+  state.subscription = { status: 'active', stripe_customer_id: null }
+  r = await post(PO, A, '{}'); ok('abonnement sans client Stripe connu -> 404', r.status === 404)
+  state.subscription = { status: 'active', stripe_customer_id: 'cus_9' }
+  state.stripeFail = true; r = await post(PO, A, '{}'); ok('portail non activé chez Stripe -> 502', r.status === 502); state.stripeFail = false
+  r = await fetch(PO); ok('GET -> 405', r.status === 405)
+  state.subscription = null
+
+  console.log(`--- [${E.name}] webhook : événements d'abonnement`)
+  const subEvent = (type, over = {}, created = 1790000000) => JSON.stringify({ id: 'evt_s', type, created, data: { object: { id: 'sub_1', customer: 'cus_1', status: 'active', current_period_start: 1790000000, current_period_end: 1792592000, cancel_at_period_end: false, metadata: { user_id: 'aaaaaaaa-1111-2222-3333-444444444444' }, ...over } } })
+  const nsub = state.subCalls.length
+  p = subEvent('customer.subscription.created'); r = await hook(p, sign(p)); j = await r.json()
+  const sy = state.subCalls.at(-1)
+  ok('abonnement créé -> état envoyé à la base via ' + E.prefix + 'subscription_sync', r.status === 200 && state.subCalls.length === nsub + 1 && sy.p_user === 'aaaaaaaa-1111-2222-3333-444444444444' && sy.p_status === 'active' && sy.p_customer === 'cus_1' && sy.p_subscription === 'sub_1', JSON.stringify(sy))
+  ok('dates de période converties (secondes -> horodatage) et événement daté', sy.p_period_start === new Date(1790000000 * 1000).toISOString() && sy.p_period_end === new Date(1792592000 * 1000).toISOString() && sy.p_event_created === new Date(1790000000 * 1000).toISOString() && sy.p_cancel_at_period_end === false)
+  p = subEvent('customer.subscription.updated', { current_period_start: undefined, current_period_end: undefined, items: { data: [{ current_period_start: 1795000000, current_period_end: 1797592000 }] } }); await hook(p, sign(p))
+  ok('API Stripe récente : dates lues sur la ligne de l\'abonnement', state.subCalls.at(-1).p_period_end === new Date(1797592000 * 1000).toISOString() && state.subCalls.at(-1).p_period_start === new Date(1795000000 * 1000).toISOString())
+  p = subEvent('customer.subscription.updated', { cancel_at_period_end: true }); await hook(p, sign(p))
+  ok('résiliation programmée (cancel_at_period_end) transmise', state.subCalls.at(-1).p_cancel_at_period_end === true)
+  p = subEvent('customer.subscription.updated', { cancel_at_period_end: false, cancel_at: 1792592000 }); await hook(p, sign(p))
+  ok('résiliation programmée par date (cancel_at) transmise aussi', state.subCalls.at(-1).p_cancel_at_period_end === true)
+  p = subEvent('customer.subscription.updated', { status: 'past_due' }); await hook(p, sign(p))
+  ok('paiement en retard : statut past_due transmis', state.subCalls.at(-1).p_status === 'past_due')
+  p = subEvent('customer.subscription.deleted', { status: 'active' }); await hook(p, sign(p))
+  ok('abonnement supprimé -> statut canceled, quel que soit l\'objet reçu', state.subCalls.at(-1).p_status === 'canceled')
+  p = subEvent('customer.subscription.created', { customer: { id: 'cus_obj' } }); await hook(p, sign(p))
+  ok('client donné sous forme d\'objet : identifiant retrouvé', state.subCalls.at(-1).p_customer === 'cus_obj')
+  const n2 = state.subCalls.length
+  p = subEvent('customer.subscription.created', { metadata: {} }); r = await hook(p, sign(p)); j = await r.json()
+  ok('abonnement qui ne vient pas de l\'application (sans joueur) -> ignoré', r.status === 200 && j.ignored === true && state.subCalls.length === n2)
+  p = subEvent('customer.subscription.created', { metadata: { user_id: "x'; drop table" } }); r = await hook(p, sign(p)); j = await r.json()
+  ok('identifiant de joueur illisible -> ignoré, jamais transmis à la base', r.status === 200 && j.ignored === true && state.subCalls.length === n2)
+  p = subEvent('customer.subscription.created'); r = await hook(p, sign(p, undefined, 'whsec_autre')); ok('mauvaise signature -> 400, rien transmis', r.status === 400 && state.subCalls.length === n2)
+  r = await hook(p, sign(p, undefined, E.otherWhsec)); ok('signature de l\'autre environnement -> 400', r.status === 400 && state.subCalls.length === n2)
+  state.rpcFail = true; p = subEvent('customer.subscription.updated'); r = await hook(p, sign(p)); ok('erreur base de données -> 500 (Stripe réessaiera)', r.status === 500); state.rpcFail = false
+  const nCredits = state.rpcCalls.length
+  p = JSON.stringify({ id: 'evt_sub_checkout', type: 'checkout.session.completed', data: { object: { id: 'cs_sub', mode: 'subscription', payment_status: 'paid', metadata: { user_id: 'aaaaaaaa-1111-2222-3333-444444444444', kind: 'subscription' }, client_reference_id: 'aaaaaaaa-1111-2222-3333-444444444444' } } })
+  r = await hook(p, sign(p)); j = await r.json()
+  ok('fin du paiement d\'un abonnement : aucun pack de boosters crédité (l\'état vient des événements d\'abonnement)', r.status === 200 && state.rpcCalls.length === nCredits && j.credited !== true)
+
   console.log(`--- [${E.name}] isolation des environnements`)
   const other = E.name === 'prod' ? 'pp_o1ocards_' : 'o1ocards_'
   const wrong = state.paths.filter((p) => (E.name === 'prod' ? /\/(rpc\/)?pp_o1ocards_/.test(p) : !/\/(rpc\/)?pp_o1ocards_/.test(p)))
