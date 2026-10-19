@@ -1,4 +1,4 @@
-import { isSpecial } from '../rarity'
+import { isSpecial, shownRarity } from '../rarity'
 import { useGame } from '../game'
 import TypeArt from './TypeArt'
 
@@ -12,22 +12,25 @@ export default function Card({ typeId, base, series, number, rarity, type: typeP
   const game = useGame()
   const type = typeProp ?? game?.catalog?.typeMap?.[typeId]
   const fullart = (styleName ?? game?.catalog?.cardStyle?.(typeId, base)) === 'fullart'
-  const hidden = !!game?.catalog?.numberHidden?.(typeId, base, series)   // numéro n/m masqué pour cette rareté
+  // Carte 1/1 : nom et couleurs de sa rareté de base (Ultra Rare 1/1 rouge, Rare 1/1 verte…), et son numéro « 1/1 » est TOUJOURS visible, même si les numéros de sa rareté sont masqués
+  const shown = shownRarity(rarity, game?.rarityMap?.[base])
+  const isUnique = rarity?.kind === 'unique'
+  const hidden = !isUnique && !!game?.catalog?.numberHidden?.(typeId, base, series)   // numéro n/m masqué pour cette rareté
   const setNo = game?.catalog?.checklist?.(typeId)                // numéro de checklist du type, ex. n° 2/50
 
   const style = {
-    '--r1': rarity?.color ?? '#cfc8b8', '--r2': rarity?.color2 ?? '#9a917f', '--rt': rarity?.text_color ?? '#3a3630',
+    '--r1': shown?.color ?? '#cfc8b8', '--r2': shown?.color2 ?? '#9a917f', '--rt': shown?.text_color ?? '#3a3630',
   }
   const cls = ['card', size, tone || '', fullart ? 'fullart' : '', hidden ? 'nonum' : '', !tone && isSpecial(rarity) ? 'foil' : '', glow ? 'glow' : '', shine ? 'shine' : '', onClick ? 'clickable' : '']
     .filter(Boolean)
     .join(' ')
   const state = tone === 'mine' ? ', à toi' : tone === 'taken' ? ', déjà tirée par un autre joueur' : ''
-  const label = `${type?.name ?? 'Carte'}, ${rarity?.name ?? ''}${hidden ? '' : ` ${number} sur ${series}`}${setNo ? `, n° ${setNo.no} sur ${setNo.total}` : ''}${state}${fullart ? ', FullArt' : ''}${listed ? ', en vente' : ''}${favorite ? ', favorite' : ''}${isNew ? ', nouvelle carte' : ''}${count > 1 ? `, pile de ${count} cartes` : ''}${inAlbum ? ', dans ton album' : ''}`
+  const label = `${type?.name ?? 'Carte'}, ${shown?.name ?? ''}${isUnique && shown !== rarity ? ', Unique' : ''}${hidden ? '' : ` ${number} sur ${series}`}${setNo ? `, n° ${setNo.no} sur ${setNo.total}` : ''}${state}${fullart ? ', FullArt' : ''}${listed ? ', en vente' : ''}${favorite ? ', favorite' : ''}${isNew ? ', nouvelle carte' : ''}${count > 1 ? `, pile de ${count} cartes` : ''}${inAlbum ? ', dans ton album' : ''}`
   const Tag = onClick ? 'button' : 'div'
   return (
     <Tag className={cls} style={style} onClick={onClick} aria-label={label} type={onClick ? 'button' : undefined}>
       <div className="card-face">
-        <span className="card-rarity">{rarity?.name}</span>
+        <span className="card-rarity">{shown?.name}</span>
         {!hidden && (
           <div className="card-num">{String(number).padStart(String(series).length, '0')}/{series}</div>
         )}

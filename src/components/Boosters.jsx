@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as api from '../api'
 import { explain } from '../api'
-import { isSpecial, isArtRare } from '../rarity'
+import { isSpecial, isArtRare, fireworksRarity } from '../rarity'
 import ArtIntro, { GOLD_FIREWORKS } from './ArtReveal'
 import { useGame, useCountdown, fmtClock, fmt } from '../game'
 import Card from './Card'
@@ -399,7 +399,7 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
     const rarest = cards.reduce((best, c) => (rarityMap[c.rarity_id]?.sort_order < (rarityMap[best.rarity_id]?.sort_order ?? 99) ? c : best), cards[0])
     // « Tout révéler » : on joue quand même les feux d'artifice des cartes spéciales, rarest en premier
     const specials = revealAll
-      ? [...new Map(cards.slice(from ?? 0).map((c) => rarityMap[c.rarity_id]).filter(isSpecial).map((r) => [r.id, r])).values()].sort((a, b) => a.sort_order - b.sort_order)
+      ? [...new Map(cards.slice(from ?? 0).filter((c) => isSpecial(rarityMap[c.rarity_id])).map((c) => fireworksRarity(rarityMap[c.rarity_id], rarityMap[c.base_rarity])).map((r) => [r.id, r])).values()].sort((a, b) => a.sort_order - b.sort_order)
       : []
     return (
       <div className="overlay" role="dialog" aria-modal="true" aria-label="Résumé du booster">
@@ -464,7 +464,7 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
 
         {introOn && <ArtIntro type={catalog?.typeMap?.[c.type_id]} onDone={() => setArtDone(idx)} />}
         {/* feux d'artifice : ceux de la rareté spéciale, sinon dorés pour une Art Rare ; ils partent quand l'animation plein écran est finie */}
-        {!introOn && (isSpecial(rarity) ? <Fireworks rarity={rarity} /> : art && <Fireworks rarity={GOLD_FIREWORKS} />)}
+        {!introOn && (isSpecial(rarity) ? <Fireworks rarity={fireworksRarity(rarity, rarityMap[c.base_rarity])} /> : art && <Fireworks rarity={GOLD_FIREWORKS} />)}
         {c.is_new && <p className="reveal-new">⭐ Nouvelle carte : elle est déjà dans ton album.</p>}
         <p className="overlay-hint">{last ? 'Touche la carte pour voir le résumé.' : 'Touche la carte pour passer à la suivante.'}</p>
       </div>
