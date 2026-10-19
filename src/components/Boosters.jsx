@@ -229,8 +229,8 @@ export default function Boosters({ goCollection }) {
     if (!(status && (isGold ? goldCategory : category) && (isGold ? true : isType ? typeInfo?.quantity > 0 : isPack ? goldenPacks > 0 : total > 0) && (fromSummary === true || !overlay))) return
     setError('')
     // nom du booster pendant l'ouverture : celui du module Boosters (Gold, type choisi, booster des abonnés pour un abonné)
-    const shakeLabel = isGold ? status?.reward_booster?.name : isType ? typeInfo?.name : kind === 'normal' && status?.subscription?.active && status?.subscription?.booster_name ? status?.standard_booster?.name : undefined
-    setOverlay({ phase: 'shake', categoryId: (goldCategory ?? category).id, golden: isPack, gold: isGold, label: shakeLabel })
+    const shakeBooster = isGold ? status?.reward_booster : isType ? typeInfo : isPack ? null : status?.standard_booster
+    setOverlay({ phase: 'shake', categoryId: (goldCategory ?? category).id, golden: isPack, gold: isGold, label: shakeBooster?.name, glow: shakeBooster?.glow })
     const t0 = Date.now()
     try {
       const res = isType ? await api.openBoosterType(rewardId) : isGold ? await api.openGoldReward(rewardId) : isPack ? await api.openGoldenPack() : await api.openBooster()
@@ -265,7 +265,7 @@ export default function Boosters({ goCollection }) {
 
       <div className="pack-stage">
         <button className="pack-button" onClick={() => open()} disabled={!canOpen} aria-label={boosterName ? `Ouvrir un booster ${boosterName}` : 'Ouvrir un booster'}>
-          <Pack dim={total === 0 || !category} category={category} />
+          <Pack dim={total === 0 || !category} category={category} label={status?.standard_booster?.name} glow={status?.standard_booster?.glow} />
         </button>
 
         {category && <p className="pack-name">Booster {boosterName ? `${boosterName} ` : ''}« {category.name} »</p>}
@@ -398,7 +398,7 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
   if (overlay.phase === 'shake' || overlay.phase === 'tear') {
     return (
       <div className="overlay" role="dialog" aria-modal="true" aria-label="Ouverture du booster">
-        <Pack phase={overlay.phase} golden={overlay.golden} category={catalog?.categoryMap?.[overlay.categoryId]} />
+        <Pack phase={overlay.phase} golden={overlay.golden} category={catalog?.categoryMap?.[overlay.categoryId]} label={overlay.label} glow={overlay.glow} />
         <p className="overlay-hint">{overlay.gold ? `Ton booster ${overlay.label ?? 'Gold'} !` : overlay.golden ? 'Un booster doré !' : overlay.label ? `Ton booster ${overlay.label} !` : 'Ouverture…'}</p>
       </div>
     )

@@ -1,5 +1,5 @@
-// Booster dessiné en SVG : le nom de la catégorie en haut, son image au centre (« 1/1 » tant qu'elle n'en a pas), « 1/1 Cards » sur la
-// bande du bas. Le bandeau du haut s'arrache à l'ouverture.
+// Booster dessiné en SVG : le nom de la catégorie en haut, son image au centre (« 1/1 » tant qu'elle n'en a pas), le nom du booster (Standard, OneMore…) sur la
+// bande du bas (« 1/1 Cards » à défaut). Un halo de lumière peut entourer le paquet. Le bandeau du haut s'arrache à l'ouverture.
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { isImage } from './TypeArt'
 
@@ -37,12 +37,22 @@ export function packTitle(name) {
   return { text: shown, size: Math.max(15, Math.min(30, Math.floor(200 / (shown.length * 0.62)))) }
 }
 
+// Nom du booster sur la bande du bas : une seule ligne, taille adaptée à la longueur (tronqué au-delà de 18 caractères)
+export function bandLabel(label) {
+  const text = String(label ?? '').trim() || '1/1 Cards'
+  const shown = text.length > 18 ? text.slice(0, 17).trimEnd() + '…' : text
+  return { text: shown, size: Math.max(12, Math.min(22, Math.floor(190 / (shown.length * 0.6)))) }
+}
+const GLOW_IDS = ['gold', 'silver', 'red', 'blue', 'green', 'purple', 'rainbow']
+
 const STAR = 'M12 2.2l2.9 6.5 7.1.7-5.3 4.8 1.5 7-6.2-3.7-6.2 3.7 1.5-7L2 9.4l7.1-.7z'
 
-export default function Pack({ phase = 'idle', dim = false, golden = false, category = null }) {
+export default function Pack({ phase = 'idle', dim = false, golden = false, category = null, label = null, glow = 'none' }) {
   const top = crimp(4, 20, 220, 30) + 'L230 34 L10 34 Z'
   const bottom = crimp(356, 340, 220, 30) + 'L230 326 L10 326 Z'
   const title = packTitle(golden ? 'Booster doré' : category?.name)
+  const band = bandLabel(label)
+  const halo = !dim && !golden && GLOW_IDS.includes(glow) ? glow : null   // pas de halo sur un paquet éteint (stock vide) ni sur le booster doré (qui a le sien)
   const image = golden ? '' : (category?.image ?? '')
   // Identifiants SVG propres à chaque booster : plusieurs boosters peuvent être affichés ensemble (aperçus de la console admin) et,
   // avec des identifiants communs, tous prendraient le dégradé du premier
@@ -58,7 +68,7 @@ export default function Pack({ phase = 'idle', dim = false, golden = false, cate
     return undefined
   }, [title.text, title.size])
   return (
-    <div className={`pack-wrap ${phase} ${dim ? 'dim' : ''} ${golden ? 'golden' : ''}`} style={golden ? undefined : packColors(category)} aria-hidden="true">
+    <div className={`pack-wrap ${phase} ${dim ? 'dim' : ''} ${golden ? 'golden' : ''}${halo ? ` has-glow glow-${halo}` : ''}`} style={golden ? undefined : packColors(category)} aria-hidden="true">
       <svg viewBox="0 0 240 360" role="img">
         <defs>
           <linearGradient id={`pk-body-${uid}`} x1="0" y1="0" x2="1" y2="1">
@@ -94,8 +104,8 @@ export default function Pack({ phase = 'idle', dim = false, golden = false, cate
                 style={{ fill: 'var(--pk-text)', fontFamily: 'var(--font-display)', letterSpacing: '-0.04em' }}>1/1</text>
             )}
           </g>
-          <text x="120" y="298" textAnchor="middle" fontSize="22" fontWeight="700" transform="rotate(-5 120 294)"
-            style={{ fill: 'var(--pk-bandtext)', fontFamily: 'var(--font-display)' }}>1/1 Cards</text>
+          <text className="pack-band" x="120" y="298" textAnchor="middle" fontSize={band.size} fontWeight="700" transform="rotate(-5 120 294)"
+            style={{ fill: 'var(--pk-bandtext)', fontFamily: 'var(--font-display)' }}>{band.text}</text>
           <path d={bottom} style={{ fill: 'var(--pk-crimp)' }} />
         </g>
         <path className="pack-top" d={top} style={{ fill: 'var(--pk-crimp)' }} />

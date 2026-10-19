@@ -1,6 +1,19 @@
 // Logique pure de l'éditeur de boosters (admin) : répartitions par carte, chances en pourcentage, contrôles. Testée sans navigateur.
 export const MAX_CARDS = 10
 
+// Halo de lumière autour du paquet (dans l'ordre du menu de l'admin) ; 'none' = aucun
+export const GLOWS = [
+  { id: 'none', label: 'Aucun' },
+  { id: 'gold', label: 'Doré' },
+  { id: 'silver', label: 'Argenté' },
+  { id: 'red', label: 'Rouge' },
+  { id: 'blue', label: 'Bleu' },
+  { id: 'green', label: 'Vert' },
+  { id: 'purple', label: 'Violet' },
+  { id: 'rainbow', label: 'Arc-en-ciel' },
+]
+export const glowOf = (id) => (GLOWS.some((g) => g.id === id) ? id : 'none')
+
 // Rôles particuliers d'un booster (un seul booster par rôle ; le Standard n'en a pas) : '' = booster ordinaire
 export const ROLES = [
   { id: '', label: 'Booster ordinaire', help: 'Se reçoit en cadeau de l’admin ou s’achète en pièces si un prix est fixé.' },

@@ -22,6 +22,8 @@ select pg_temp.expect('un seul booster par rôle : Gold (récompense), OneMore (
 select pg_temp.expect('jamais en vente ni actifs par défaut en stock : prix nul, activés, 5 cartes avec une répartition par carte', (select bool_and(price_coins is null and enabled and cards = 5) from public.{{P}}booster_types where role is not null)
   and (select bool_and(n = 5) from (select count(distinct s.position) n from public.{{P}}booster_type_slots s join public.{{P}}booster_types b on b.id = s.booster_type_id where b.role is not null group by b.id) z));
 select pg_temp.expect('les anciens réglages gold_reward_weight_* ont disparu', not exists (select 1 from public.{{P}}config where key like 'gold_reward_weight_%'));
+select pg_temp.expect('halo de départ : Standard sans halo, OneMore et Gold dorés, cadeau des abonnés violet', (select glow from public.{{P}}booster_types where is_standard) = 'none'
+  and (select string_agg(role || ':' || glow, ',' order by role) from public.{{P}}booster_types where role is not null) = 'card_reward:gold,subscriber:gold,subscription_gift:purple');
 
 \echo '--- semis d''après les NOMS des raretés (identifiants permutés), anciens poids du Gold repris'
 delete from public.{{P}}booster_types where role is not null;
@@ -34,6 +36,7 @@ insert into public.{{P}}config (key, value, description) values ('gold_reward_we
 insert into public.{{P}}booster_types (name, cards, color, position) values ('Gold', 3, '#111111', 99);   -- un nom déjà pris par un booster ordinaire
 select public.{{P}}seed_role_boosters();
 select pg_temp.expect('le nom « Gold » étant déjà pris, le booster de récompense s''appelle « Gold 2 » (jamais de doublon de nom)', (select count(*) from public.{{P}}booster_types where role = 'card_reward' and name = 'Gold 2') = 1 and (select count(*) from public.{{P}}booster_types where lower(name) = 'gold') = 1);
+select pg_temp.expect('Gold semé : halo doré', (select glow from public.{{P}}booster_types where role = 'card_reward') = 'gold' and (select glow from public.{{P}}booster_types where role = 'subscriber') = 'gold' and (select glow from public.{{P}}booster_types where role = 'subscription_gift') = 'purple');
 select pg_temp.expect('Gold : cartes 1 à 3 Rare (zz_c), carte 4 Super Rare (zz_d), cartes 1 à 4 à 100',
   (select string_agg(position || ':' || rarity_id || ':' || weight, ',' order by position) from public.{{P}}booster_type_slots where booster_type_id = (select id from public.{{P}}booster_types where role = 'card_reward') and position <= 4) = '1:zz_c:100,2:zz_c:100,3:zz_c:100,4:zz_d:100');
 select pg_temp.expect('Gold carte 5 : poids repris des anciens réglages (numérotée 3, Art Rare 2, Alpha 1, Omega 1, Unique 4)',
@@ -141,9 +144,58 @@ select public.{{P}}admin_save_booster_type('thomarie', :silver, 'Silver rôle', 
 select public.{{P}}admin_delete_rarity('thomarie', 'zz_t') ->> 'ok' as supprimee;
 select pg_temp.expect('une fois retirée des répartitions, la rareté se supprime', not exists (select 1 from public.{{P}}rarities where id = 'zz_t'));
 
+
+\echo '--- halo de lumière : réglage par booster, visible dans le statut et les résultats d''ouverture'
+select (public.{{P}}admin_save_booster_type('thomarie', null, 'Halo test', 1, '#112233', 10, true, '[{"position":1,"rarity_id":"common","weight":1}]'::jsonb, null, 'rainbow') ->> 'id')::int as halo \gset
+select pg_temp.expect('un booster enregistré avec le halo « rainbow » le garde', (select glow from public.{{P}}booster_types where id = :halo) = 'rainbow');
+select public.{{P}}admin_save_booster_type('thomarie', :halo, 'Halo test', 1, '#112233', 10, true, '[{"position":1,"rarity_id":"common","weight":1}]'::jsonb, null, 'silver') ->> 'ok' as modif;
+select pg_temp.expect('modifier le halo (argenté) le change', (select glow from public.{{P}}booster_types where id = :halo) = 'silver');
+select public.{{P}}admin_save_booster_type('thomarie', :halo, 'Halo test', 1, '#112233', 10, true, '[{"position":1,"rarity_id":"common","weight":1}]'::jsonb) ->> 'ok' as sans_halo;
+select pg_temp.expect('sans halo précisé (appel ancien) : « none », jamais une valeur au hasard', (select glow from public.{{P}}booster_types where id = :halo) = 'none');
+select pg_temp.expect('halo inconnu refusé (invalid_booster) ; halo nul = aucun', pg_temp.err('select public.{{P}}admin_save_booster_type(''thomarie'', ' || :halo || ', ''Halo test'', 1, ''#112233'', 10, true, ''[{"position":1,"rarity_id":"common","weight":1}]''::jsonb, null, ''arc'')') = 'invalid_booster'
+  and pg_temp.err('select public.{{P}}admin_save_booster_type(''thomarie'', ' || :halo || ', ''Halo test'', 1, ''#112233'', 10, true, ''[{"position":1,"rarity_id":"common","weight":1}]''::jsonb, null, null)') = 'aucune erreur' and (select glow from public.{{P}}booster_types where id = :halo) = 'none');
+select pg_temp.expect('tous les halos de la liste sont acceptés', (select bool_and(pg_temp.err('select public.{{P}}admin_save_booster_type(''thomarie'', ' || :halo || ', ''Halo test'', 1, ''#112233'', 10, true, ''[{"position":1,"rarity_id":"common","weight":1}]''::jsonb, null, ''' || g || ''')') = 'aucune erreur') from unnest(array['none', 'gold', 'silver', 'red', 'blue', 'green', 'purple', 'rainbow']) g));
+select public.{{P}}admin_save_booster_type('thomarie', :halo, 'Halo test', 1, '#112233', 10, true, '[{"position":1,"rarity_id":"common","weight":1}]'::jsonb, null, 'rainbow') ->> 'ok' as remis;
+select public.{{P}}admin_grant_boosters('thomarie', :halo, 2, null) ->> 'players' as offerts;
+select pg_temp.expect('le statut donne le halo de chaque booster du joueur (liste des autres boosters, booster standard, booster de récompense)', (select b ->> 'glow' from jsonb_array_elements(public.{{P}}status() -> 'booster_types') b where (b ->> 'id')::int = :halo) = 'rainbow'
+  and (public.{{P}}status() -> 'standard_booster' ->> 'glow') = 'none' and (public.{{P}}status() -> 'reward_booster' ->> 'glow') = (select glow from public.{{P}}booster_types where role = 'card_reward'));
+update public.{{P}}categories set closed = true;
+insert into public.{{P}}categories (name, position, series_count, color, color2, text_color, enabled) values ('Halo Param', 1, 100, '#fff', '#ccc', '#000', true) returning id as cat4 \gset
+insert into public.{{P}}types (category_id, name, image, position, secret) select :cat4, 'Halo ' || g, '🐱', g, false from generate_series(1, 3) g;
+insert into public.{{P}}type_rarities (type_id, rarity_id, max_series, numbered_series, card_style) select t.id, 'common', 40, 40, 'simple' from public.{{P}}types t where t.category_id = :cat4;
+create temp table og2 as select public.{{P}}open_booster_of_type(:halo) as j;
+select pg_temp.expect('l''ouverture d''un booster de stock renvoie son nom et son halo (pour l''animation)', (select j -> 'booster' ->> 'name' = 'Halo test' and j -> 'booster' ->> 'glow' = 'rainbow' from og2));
+select pg_temp.expect('l''ouverture d''un Gold renvoie le halo du booster de récompense', (select (j -> 'booster' ->> 'glow') = (select glow from public.{{P}}booster_types where role = 'card_reward') from og));
+
+\echo '--- Art Rare : tirée au hasard parmi TOUTES les cartes qui ont cette rareté (pas toujours la même)'
+update public.{{P}}categories set closed = true;
+insert into public.{{P}}categories (name, position, series_count, color, color2, text_color, enabled) values ('Art Rare Param', 1, 100, '#fff', '#ccc', '#000', true) returning id as cat3 \gset
+insert into public.{{P}}types (category_id, name, image, position, secret) select :cat3, 'Art ' || g, '🎨', g, false from generate_series(1, 6) g;
+insert into public.{{P}}type_rarities (type_id, rarity_id, max_series, numbered_series, card_style)
+select t.id, r.rid, 50, 50, 'simple' from public.{{P}}types t cross join (values ('common'), ('artrare')) r(rid) where t.category_id = :cat3;
+select public.{{P}}admin_save_booster_type('thomarie', :gift, 'Art Rare assuré', 5, '#f59e0b', null, true,
+  '[{"position":1,"rarity_id":"artrare","weight":100},{"position":2,"rarity_id":"artrare","weight":100},{"position":3,"rarity_id":"artrare","weight":100},{"position":4,"rarity_id":"artrare","weight":100},{"position":5,"rarity_id":"artrare","weight":100}]'::jsonb, 'subscription_gift', 'purple') ->> 'ok' as gift_regle;
+delete from public.{{P}}cards where owner_id = :A; delete from public.{{P}}album_picks where user_id = :A;
+delete from public.{{P}}user_boosters where user_id = :A and booster_type_id = :gift;
+insert into public.{{P}}user_boosters (user_id, booster_type_id, quantity) values (:A, :gift, 40);
+create temp table ar as select (c ->> 'type_id')::int as type_id, (c ->> 'base_rarity') as base, (c ->> 'rarity_id') as rid, (c ->> 'number')::int as num from (select public.{{P}}open_booster_of_type(:gift) as j from generate_series(1, 30)) x, jsonb_array_elements(x.j -> 'cards') c;
+select type_id, count(*) as nb from ar group by type_id order by type_id;
+select pg_temp.expect('30 boosters « Art Rare assuré » (6 cartes possibles) : 150 cartes, toutes de la rareté Art Rare (la 1re et la dernière d''une série s''affichent Alpha et Omega)', (select count(*) from ar) = 150 and (select count(*) from ar where base = 'artrare') = 150);
+select pg_temp.expect('l''Art Rare est répartie sur les 6 cartes (chacune environ 25 fois sur 150), jamais toujours la même', (select count(distinct type_id) from ar) = 6 and (select min(n) from (select count(*) n from ar group by type_id) z) >= 6 and (select max(n) from (select count(*) n from ar group by type_id) z) <= 48);
+create temp table arb as select x.b, (c ->> 'type_id')::int as type_id from (select g as b, public.{{P}}open_booster_of_type(:gift) as j from generate_series(1, 6) g) x, jsonb_array_elements(x.j -> 'cards') c;
+select pg_temp.expect('dans un même booster, jamais deux fois la même carte pour une même rareté (6 boosters de 5 cartes différentes)', (select count(*) from arb) = 30 and not exists (select 1 from arb group by b, type_id having count(*) > 1));
+-- une seule carte porte l'Art Rare : c'est forcément toujours elle (c'est le comportement attendu, à vérifier dans les types de la catégorie)
+delete from public.{{P}}type_rarities where rarity_id = 'artrare' and type_id <> (select min(id) from public.{{P}}types where category_id = :cat3) and type_id in (select id from public.{{P}}types where category_id = :cat3);
+update public.{{P}}user_boosters set quantity = 40 where user_id = :A and booster_type_id = :gift;
+create temp table ar1 as select (c ->> 'type_id')::int as type_id from (select public.{{P}}open_booster_of_type(:gift) as j from generate_series(1, 10)) x, jsonb_array_elements(x.j -> 'cards') c where (c ->> 'rarity_id') = 'artrare';
+select pg_temp.expect('si une SEULE carte de la catégorie possède l''Art Rare, toutes les Art Rare tirées sont cette carte (le tirage ne peut pas en inventer d''autres)', (select count(*) from ar1) >= 40 and (select count(distinct type_id) from ar1) = 1);
+update public.{{P}}categories set closed = false;
+delete from public.{{P}}categories where name = 'Art Rare Param';
+
 -- nettoyage : on laisse la base comme on l'a trouvée
 delete from public.{{P}}gold_rewards; delete from public.{{P}}cards where owner_id = :A; delete from public.{{P}}album_picks where user_id = :A;
 delete from public.{{P}}categories where name = 'Gold Param';
+delete from public.{{P}}categories where name = 'Halo Param';
 delete from public.{{P}}booster_types where id not in (select id from bt_backup);
 delete from public.{{P}}booster_types where id in (select id from bt_backup);
 insert into public.{{P}}booster_types overriding system value select * from bt_backup;

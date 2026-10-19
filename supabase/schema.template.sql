@@ -1091,10 +1091,10 @@ begin
     'coins_locked',        v_locked,
     'friend_requests',     (select count(*) from public.{{P}}friendships f where f.addressee_id = p.id and f.status = 'pending'),
     -- le booster qui s'ouvre avec le stock gratuit : le Standard, ou celui des abonnés pour un abonné
-    'standard_booster',    (select jsonb_build_object('id', bt.id, 'name', bt.name, 'cards', bt.cards, 'color', bt.color) from public.{{P}}booster_types bt
+    'standard_booster',    (select jsonb_build_object('id', bt.id, 'name', bt.name, 'cards', bt.cards, 'color', bt.color, 'glow', bt.glow) from public.{{P}}booster_types bt
                             where bt.id = coalesce((select sb.id from public.{{P}}booster_types sb where sb.role = 'subscriber' and sb.enabled and public.{{P}}is_subscriber(p.id)),
                                                    (select st.id from public.{{P}}booster_types st where st.is_standard))),
-    'reward_booster',      (select jsonb_build_object('id', bt.id, 'name', bt.name, 'cards', bt.cards, 'color', bt.color) from public.{{P}}booster_types bt where bt.role = 'card_reward'),
+    'reward_booster',      (select jsonb_build_object('id', bt.id, 'name', bt.name, 'cards', bt.cards, 'color', bt.color, 'glow', bt.glow) from public.{{P}}booster_types bt where bt.role = 'card_reward'),
     'subscription',        jsonb_build_object(
                              'enabled',              coalesce(public.{{P}}cfg('subscription_enabled'), 0) = 1,
                              'name',                 coalesce(public.{{P}}text_cfg('subscription_name'), 'OneMore'),
@@ -1108,7 +1108,7 @@ begin
                              'gift_id',              (select bt.id from public.{{P}}booster_types bt where bt.role = 'subscription_gift' and bt.enabled),
                              'gift_name',            (select bt.name from public.{{P}}booster_types bt where bt.role = 'subscription_gift' and bt.enabled),
                              'gift_quantity',        coalesce(public.{{P}}cfg('subscription_gift_quantity'), 0)::int),
-    'booster_types',       (select coalesce(jsonb_agg(jsonb_build_object('id', bt.id, 'name', bt.name, 'cards', bt.cards, 'color', bt.color, 'price', bt.price_coins,
+    'booster_types',       (select coalesce(jsonb_agg(jsonb_build_object('id', bt.id, 'name', bt.name, 'cards', bt.cards, 'color', bt.color, 'glow', bt.glow, 'price', bt.price_coins,
                                                                           'quantity', coalesce(ub.quantity, 0)) order by bt.position, bt.id), '[]'::jsonb)
                             from public.{{P}}booster_types bt
                             left join public.{{P}}user_boosters ub on ub.booster_type_id = bt.id and ub.user_id = p.id
@@ -1228,6 +1228,14 @@ create table if not exists public.{{P}}booster_types (
 -- abonnés à chaque période ; « card_reward » = gagné quand tous les emplacements d'une carte sont remplis dans l'album (le « booster Gold »).
 alter table public.{{P}}booster_types add column if not exists role text check (role in ('subscriber', 'subscription_gift', 'card_reward'));
 create unique index if not exists {{P}}booster_types_role_uq on public.{{P}}booster_types (role) where role is not null;
+-- Halo de lumière autour du paquet : aucun, doré, argenté, rouge, bleu, vert, violet, arc-en-ciel. La colonne est d'abord créée vide pour reprendre les boosters existants
+-- une seule fois (les relances du schéma ne touchent plus aux choix de l'admin).
+alter table public.{{P}}booster_types add column if not exists glow text;
+update public.{{P}}booster_types set glow = case role when 'subscriber' then 'gold' when 'card_reward' then 'gold' when 'subscription_gift' then 'purple' else 'none' end where glow is null;
+alter table public.{{P}}booster_types alter column glow set default 'none';
+alter table public.{{P}}booster_types alter column glow set not null;
+alter table public.{{P}}booster_types drop constraint if exists {{P}}booster_types_glow_check;
+alter table public.{{P}}booster_types add constraint {{P}}booster_types_glow_check check (glow in ('none', 'gold', 'silver', 'red', 'blue', 'green', 'purple', 'rainbow'));
 create unique index if not exists {{P}}booster_types_name_uq on public.{{P}}booster_types (lower(trim(name)));
 create unique index if not exists {{P}}booster_types_standard_uq on public.{{P}}booster_types (is_standard) where is_standard;
 create table if not exists public.{{P}}booster_type_slots (
@@ -1536,7 +1544,7 @@ begin
   where id = uid returning * into p;
 
   return jsonb_build_object('cards', res, 'golden', v_golden, 'category_id', v_cat, 'status', public.{{P}}status_json(p),
-                            'booster', case when v_sub is not null and v_std = v_sub then (select jsonb_build_object('id', bt.id, 'name', bt.name, 'color', bt.color) from public.{{P}}booster_types bt where bt.id = v_sub) end);
+                            'booster', (select jsonb_build_object('id', bt.id, 'name', bt.name, 'color', bt.color, 'glow', bt.glow) from public.{{P}}booster_types bt where bt.id = v_std));
 end $$;
 
 -- Ouvrir un booster d'un autre type que le Standard (stock du joueur : achat en pièces ou don de l'admin)
@@ -1573,7 +1581,7 @@ begin
   end if;
   update public.{{P}}user_boosters set quantity = quantity - 1 where user_id = uid and booster_type_id = p_type;
   update public.{{P}}profiles set boosters_opened = boosters_opened + 1 where id = uid returning * into p;
-  return jsonb_build_object('cards', res, 'golden', false, 'category_id', v_cat, 'booster', jsonb_build_object('id', bt.id, 'name', bt.name, 'color', bt.color),
+  return jsonb_build_object('cards', res, 'golden', false, 'category_id', v_cat, 'booster', jsonb_build_object('id', bt.id, 'name', bt.name, 'color', bt.color, 'glow', bt.glow),
                             'status', public.{{P}}status_json(p));
 end $$;
 
@@ -1603,7 +1611,8 @@ grant execute on function public.{{P}}buy_booster(int, int) to authenticated;
 -- ---------- Admin : créer, modifier, supprimer un type de booster ; offrir des boosters ----------
 -- p_slots = [{position, rarity_id, weight}] : chaque carte de 1 à p_cards a au moins une rareté (ordinaire ou Unique), chaque couple une seule fois.
 drop function if exists public.{{P}}admin_save_booster_type(text, int, text, int, text, int, boolean, jsonb);
-create or replace function public.{{P}}admin_save_booster_type(p_password text, p_id int, p_name text, p_cards int, p_color text, p_price int, p_enabled boolean, p_slots jsonb, p_role text default null)
+drop function if exists public.{{P}}admin_save_booster_type(text, int, text, int, text, int, boolean, jsonb, text);
+create or replace function public.{{P}}admin_save_booster_type(p_password text, p_id int, p_name text, p_cards int, p_color text, p_price int, p_enabled boolean, p_slots jsonb, p_role text default null, p_glow text default 'none')
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare err text := public.{{P}}admin_guard(p_password); v_id int; v_std boolean := false; v_old_role text; v_role text := nullif(trim(coalesce(p_role, '')), '');
         v_name text := trim(coalesce(p_name, '')); r record;
@@ -1614,6 +1623,7 @@ begin
   if p_color is null or p_color !~ '^#[0-9a-fA-F]{6}$' then raise exception 'invalid_booster'; end if;
   if p_price is not null and (p_price < 0 or p_price > 1000000000) then raise exception 'invalid_booster'; end if;
   if v_role is not null and v_role not in ('subscriber', 'subscription_gift', 'card_reward') then raise exception 'invalid_booster'; end if;
+  if coalesce(p_glow, 'none') not in ('none', 'gold', 'silver', 'red', 'blue', 'green', 'purple', 'rainbow') then raise exception 'invalid_booster'; end if;
   if p_slots is null or jsonb_typeof(p_slots) <> 'array' then raise exception 'invalid_booster_slots'; end if;
   -- Choix possibles d'une carte : raretés ordinaires et Unique ; en plus, pour le booster de récompense : Alpha, Omega et « numbered »
   for r in select (e ->> 'position')::int as pos, e ->> 'rarity_id' as rid, (e ->> 'weight')::double precision as w from jsonb_array_elements(p_slots) e loop
@@ -1637,10 +1647,10 @@ begin
   if v_role is not null then update public.{{P}}booster_types set role = null where role = v_role and id is distinct from p_id; end if;
 
   if p_id is null then
-    insert into public.{{P}}booster_types (name, cards, color, price_coins, enabled, position, role)
-    values (v_name, p_cards, p_color, p_price, coalesce(p_enabled, true), coalesce((select max(position) from public.{{P}}booster_types), 0) + 1, v_role) returning id into v_id;
+    insert into public.{{P}}booster_types (name, cards, color, price_coins, enabled, position, role, glow)
+    values (v_name, p_cards, p_color, p_price, coalesce(p_enabled, true), coalesce((select max(position) from public.{{P}}booster_types), 0) + 1, v_role, coalesce(p_glow, 'none')) returning id into v_id;
   else
-    update public.{{P}}booster_types set name = v_name, cards = p_cards, color = p_color, role = v_role,
+    update public.{{P}}booster_types set name = v_name, cards = p_cards, color = p_color, role = v_role, glow = coalesce(p_glow, 'none'),
            price_coins = case when v_std then null else p_price end,
            enabled = case when v_std or v_role = 'card_reward' then true else coalesce(p_enabled, true) end
     where id = p_id;
@@ -1684,10 +1694,10 @@ begin
   if p_username is not null and n = 0 then raise exception 'user_not_found'; end if;
   return jsonb_build_object('ok', true, 'players', n);
 end $$;
-revoke all on function public.{{P}}admin_save_booster_type(text, int, text, int, text, int, boolean, jsonb, text) from public, anon;
+revoke all on function public.{{P}}admin_save_booster_type(text, int, text, int, text, int, boolean, jsonb, text, text) from public, anon;
 revoke all on function public.{{P}}admin_delete_booster_type(text, int) from public, anon;
 revoke all on function public.{{P}}admin_grant_boosters(text, int, int, text) from public, anon;
-grant execute on function public.{{P}}admin_save_booster_type(text, int, text, int, text, int, boolean, jsonb, text) to authenticated;
+grant execute on function public.{{P}}admin_save_booster_type(text, int, text, int, text, int, boolean, jsonb, text, text) to authenticated;
 grant execute on function public.{{P}}admin_delete_booster_type(text, int) to authenticated;
 grant execute on function public.{{P}}admin_grant_boosters(text, int, int, text) to authenticated;
 
@@ -2992,7 +3002,7 @@ begin
   update public.{{P}}gold_rewards set opened_at = now(), seen = true, cards = res where id = rw.id;
   select * into p from public.{{P}}profiles where id = uid;
   return jsonb_build_object('cards', res, 'golden', true, 'gold', true, 'type_id', rw.type_id, 'category_id', v_cat, 'status', public.{{P}}status_json(p),
-    'booster', (select jsonb_build_object('id', bt.id, 'name', bt.name, 'color', bt.color) from public.{{P}}booster_types bt where bt.role = 'card_reward'));
+    'booster', (select jsonb_build_object('id', bt.id, 'name', bt.name, 'color', bt.color, 'glow', bt.glow) from public.{{P}}booster_types bt where bt.role = 'card_reward'));
 end $$;
 
 -- Annonce vue (la fenêtre « Carte complétée » ne revient pas)
@@ -3125,7 +3135,7 @@ begin
   if not exists (select 1 from public.{{P}}booster_types where role = 'card_reward') then
     v_name := 'Gold'; n := 1;
     while exists (select 1 from public.{{P}}booster_types where lower(trim(name)) = lower(v_name)) loop n := n + 1; v_name := 'Gold ' || n; end loop;
-    insert into public.{{P}}booster_types (name, cards, color, role, position) values (v_name, 5, '#d4af37', 'card_reward', coalesce((select max(position) from public.{{P}}booster_types), 0) + 1) returning id into v_id;
+    insert into public.{{P}}booster_types (name, cards, color, role, glow, position) values (v_name, 5, '#d4af37', 'card_reward', 'gold', coalesce((select max(position) from public.{{P}}booster_types), 0) + 1) returning id into v_id;
     insert into public.{{P}}booster_type_slots (booster_type_id, position, rarity_id, weight)
     select v_id, d.pos, r.id, d.w
     from (values (1, 'rare', 100.0), (2, 'rare', 100.0), (3, 'rare', 100.0), (4, 'super rare', 100.0), (5, 'art rare', w_art)) d(pos, k, w)
@@ -3146,7 +3156,7 @@ begin
   if not exists (select 1 from public.{{P}}booster_types where role = 'subscriber') then
     v_name := 'OneMore'; n := 1;
     while exists (select 1 from public.{{P}}booster_types where lower(trim(name)) = lower(v_name)) loop n := n + 1; v_name := 'OneMore ' || n; end loop;
-    insert into public.{{P}}booster_types (name, cards, color, role, position) values (v_name, 5, '#7c3aed', 'subscriber', coalesce((select max(position) from public.{{P}}booster_types), 0) + 1) returning id into v_id;
+    insert into public.{{P}}booster_types (name, cards, color, role, glow, position) values (v_name, 5, '#7c3aed', 'subscriber', 'gold', coalesce((select max(position) from public.{{P}}booster_types), 0) + 1) returning id into v_id;
     insert into public.{{P}}booster_type_slots (booster_type_id, position, rarity_id, weight)
     select v_id, d.pos, r.id, d.w
     from (values (1, 'commune', 100.0), (2, 'commune', 50.0), (2, 'peu commune', 50.0), (3, 'peu commune', 70.0), (3, 'rare', 30.0), (4, 'rare', 70.0), (4, 'super rare', 30.0),
@@ -3164,7 +3174,7 @@ begin
   if not exists (select 1 from public.{{P}}booster_types where role = 'subscription_gift') then
     v_name := 'Art Rare assuré'; n := 1;
     while exists (select 1 from public.{{P}}booster_types where lower(trim(name)) = lower(v_name)) loop n := n + 1; v_name := 'Art Rare assuré ' || n; end loop;
-    insert into public.{{P}}booster_types (name, cards, color, role, position) values (v_name, 5, '#f59e0b', 'subscription_gift', coalesce((select max(position) from public.{{P}}booster_types), 0) + 1) returning id into v_id;
+    insert into public.{{P}}booster_types (name, cards, color, role, glow, position) values (v_name, 5, '#f59e0b', 'subscription_gift', 'purple', coalesce((select max(position) from public.{{P}}booster_types), 0) + 1) returning id into v_id;
     insert into public.{{P}}booster_type_slots (booster_type_id, position, rarity_id, weight)
     select v_id, d.pos, r.id, d.w
     from (values (1, 'commune', 100.0), (2, 'commune', 100.0), (3, 'commune', 100.0), (4, 'peu commune', 60.0), (4, 'rare', 40.0), (5, 'art rare', 100.0)) d(pos, k, w)

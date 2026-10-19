@@ -19,6 +19,7 @@ select pg_temp.try('select public.{{P}}admin_save_type(''thomarie'', ' || :type_
 select 'image enregistrée', left(image, 30) as image from public.{{P}}types where id = :type_emoji;
 
 \echo '--- suppression : refusée si des cartes existent'
+delete from public.{{P}}cards where type_id = 1 and series = 10 and number = 4;   -- un tirage aléatoire d'un test précédent a pu créer cette carte
 insert into public.{{P}}cards (type_id, series, number, owner_id) values (1, 10, 4, :A);
 select pg_temp.try('select public.{{P}}admin_delete_type(''thomarie'', 1)');
 select pg_temp.try('select public.{{P}}admin_delete_category(''thomarie'', 1)');

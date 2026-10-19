@@ -122,12 +122,14 @@ select :onemore, p, 'super', 100 from generate_series(1, 5) p;
 update public.{{P}}profiles set boosters = 30, bonus_boosters = 0 where id in (:A, :B);
 set request.jwt.claim.sub = :B;
 create temp table nb as select public.{{P}}open_booster() as j;
-select pg_temp.expect('non abonné : Standard (5 Communes), aucune mention de booster d''abonné', (select count(*) = 5 and bool_and(c ->> 'base_rarity' = 'common') from nb, jsonb_array_elements(j -> 'cards') c) and (select j -> 'booster' is null or j ->> 'booster' is null from nb));
+select pg_temp.expect('non abonné : Standard (5 Communes), le résultat porte le nom « Standard » et aucun halo', (select count(*) = 5 and bool_and(c ->> 'base_rarity' = 'common') from nb, jsonb_array_elements(j -> 'cards') c) and (select j -> 'booster' ->> 'name' = 'Standard' and j -> 'booster' ->> 'glow' = 'none' from nb));
 select pg_temp.sub('active', interval '10 days') as _ \gset
 update public.{{P}}profiles set boosters = 30 where id = :A;
 set request.jwt.claim.sub = :A;
 create temp table ab as select public.{{P}}open_booster() as j;
 select pg_temp.expect('abonné : booster des abonnés (5 Super Rare), le résultat porte son nom « OneMore »', (select count(*) = 5 and bool_and(c ->> 'base_rarity' = 'super') from ab, jsonb_array_elements(j -> 'cards') c) and (select j -> 'booster' ->> 'name' = 'OneMore' from ab));
+select pg_temp.expect('le résultat porte le halo du booster des abonnés (doré)', (select j -> 'booster' ->> 'glow' = 'gold' from ab));
+select pg_temp.expect('le statut donne le halo du booster de l''abonné (doré) et celui du Standard pour un non abonné (aucun)', (public.{{P}}status() -> 'standard_booster' ->> 'glow') = 'gold');
 select pg_temp.expect('même stock : une seule unité consommée (29 restants)', (select boosters from public.{{P}}profiles where id = :A) = 29);
 select pg_temp.expect('le statut annonce le booster des abonnés comme « booster standard » du joueur', (public.{{P}}status() -> 'standard_booster' ->> 'name') = 'OneMore');
 select pg_temp.expect('les chances affichées sont celles du booster des abonnés (carte 1 : Super Rare 100 %)', (public.{{P}}draw_odds(:cat) -> 'booster' ->> 'name') = 'OneMore' and (public.{{P}}draw_odds(:cat) #>> '{positions,0,mix,0,id}') = 'super');

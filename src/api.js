@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { glowOf } from './boosterLogic'
 import { PREFIX, CHECKOUT_FUNCTION, SUBSCRIBE_FUNCTION, SUBSCRIPTION_PORTAL_FUNCTION } from './env'
 
 // Tous les noms de tables et de fonctions de la base portent le préfixe de l'environnement (o1ocards_ ou pp_o1ocards_)
@@ -170,7 +171,7 @@ export const adminSaveRarity = (pw, r) =>
   })
 // Types de boosters (admin) : créer ou modifier (id nul = création), supprimer, offrir (pseudo vide = tous les joueurs)
 export const adminSaveBoosterType = (pw, id, b) =>
-  rpc('admin_save_booster_type', { p_password: pw, p_id: id, p_name: b.name, p_cards: b.cards, p_color: b.color, p_price: b.price, p_enabled: b.enabled, p_slots: b.slots, p_role: b.role || null })
+  rpc('admin_save_booster_type', { p_password: pw, p_id: id, p_name: b.name, p_cards: b.cards, p_color: b.color, p_price: b.price, p_enabled: b.enabled, p_slots: b.slots, p_role: b.role || null, p_glow: glowOf(b.glow) })
 export const adminDeleteBoosterType = (pw, id) => rpc('admin_delete_booster_type', { p_password: pw, p_id: id })
 export const adminGrantBoosters = (pw, typeId, quantity, username = null) =>
   rpc('admin_grant_boosters', { p_password: pw, p_type: typeId, p_quantity: quantity, p_username: username })

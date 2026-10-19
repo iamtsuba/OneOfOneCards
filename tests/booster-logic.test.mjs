@@ -1,6 +1,6 @@
 // Teste src/boosterLogic.js : répartitions par carte, pourcentages, contrôles de l'éditeur de boosters.
 //   node tests/booster-logic.test.mjs
-import { slotsToPositions, positionsToSlots, shares, resizePositions, validateBooster, defaultPositions, pickableRarities, ROLES, roleLabel, NUMBERED, MAX_CARDS } from '../src/boosterLogic.js'
+import { slotsToPositions, positionsToSlots, shares, resizePositions, validateBooster, defaultPositions, pickableRarities, ROLES, roleLabel, NUMBERED, GLOWS, glowOf, MAX_CARDS } from '../src/boosterLogic.js'
 
 let bad = 0
 const ok = (name, cond) => { console.log(cond ? 'OK  ' : 'FAIL', name); if (!cond) bad++ }
@@ -64,6 +64,10 @@ const withEntry = (id, role) => validateBooster({ name: 'X', cards: 1, price: ''
 ok('validation : Alpha, Omega et « numbered » refusés pour un booster ordinaire, des abonnés ou cadeau, avec un message qui dit pourquoi', ['', 'subscriber', 'subscription_gift'].every((role) => /n’est possible que dans le booster de récompense/.test(withEntry('alpha', role)) && /Omega/.test(withEntry('omega', role)) && /numérotée/.test(withEntry('numbered', role))))
 ok('validation : acceptés pour le booster de récompense', withEntry('alpha', 'card_reward') === '' && withEntry('omega', 'card_reward') === '' && withEntry('numbered', 'card_reward') === '')
 ok('validation : une rareté ordinaire reste valable partout ; sans rôle précisé (appel ancien), comme un booster ordinaire', withEntry('common', '') === '' && withEntry('common', 'card_reward') === '' && validateBooster({ name: 'X', cards: 1, price: '', positions: [[{ rarity_id: 'alpha', weight: 1 }]] }, names2, kinds) !== '')
+
+// ---- halo de lumière
+ok('halos : aucun, doré, argenté, rouge, bleu, vert, violet, arc-en-ciel (dans cet ordre, avec leur libellé)', eq(GLOWS.map((g) => g.id), ['none', 'gold', 'silver', 'red', 'blue', 'green', 'purple', 'rainbow']) && GLOWS.map((g) => g.label).join('|') === 'Aucun|Doré|Argenté|Rouge|Bleu|Vert|Violet|Arc-en-ciel')
+ok('glowOf : un halo inconnu, absent ou nul devient « aucun » ; un halo valide est gardé', glowOf('gold') === 'gold' && glowOf('rainbow') === 'rainbow' && glowOf('laser') === 'none' && glowOf(undefined) === 'none' && glowOf(null) === 'none' && glowOf('') === 'none')
 
 if (bad) { console.error(`\n${bad} ÉCHEC(S)`); process.exit(1) }
 console.log('\nLogique des boosters : tous les contrôles sont passés.')

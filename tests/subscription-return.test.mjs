@@ -46,8 +46,8 @@ const wait = (ms) => act(async () => { await new Promise((r) => setTimeout(r, ms
 
 const sub = { enabled: true, name: 'OneMore', price_cents: 499, active: false, period_end: null, cancel_at_period_end: false, regen_minutes: 5, booster_name: 'OneMore', booster_color: '#7c3aed', gift_id: 7, gift_name: 'Art Rare assuré', gift_quantity: 1 }
 const base = { id: 'u1', username: 'Tsuba', boosters: 7, bonus_boosters: 0, coins: 0, coins_locked: 0, golden_packs: 0, gold_rewards: [], unseen_rewards: [], max_boosters: 10, regen_minutes: 10, regen_amount: 10,
-  active_category_id: 5, next_refill_at: null, cards_taken: 10, total_cards: 100, cgv_version: 3, shop_enabled: false, booster_types: [], standard_booster: { id: 1, name: 'Standard' }, server_now: new Date().toISOString(), subscription: sub }
-const activeStatus = { ...base, standard_booster: { id: 9, name: 'OneMore', color: '#7c3aed' }, regen_minutes: 5, subscription: { ...sub, active: true, period_end: '2026-11-19T10:00:00+00:00' },
+  active_category_id: 5, next_refill_at: null, cards_taken: 10, total_cards: 100, cgv_version: 3, shop_enabled: false, booster_types: [], standard_booster: { id: 1, name: 'Standard', glow: 'none' }, server_now: new Date().toISOString(), subscription: sub }
+const activeStatus = { ...base, standard_booster: { id: 9, name: 'OneMore', color: '#7c3aed', glow: 'gold' }, regen_minutes: 5, subscription: { ...sub, active: true, period_end: '2026-11-19T10:00:00+00:00' },
   booster_types: [{ id: 7, name: 'Art Rare assuré', cards: 5, color: '#f59e0b', price: null, quantity: 1 }] }
 const catalog = { categoryMap: { 5: { id: 5, name: 'Chattrapez les tous !', color: '#f59e0b', color2: '#c2410c', text_color: '#fff', image: '🐱' } }, typeMap: {}, types: [], rarities: [], cardRef: () => '' }
 
@@ -64,6 +64,7 @@ async function mountPage(getStatus) {
   await act(async () => { reactRoot.render(React.createElement(Harness)) })
   return { host, refreshCalls, unmount: async () => { await act(async () => reactRoot.unmount()); host.remove() } }
 }
+const bandText = (h) => (h.querySelector('.pack-stage .pack-band')?.textContent ?? '')
 const text = (h) => h.textContent.replace(/\s+/g, ' ')
 const btn = (h, re) => [...h.querySelectorAll('button')].find((b) => re.test(b.textContent))
 
@@ -78,6 +79,7 @@ const btn = (h, re) => [...h.querySelectorAll('button')].find((b) => re.test(b.t
   ok('abonnement actif : « Abonné OneMore », plus aucun bouton « S’abonner »', /Abonné OneMore/.test(text(m.host)) && !btn(m.host, /S’abonner/) && !/Activation de/.test(text(m.host)))
   ok('message de bienvenue', /Bienvenue dans OneMore ! Tes avantages sont actifs\./.test(text(m.host)))
   ok('on voit le booster OneMore (page, titre du paquet et bouton) et le cadeau avec son bouton Ouvrir', /Booster OneMore « Chattrapez les tous ! »/.test(text(m.host)) && !!btn(m.host, /^Ouvrir un booster OneMore$/) && /Ton cadeau du mois/.test(text(m.host)) && /1 à ouvrir/.test(text(m.host)))
+  ok('le paquet affiche le nom du booster sur sa bande (« OneMore » à la place de « 1/1 Cards ») avec un halo doré', bandText(m.host) === 'OneMore' && /has-glow glow-gold/.test(m.host.querySelector('.pack-stage .pack-wrap')?.className ?? ''))
   ok('le cadeau est aussi dans « Autres boosters » (même stock) et s\'ouvre avec un bouton Ouvrir', (m.host.textContent.match(/Art Rare assuré/g) || []).length >= 2 && [...m.host.querySelectorAll('button')].filter((b) => b.textContent === 'Ouvrir').length >= 2)
   await m.unmount()
 }
@@ -119,7 +121,7 @@ const btn = (h, re) => [...h.querySelectorAll('button')].find((b) => re.test(b.t
   dom.reconfigure({ url: 'https://pp.1o1cards.cc/' })
   const m2 = await mountPage(async () => base)
   await wait(100)
-  ok('visite normale d\'un non abonné : le bouton d\'abonnement est là, ni attente ni confirmation', !!btn(m2.host, /S’abonner à OneMore/) && !/Activation de/.test(text(m2.host)) && calls.length === 0 && /Booster « Chattrapez les tous ! »/.test(text(m2.host)) && !!btn(m2.host, /^Ouvrir un booster$/))
+  ok('visite normale d\'un non abonné : le bouton d\'abonnement est là, ni attente ni confirmation', !!btn(m2.host, /S’abonner à OneMore/) && !/Activation de/.test(text(m2.host)) && calls.length === 0 && /Booster « Chattrapez les tous ! »/.test(text(m2.host)) && !!btn(m2.host, /^Ouvrir un booster$/) && bandText(m2.host) === 'Standard' && !/glow/.test(m2.host.querySelector('.pack-stage .pack-wrap')?.className ?? ''))
   await m2.unmount()
 }
 

@@ -4,7 +4,7 @@ import { explain } from '../api'
 import { useGame, fmt, fmtDate } from '../game'
 import { IS_PREPROD } from '../env'
 import { fmtOdds } from './Odds'
-import { defaultPositions, pickableRarities, positionsToSlots, resizePositions, shares, slotsToPositions, validateBooster, roleLabel, ROLES, NUMBERED, MAX_CARDS } from '../boosterLogic'
+import { defaultPositions, pickableRarities, positionsToSlots, resizePositions, shares, slotsToPositions, validateBooster, roleLabel, ROLES, GLOWS, glowOf, NUMBERED, MAX_CARDS } from '../boosterLogic'
 import TypeArt from './TypeArt'
 import Pack from './Pack'
 import Card from './Card'
@@ -1153,6 +1153,7 @@ export function BoosterEditor({ booster, rarities, run, busy, onCreated, onDelet
   const kinds = Object.fromEntries(rarities.map((r) => [r.id, r.kind]))
   const [f, setF] = useState(() => ({
     role: booster?.role ?? '',
+    glow: glowOf(booster?.glow),
     name: booster?.name ?? '', cards: booster?.cards ?? 5, color: booster?.color ?? '#e8452e',
     price: booster?.price_coins == null ? '' : String(booster.price_coins), enabled: booster?.enabled ?? true,
   }))
@@ -1168,7 +1169,7 @@ export function BoosterEditor({ booster, rarities, run, busy, onCreated, onDelet
   const setCards = (n) => { setF({ ...f, cards: n }); setPos(resizePositions(pos, n)) }
 
   const save = () => run(
-    (pw) => api.adminSaveBoosterType(pw, booster?.id ?? null, { name: f.name.trim(), cards: f.cards, color: f.color, price: noSale || f.price === '' ? null : Number(f.price), enabled: std || f.role === 'card_reward' ? true : f.enabled, slots: positionsToSlots(pos), role: std ? null : f.role || null }),
+    (pw) => api.adminSaveBoosterType(pw, booster?.id ?? null, { name: f.name.trim(), cards: f.cards, color: f.color, price: noSale || f.price === '' ? null : Number(f.price), enabled: std || f.role === 'card_reward' ? true : f.enabled, slots: positionsToSlots(pos), role: std ? null : f.role || null, glow: f.glow }),
     (res) => { if (isNew && res?.id != null) onCreated(res.id); return 'Booster enregistré.' },
   )
   const remove = () => {
@@ -1187,6 +1188,14 @@ export function BoosterEditor({ booster, rarities, run, busy, onCreated, onDelet
       <h3>{isNew ? 'Nouveau booster' : booster.name}{std && <span className="muted"> · se recharge tout seul</span>}</h3>
       <div className="booster-fields">
         <label>Nom<input value={f.name} maxLength={40} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+        <label>Halo de lumière
+          <span className="glow-field">
+            <select value={f.glow} onChange={(e) => setF({ ...f, glow: e.target.value })}>
+              {GLOWS.map((g) => <option key={g.id} value={g.id}>{g.label}</option>)}
+            </select>
+            <i className={`glow-swatch glow-${f.glow}`} aria-hidden="true" />
+          </span>
+        </label>
         {!std && (
           <label>Rôle
             <select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>

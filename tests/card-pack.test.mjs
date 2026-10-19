@@ -10,14 +10,14 @@ const require = createRequire(import.meta.url)
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const out = mkdtempSync(path.join(root, 'tests', '.out-cardpack-'))
 await build({
-  stdin: { contents: "export { default as Card } from './src/components/Card.jsx'; export { default as Pack, packTitle } from './src/components/Pack.jsx'; export { GameContext } from './src/game.js'", resolveDir: root, loader: 'js' },
+  stdin: { contents: "export { default as Card } from './src/components/Card.jsx'; export { default as Pack, packTitle, bandLabel } from './src/components/Pack.jsx'; export { GameContext } from './src/game.js'", resolveDir: root, loader: 'js' },
   bundle: true, format: 'esm', platform: 'node', jsx: 'automatic', outfile: path.join(out, 'bundle.mjs'),
   external: ['react', 'react-dom', 'react/jsx-runtime', '@supabase/supabase-js'],
   define: { 'import.meta.env': JSON.stringify({ MODE: 'preprod', VITE_APP_ENV: 'preprod' }) }, logLevel: 'silent',
 })
 const React = require('react')
 const { renderToStaticMarkup } = require('react-dom/server')
-const { Card, Pack, packTitle, GameContext } = await import(pathToFileURL(path.join(out, 'bundle.mjs')).href)
+const { Card, Pack, packTitle, bandLabel, GameContext } = await import(pathToFileURL(path.join(out, 'bundle.mjs')).href)
 rmSync(out, { recursive: true, force: true })
 
 let bad = 0
@@ -81,5 +81,23 @@ ok('titre trop long : tronqué avec « … » (22 caractères au plus) et taille
 ok('titre : la largeur estimée ne dépasse jamais la zone (≤ 200)', ['A', 'Années 80', 'CHATTRAPEZ LES TOUS', 'Une catégorie au nom vraiment très très long'].every((n) => { const t = packTitle(n); return t.text.length * 0.62 * t.size <= 215 }))
 ok('titre vide : « 1/1 Cards »', packTitle('  ').text === '1/1 Cards' && packTitle(null).text === '1/1 Cards')
 
+// ---- nom du booster sur la bande et halo de lumière
+const band = (props) => (pack({ category: cat, ...props }).match(/<text class="pack-band"[^>]*>([^<]*)<\/text>/) || [])[1]
+ok('bande du bas : « 1/1 Cards » par défaut (aucun nom de booster connu), y compris nom vide ou blanc', band({}) === '1/1 Cards' && band({ label: null }) === '1/1 Cards' && band({ label: '   ' }) === '1/1 Cards')
+ok('bande du bas : le nom du booster à la place de « 1/1 Cards » (Standard, OneMore, Art Rare assuré)', band({ label: 'Standard' }) === 'Standard' && band({ label: 'OneMore' }) === 'OneMore' && band({ label: 'Art Rare assuré' }) === 'Art Rare assuré' && !/1\/1 Cards/.test(pack({ category: cat, label: 'Standard' })))
+ok('bande du bas : le titre de la catégorie en haut et le « 1/1 » du centre restent', /Années 80/.test(pack({ category: cat, label: 'Standard' })) && /class="pack-mark"/.test(pack({ category: cat, label: 'Standard' })))
+ok('bande du bas : un nom trop long est tronqué (18 caractères au plus, « … ») et le texte rétrécit', bandLabel('Un booster au nom démesurément long').text.length <= 18 && bandLabel('Un booster au nom démesurément long').text.endsWith('…') && bandLabel('Standard').size === 22 && bandLabel('Un booster au nom démesurément long').size < 22 && bandLabel('Un booster au nom démesurément long').size >= 12)
+ok('bande du bas : la largeur estimée ne dépasse jamais la bande (≤ 190)', ['Standard', 'OneMore', 'Art Rare assuré', 'Récompense Gold!!', 'X'.repeat(40)].every((n) => { const b = bandLabel(n); return b.text.length * 0.6 * b.size <= 190 + 1 }))
+ok('nom du booster : le HTML est échappé (jamais interprété)', band({ label: '<b>x</b>' }) === '&lt;b&gt;x&lt;/b&gt;')
+const wrapClass = (props) => (pack({ category: cat, ...props }).match(/<div class="pack-wrap ([^"]*)"/) || [])[1]
+ok('halo : un paquet sans halo (aucun, absent ou inconnu) n\'a aucune classe de halo', ['none', undefined, null, '', 'laser', 'GOLD'].every((g) => !/glow/.test(wrapClass({ glow: g }))))
+ok('halo : chacun des 7 halos ajoute « has-glow glow-<nom> » autour du paquet', ['gold', 'silver', 'red', 'blue', 'green', 'purple', 'rainbow'].every((g) => new RegExp(`has-glow glow-${g}$`).test(wrapClass({ glow: g }).trim())))
+ok('halo : pas de halo sur un paquet éteint (plus de boosters) ni sur le booster doré (qui a déjà le sien)', !/glow/.test(wrapClass({ glow: 'gold', dim: true })) && !/has-glow/.test(wrapClass({ glow: 'gold', golden: true })) && /dim/.test(wrapClass({ glow: 'gold', dim: true })))
+ok('halo : se combine avec les phases d\'ouverture (shake, tear)', /shake .*has-glow glow-gold/.test(wrapClass({ glow: 'gold', phase: 'shake' })) && /tear .*has-glow glow-purple/.test(wrapClass({ glow: 'purple', phase: 'tear' })))
+ok('halo : décoratif (le paquet reste masqué aux lecteurs d\'écran)', /aria-hidden="true"/.test(pack({ category: cat, glow: 'gold' })))
+{
+  const css = (await import('node:fs')).readFileSync(path.join(root, 'src/styles.css'), 'utf8')
+  ok('CSS : une couleur pour chaque halo, l\'animation du halo, l\'arc-en-ciel animé et le respect de « réduire les animations »', ['gold', 'silver', 'red', 'blue', 'green', 'purple'].every((g) => new RegExp(`\\.glow-${g} \\{ --glow: #`).test(css)) && /@keyframes packhalo/.test(css) && /@keyframes packrainbow/.test(css) && /prefers-reduced-motion: reduce\) \{ \.pack-wrap\.has-glow svg/.test(css))
+}
 console.log(bad ? `\n${bad} ÉCHEC(S)` : '\nCarte et booster : tous les contrôles sont passés.')
 process.exit(bad ? 1 : 0)

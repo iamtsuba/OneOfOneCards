@@ -872,3 +872,27 @@ html.subscriber { --bg: #fbf1d3; }
 .sub-gift span { display: grid; flex: 1; min-width: 0; }
 .sub-gift small { color: var(--ink-soft); font-size: 12px; }
 .sub-gift .btn { flex: none; }
+
+/* Halo de lumière autour du paquet (réglé par booster dans l'onglet Boosters de l'admin) */
+.glow-gold { --glow: #ffcf3a; } .glow-silver { --glow: #dbe4f5; } .glow-red { --glow: #ff4a3d; } .glow-blue { --glow: #3da5ff; }
+.glow-green { --glow: #34d17a; } .glow-purple { --glow: #b36bff; }
+.pack-wrap.has-glow svg { animation: packhalo 2.6s ease-in-out infinite; }
+@keyframes packhalo {
+  0%, 100% { filter: drop-shadow(0 0 10px var(--glow)) drop-shadow(0 0 26px var(--glow)) drop-shadow(0 0 2px var(--glow)); }
+  50% { filter: drop-shadow(0 0 18px var(--glow)) drop-shadow(0 0 48px var(--glow)) drop-shadow(0 0 3px var(--glow)); }
+}
+.pack-wrap.glow-rainbow svg { animation: packrainbow 6s linear infinite; }
+@keyframes packrainbow {
+  0%, 100% { filter: drop-shadow(0 0 12px #ff4a3d) drop-shadow(0 0 30px #ff4a3d); }
+  17% { filter: drop-shadow(0 0 12px #ffcf3a) drop-shadow(0 0 30px #ffcf3a); }
+  34% { filter: drop-shadow(0 0 12px #34d17a) drop-shadow(0 0 30px #34d17a); }
+  50% { filter: drop-shadow(0 0 12px #3da5ff) drop-shadow(0 0 30px #3da5ff); }
+  67% { filter: drop-shadow(0 0 12px #b36bff) drop-shadow(0 0 30px #b36bff); }
+  84% { filter: drop-shadow(0 0 12px #ff5fa8) drop-shadow(0 0 30px #ff5fa8); }
+}
+.pack-wrap.has-glow.tear svg { animation: none; }
+@media (prefers-reduced-motion: reduce) { .pack-wrap.has-glow svg, .pack-wrap.glow-rainbow svg { animation: none; filter: drop-shadow(0 0 14px var(--glow, #ffcf3a)) drop-shadow(0 0 30px var(--glow, #ffcf3a)); } }
+.glow-field { display: flex; align-items: center; gap: 10px; }
+.glow-swatch { flex: none; width: 18px; height: 18px; border-radius: 50%; background: transparent; box-shadow: inset 0 0 0 1.5px rgba(27, 31, 59, .25); }
+.glow-swatch.glow-gold, .glow-swatch.glow-silver, .glow-swatch.glow-red, .glow-swatch.glow-blue, .glow-swatch.glow-green, .glow-swatch.glow-purple { background: var(--glow); box-shadow: 0 0 10px var(--glow); }
+.glow-swatch.glow-rainbow { background: conic-gradient(#ff4a3d, #ffcf3a, #34d17a, #3da5ff, #b36bff, #ff5fa8, #ff4a3d); box-shadow: 0 0 10px #b36bff; }
