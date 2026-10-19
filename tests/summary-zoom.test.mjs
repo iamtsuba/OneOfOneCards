@@ -18,7 +18,7 @@ const require = createRequire(import.meta.url)
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const out = mkdtempSync(path.join(root, 'tests', '.out-zoom-'))
 await build({
-  stdin: { contents: "export { SummaryGrid, CardZoom, Overlay, RevealLine } from './src/components/Boosters.jsx'; export { GameContext } from './src/game.js'", resolveDir: root, loader: 'js' },
+  stdin: { contents: "export { SummaryGrid, CardZoom, Overlay } from './src/components/Boosters.jsx'; export { GameContext } from './src/game.js'", resolveDir: root, loader: 'js' },
   bundle: true, format: 'esm', platform: 'node', jsx: 'automatic', outfile: path.join(out, 'bundle.mjs'),
   external: ['react', 'react-dom', 'react/jsx-runtime', 'react-dom/client', '@supabase/supabase-js'],
   define: { 'import.meta.env': JSON.stringify({ MODE: 'preprod', VITE_APP_ENV: 'preprod' }) }, logLevel: 'silent',
@@ -27,7 +27,7 @@ const React = require('react')
 const { renderToStaticMarkup } = require('react-dom/server')
 const { createRoot } = require('react-dom/client')
 const { act } = React
-const { SummaryGrid, CardZoom, Overlay, RevealLine, GameContext } = await import(pathToFileURL(path.join(out, 'bundle.mjs')).href)
+const { SummaryGrid, CardZoom, Overlay, GameContext } = await import(pathToFileURL(path.join(out, 'bundle.mjs')).href)
 rmSync(out, { recursive: true, force: true })
 
 let bad = 0
@@ -123,22 +123,16 @@ const q = (host, sel) => host.querySelector(sel)
   await m.unmount()
 }
 
-// ---------- texte sous la carte révélée : plus de « n'existe qu'en un seul exemplaire » pour les cartes numérotées ----------
-const line = (card, rarity) => renderToStaticMarkup(wrap(React.createElement(RevealLine, { rarity, card, catalog })))
-const txt = (h) => h.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
+// ---------- ouverture carte par carte : plus de phrase sous la carte (celle sur « l'exemplaire numéroté ») ----------
 const rareCard = { type_id: 2, base_rarity: 'rare', series: 120, number: 17, rarity_id: 'rare', is_new: true }
-ok('carte numérotée (17/120) : « Cet exemplaire numéroté est à toi, et à personne d\'autre. », plus aucune mention d\'un seul exemplaire', txt(line(rareCard, rarityMap.rare)) === 'Rare : « Le Pa Chat » 17/120 Cet exemplaire numéroté est à toi, et à personne d’autre.' && !/seul exemplaire|qu’en un/.test(line(rareCard, rarityMap.rare)))
 const uniqueCard = { type_id: 1, base_rarity: 'ultra', series: 1, number: 1, rarity_id: 'ultra', is_new: false }
-ok('carte Unique (série de 1) : elle, et elle seule, « n\'existe qu\'en un seul exemplaire, et c\'est le tien »', /n’existe qu’en un seul exemplaire, et c’est le tien\./.test(line(uniqueCard, rarityMap.ultra)))
-ok('toutes les cartes d\'une série de 2 ou plus (Alpha 1/N, Omega N/N, Commune…) : texte des cartes numérotées', [2, 3, 10, 50, 1500].every((n) => /Cet exemplaire numéroté est à toi/.test(line({ ...rareCard, series: n }, rarityMap.rare)) && !/seul exemplaire/.test(line({ ...rareCard, series: n }, rarityMap.rare))))
-ok('numéro masqué (rien après le nom) : la phrase reste correcte, sans espace parasite ni « undefined »', (() => { const cat2 = { ...catalog, cardRef: () => '' }; const h = renderToStaticMarkup(wrap2(cat2, React.createElement(RevealLine, { rarity: rarityMap.rare, card: rareCard, catalog: cat2 }))); return txt(h) === 'Rare : « Le Pa Chat » Cet exemplaire numéroté est à toi, et à personne d’autre.' && !/undefined/.test(h) })())
-ok('rareté ou type inconnus : pas de plantage ni de « [object Object] » (le nom manque simplement)', (() => { const h = line({ ...rareCard, type_id: 999 }, undefined); return /Cet exemplaire numéroté est à toi/.test(h) && !/object Object|NaN/.test(h) })())
 {
   const m = await mount(wrap(React.createElement(Overlay, { overlay: { phase: 'reveal', cards: [rareCard, uniqueCard], idx: 0, summary: false, categoryId: 1, nextCategoryId: 1, golden: false }, setOverlay: noop, rarityMap, catalog, boosters: 3, onAgain: noop, onCollection: noop })))
-  ok('à l\'ouverture réelle (carte par carte), le nouveau texte s\'affiche sous la carte', /Cet exemplaire numéroté est à toi/.test(m.host.querySelector('.reveal-line')?.textContent ?? '') && !/seul exemplaire/.test(m.host.textContent))
+  ok('à l\'ouverture réelle, plus aucune phrase sous la carte (ni « exemplaire numéroté », ni « un seul exemplaire »)', !m.host.querySelector('.reveal-line') && !/exemplaire/.test(m.host.textContent))
+  ok('ce qui reste sous la carte : « carte 1 sur 2 », l\'étoile « nouvelle carte » et l\'invitation à toucher la carte', /carte 1 sur 2/.test(m.host.textContent) && /Nouvelle carte/.test(m.host.textContent) && /Touche la carte pour passer à la suivante\./.test(m.host.textContent))
   await m.unmount()
   const m2 = await mount(wrap(React.createElement(Overlay, { overlay: { phase: 'reveal', cards: [rareCard, uniqueCard], idx: 1, summary: false, categoryId: 1, nextCategoryId: 1, golden: false }, setOverlay: noop, rarityMap, catalog, boosters: 3, onAgain: noop, onCollection: noop })))
-  ok('à l\'ouverture réelle, une carte Unique garde « un seul exemplaire »', /n’existe qu’en un seul exemplaire, et c’est le tien\./.test(m2.host.querySelector('.reveal-line')?.textContent ?? ''))
+  ok('même chose pour une carte Unique : aucune phrase, la carte seule', !m2.host.querySelector('.reveal-line') && !/exemplaire/.test(m2.host.textContent) && !!m2.host.querySelector('.reveal-card .card'))
   await m2.unmount()
 }
 

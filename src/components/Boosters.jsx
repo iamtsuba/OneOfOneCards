@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import * as api from '../api'
 import { explain } from '../api'
-import { isSpecial } from '../rarity'
+import { isSpecial, isArtRare } from '../rarity'
+import ArtIntro, { GOLD_FIREWORKS } from './ArtReveal'
 import { useGame, useCountdown, fmtClock, fmt } from '../game'
 import Card from './Card'
 import Pack from './Pack'
@@ -358,23 +359,11 @@ export default function Boosters({ goCollection }) {
   )
 }
 
-// Texte sous la carte révélée. Seule une carte Unique (série de 1) n'existe qu'en un seul exemplaire ; les autres sont des exemplaires NUMÉROTÉS d'une série
-// (ex. 17/120) : on dit que celui-ci est à toi, sans prétendre qu'il n'y en a qu'un.
-export function RevealLine({ rarity, card, catalog }) {
-  const name = catalog?.typeMap?.[card.type_id]?.name
-  const ref = catalog?.cardRef?.(card.type_id, card.base_rarity, card.number, card.series)
-  return (
-    <p className="reveal-line" aria-live="polite">
-      <strong>{rarity?.name}</strong> : « {name} »{ref}{' '}
-      {Number(card.series) === 1 ? 'n’existe qu’en un seul exemplaire, et c’est le tien.' : 'Cet exemplaire numéroté est à toi, et à personne d’autre.'}
-    </p>
-  )
-}
-
 export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onAgain, onCollection }) {
   const shownAt = useRef(Date.now())
   const close = () => setOverlay(null)
   const [zoom, setZoom] = useState(null)   // index de la carte ouverte en grand dans le résumé
+  const [artDone, setArtDone] = useState(-1)   // index de la dernière carte Art Rare dont l'animation plein écran est terminée (ou passée)
 
   // Carte en grand : Échap revient au résumé (sans fermer le booster), flèches pour parcourir les cartes
   useEffect(() => {
@@ -446,7 +435,11 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
   }
   // Un clic sur la carte passe directement à la suivante
   // (courte pause à l'apparition pour ne pas sauter une carte par un double clic)
+  // Une carte Art Rare (même si son numéro l'affiche Alpha ou Omega) commence par une animation plein écran : l'illustration se réduit jusqu'à devenir la carte
+  const art = isArtRare(rarityMap[c.base_rarity])
+  const introOn = art && artDone !== idx
   const advance = () => {
+    if (introOn) return
     if (Date.now() - shownAt.current > 250) next()
   }
 
@@ -458,7 +451,8 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
         <p className="overlay-hint">{gold ? `Booster ${label ?? 'Gold'} : ` : golden ? 'Booster doré : ' : ''}carte {idx + 1} sur {cards.length}</p>
 
         <div
-          className="reveal-card"
+          className={`reveal-card${art && !introOn ? ' art-landed' : ''}`}
+          style={introOn ? { visibility: 'hidden' } : undefined}
           onClick={advance}
           role="button"
           tabIndex={0}
@@ -468,9 +462,9 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
           <Card typeId={c.type_id} base={c.base_rarity} series={c.series} number={c.number} rarity={rarity} size="lg" isNew={!!c.is_new} glow shine />
         </div>
 
-        {isSpecial(rarity) && <Fireworks rarity={rarity} />}
-
-        <RevealLine rarity={rarity} card={c} catalog={catalog} />
+        {introOn && <ArtIntro type={catalog?.typeMap?.[c.type_id]} onDone={() => setArtDone(idx)} />}
+        {/* feux d'artifice : ceux de la rareté spéciale, sinon dorés pour une Art Rare ; ils partent quand l'animation plein écran est finie */}
+        {!introOn && (isSpecial(rarity) ? <Fireworks rarity={rarity} /> : art && <Fireworks rarity={GOLD_FIREWORKS} />)}
         {c.is_new && <p className="reveal-new">⭐ Nouvelle carte : elle est déjà dans ton album.</p>}
         <p className="overlay-hint">{last ? 'Touche la carte pour voir le résumé.' : 'Touche la carte pour passer à la suivante.'}</p>
       </div>

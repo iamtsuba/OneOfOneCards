@@ -914,3 +914,16 @@ html.subscriber { --bg: #fbf1d3; }
 .shelf-pack .pack-wrap { width: 100%; }
 .shelf-pack:focus-visible { outline: 3px solid #ffe27a; outline-offset: 4px; border-radius: 10px; }
 .shelf-count { position: absolute; top: -8px; right: -2px; min-width: 28px; padding: 2px 8px; border-radius: 99px; background: #14173f; color: #fff; font-weight: 800; font-size: 13px; box-shadow: 0 2px 6px rgba(20, 23, 63, .35); }
+
+/* Art Rare : l'illustration plein écran se réduit jusqu'à la carte */
+.art-intro { position: fixed; inset: 0; z-index: 70; cursor: pointer; overflow: hidden; }
+.art-intro-backdrop { position: absolute; inset: 0; background: #070a1f; opacity: 1; }
+.art-intro.shrink .art-intro-backdrop { opacity: 0; transition: opacity var(--art-shrink, 1800ms) ease-in; }
+.art-intro-img { position: fixed; display: grid; place-items: center; overflow: hidden; background: #fff; }
+.art-intro.shrink .art-intro-img { box-shadow: 0 0 40px rgba(255, 207, 58, .7), 0 0 0 3px rgba(255, 226, 122, .9); }
+.art-intro-img img { width: 100%; height: 100%; object-fit: cover; object-position: center 30%; animation: artzoom 2.4s ease-out both; }
+.art-intro-emoji { font-size: min(80vw, 55vh); line-height: 1; }
+@keyframes artzoom { from { transform: scale(1.14); } to { transform: scale(1); } }
+.reveal-card.art-landed { animation: cardin .35s cubic-bezier(.2, .8, .2, 1), artpop 1s ease-out; }
+@keyframes artpop { 0% { filter: brightness(2.4) drop-shadow(0 0 46px #ffcf3a); } 100% { filter: brightness(1) drop-shadow(0 0 0 transparent); } }
+@media (prefers-reduced-motion: reduce) { .art-intro { display: none; } .reveal-card.art-landed { animation: none; } }
