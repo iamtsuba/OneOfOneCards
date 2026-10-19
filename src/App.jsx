@@ -51,7 +51,7 @@ function Game({ session }) {
   const setStatus = useCallback((s) => {
     setStatusRaw({ ...s, offset: new Date(s.server_now).getTime() - Date.now() })
   }, [])
-  const refreshStatus = useCallback(async () => setStatus(await api.getStatus()), [setStatus])
+  const refreshStatus = useCallback(async () => { const s = await api.getStatus(); setStatus(s); return s }, [setStatus])
 
   const refreshCatalog = useCallback(async () => setCatalogRaw(await api.getCatalog()), [])
 
@@ -66,6 +66,12 @@ function Game({ session }) {
   }, [refreshStatus, refreshCatalog])
 
   useEffect(() => { load() }, [load])
+  // Abonné : le fond du jeu passe du gris clair au doré clair
+  const subscriberOn = !!status?.subscription?.active
+  useEffect(() => {
+    document.documentElement.classList.toggle('subscriber', subscriberOn)
+    return () => document.documentElement.classList.remove('subscriber')
+  }, [subscriberOn])
 
   // Une catégorie vient de se terminer (ou a été modifiée) : on relit le catalogue
   const activeCategory = status?.active_category_id

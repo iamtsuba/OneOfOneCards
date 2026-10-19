@@ -11,6 +11,8 @@
 //
 // Le prix (centimes par mois) et l'ouverture de l'abonnement viennent des réglages de __PREFIX__config, le nom de __PREFIX__text_config.
 // Le prix est envoyé à Stripe à chaque souscription (price_data) : changer le réglage ne touche pas les abonnés déjà inscrits.
+// Deuxième usage, au retour du paiement : { action: 'confirm', session_id } relit la session auprès de Stripe (avec la clé secrète), vérifie qu'elle appartient bien
+// au joueur connecté et met son abonnement à jour tout de suite, sans attendre le webhook (qui reste la source de vérité pour la suite : renouvellements, résiliation).
 // Avant de créer le paiement, la fonction exige les conditions de vente, la renonciation au droit de rétractation (contenu numérique)
 // ET la reconnaissance du renouvellement automatique, puis enregistre cette preuve dans __PREFIX__consents (date, version, textes, IP).
 // SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY sont fournis automatiquement par Supabase.
@@ -30,6 +32,22 @@ const CORS = {
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } })
+
+// Arguments de subscription_sync tirés d'un abonnement Stripe (selon la version de l'API, les dates de période sont sur l'abonnement ou sur sa première ligne)
+const iso = (t: unknown) => (typeof t === 'number' ? new Date(t * 1000).toISOString() : null)
+function syncArgs(userId: string, sub: any) {
+  const item = sub.items?.data?.[0]
+  return {
+    p_user: userId,
+    p_customer: typeof sub.customer === 'string' ? sub.customer : sub.customer?.id ?? null,
+    p_subscription: sub.id ?? null,
+    p_status: sub.status,
+    p_period_start: iso(sub.current_period_start ?? item?.current_period_start),
+    p_period_end: iso(sub.current_period_end ?? item?.current_period_end),
+    p_cancel_at_period_end: sub.cancel_at_period_end === true || (sub.cancel_at ?? null) !== null,
+    p_event_created: new Date().toISOString(),
+  }
+}
 
 const RECURRING_TEXT = 'Abonnement mensuel renouvelé automatiquement jusqu’à résiliation, que je peux faire à tout moment depuis « Gérer mon abonnement ».'
 
@@ -70,6 +88,22 @@ Deno.serve(async (req) => {
     const user = auth?.user
     if (authError || !user) return json({ error: 'not_authenticated' }, 401)
 
+    // Confirmation au retour du paiement : la session Stripe doit appartenir au joueur connecté
+    if (body?.action === 'confirm') {
+      const sid = String(body?.session_id ?? '')
+      if (!/^cs_(test|live)_[A-Za-z0-9]{10,200}$/.test(sid)) return json({ error: 'invalid_session' }, 400)
+      const base0 = secret('STRIPE_API_BASE') ?? 'https://api.stripe.com'
+      const r0 = await fetch(`${base0}/v1/checkout/sessions/${sid}?expand[]=subscription`, { headers: { Authorization: `Bearer ${stripeKey}` } })
+      const sess = await r0.json()
+      if (!r0.ok) { console.error('Session Stripe introuvable', sess?.error?.message); return json({ error: 'session_not_found' }, 404) }
+      if (sess.mode !== 'subscription' || (sess.client_reference_id ?? sess.metadata?.user_id) !== user.id) return json({ error: 'wrong_user' }, 403)
+      const sub = sess.subscription
+      if (sess.status !== 'complete' || !sub || typeof sub !== 'object') return json({ error: 'not_complete' }, 409)
+      const { data: synced, error: syncError } = await admin.rpc(PREFIX + 'subscription_sync', syncArgs(user.id, sub))
+      if (syncError) { console.error('Mise à jour de l’abonnement impossible', syncError.message); return json({ error: 'server_error' }, 500) }
+      return json({ ok: true, active: synced?.active === true })
+    }
+
     const { data: rows, error: cfgError } = await admin
       .from(PREFIX + 'config').select('key,value').in('key', ['subscription_enabled', 'subscription_price_cents', 'cgv_version'])
     if (cfgError) throw cfgError
@@ -103,13 +137,15 @@ Deno.serve(async (req) => {
 
     const success = new URL(back)
     success.searchParams.set('subscription', 'success')
+    // Stripe remplace {CHECKOUT_SESSION_ID} par l'identifiant de la session (les accolades doivent rester telles quelles : pas d'encodage d'adresse)
+    const successUrl = success.toString() + '&session_id={CHECKOUT_SESSION_ID}'
     const cancel = new URL(back)
     cancel.searchParams.set('subscription', 'cancel')
 
     const form = new URLSearchParams({
       mode: 'subscription',
       locale: 'fr',
-      success_url: success.toString(),
+      success_url: successUrl,
       cancel_url: cancel.toString(),
       client_reference_id: user.id,
       'line_items[0][quantity]': '1',

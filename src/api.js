@@ -102,6 +102,12 @@ async function urlFunction(name, body) {
 }
 // Abonnement : demande la page de paiement mensuel de Stripe (les trois consentements sont exigés par le serveur)
 export const startSubscription = (consent) => urlFunction(SUBSCRIBE_FUNCTION, { consent })
+// Abonnement : au retour du paiement, demande au serveur de relire la session chez Stripe et d'activer l'abonnement tout de suite (le webhook fait pareil, en différé)
+export async function confirmSubscription(sessionId) {
+  const { data, error } = await supabase.functions.invoke(SUBSCRIBE_FUNCTION, { body: { action: 'confirm', session_id: sessionId } })
+  if (error) throw new Error('checkout:confirm_failed')
+  return data
+}
 // Abonnement : adresse du portail de Stripe pour résilier, changer de carte ou voir les factures
 export const openSubscriptionPortal = () => urlFunction(SUBSCRIPTION_PORTAL_FUNCTION, {})
 

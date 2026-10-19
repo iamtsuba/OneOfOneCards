@@ -122,6 +122,10 @@ export default function Boosters({ goCollection }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!overlay])
 
+  const subscriber = !!status?.subscription?.active
+  // booster ouvert avec le stock gratuit : celui des abonnés (OneMore) pour un abonné
+  const boosterName = subscriber && status?.subscription?.booster_name ? status?.standard_booster?.name : null
+  const giftItem = (status?.booster_types ?? []).find((b) => b.id === status?.subscription?.gift_id) ?? null
   const boosters = status?.boosters ?? 0
   const bonus = status?.bonus_boosters ?? 0
   const total = boosters + bonus
@@ -130,6 +134,7 @@ export default function Boosters({ goCollection }) {
   const canOpen = status && total > 0 && !overlay && !!category
   const [consentOpen, setConsentOpen] = useState(false)
   const [subOpen, setSubOpen] = useState(false)
+  const [subPending, setSubPending] = useState(false)   // retour de paiement : abonnement en cours d'activation
   const [subBusy, setSubBusy] = useState(false)
   const [subError, setSubError] = useState('')
   // « Gérer mon abonnement » : portail Stripe (résilier, changer de carte, factures)
@@ -149,20 +154,37 @@ export default function Boosters({ goCollection }) {
     const params = new URLSearchParams(window.location.search)
     const pay = params.get('payment')
     const subReturn = params.get('subscription')
+    const sessionId = params.get('session_id')
     if (!pay && !subReturn) return
     params.delete('payment')
     params.delete('subscription')
+    params.delete('session_id')
     const qs = params.toString()
     window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash)
     // Retour de la page d'abonnement ou du portail de gestion : l'état arrive par Stripe quelques secondes plus tard
     if (subReturn) {
       if (subReturn === 'cancel') { setNotice('Abonnement annulé : tu n’as pas été débité.'); return }
-      setNotice(subReturn === 'success' ? 'Merci ! Ton abonnement s’active dans quelques secondes.' : 'Modifications enregistrées chez Stripe : elles s’affichent dans quelques secondes.')
-      let tries = 0
-      const id = setInterval(() => {
-        refreshStatus().catch(() => {})
-        if (++tries >= 10) clearInterval(id)
-      }, 2500)
+      if (subReturn !== 'success') {
+        setNotice('Modifications enregistrées chez Stripe : elles s’affichent dans quelques secondes.')
+        let tries = 0
+        const id = setInterval(() => { refreshStatus().catch(() => {}); if (++tries >= 10) clearInterval(id) }, 2500)
+        return
+      }
+      // Paiement validé : le serveur relit la session chez Stripe et active l'abonnement tout de suite ; le webhook prend le relais pour la suite.
+      // Pendant ce temps, plus de bouton d'abonnement (« activation en cours »).
+      setSubPending(true)
+      setNotice('Merci ! Ton paiement est validé, activation de ton abonnement…')
+      ;(async () => {
+        try { if (sessionId) await api.confirmSubscription(sessionId) } catch { /* le webhook prendra le relais */ }
+        for (let i = 0; i < 12; i++) {
+          let s = null
+          try { s = await refreshStatus() } catch { /* on réessaie */ }
+          if (s?.subscription?.active) { setSubPending(false); setNotice(`Bienvenue dans ${s.subscription.name} ! Tes avantages sont actifs.`); return }
+          await new Promise((r) => setTimeout(r, 2500))
+        }
+        setSubPending(false)
+        setNotice('Ton paiement est bien enregistré, mais l’activation prend plus de temps que prévu. Recharge la page dans un instant ; si rien ne change, contacte-nous.')
+      })()
       return
     }
     if (pay === 'cancel') { setNotice('Paiement annulé : tu n’as pas été débité.'); return }
@@ -242,11 +264,11 @@ export default function Boosters({ goCollection }) {
       <h1 className="page-title">Boosters</h1>
 
       <div className="pack-stage">
-        <button className="pack-button" onClick={() => open()} disabled={!canOpen} aria-label="Ouvrir un booster">
+        <button className="pack-button" onClick={() => open()} disabled={!canOpen} aria-label={boosterName ? `Ouvrir un booster ${boosterName}` : 'Ouvrir un booster'}>
           <Pack dim={total === 0 || !category} category={category} />
         </button>
 
-        {category && <p className="pack-name">Booster « {category.name} »</p>}
+        {category && <p className="pack-name">Booster {boosterName ? `${boosterName} ` : ''}« {category.name} »</p>}
         <p className="stock">
           {status ? (
             total > 0 ? (
@@ -263,7 +285,7 @@ export default function Boosters({ goCollection }) {
         </p>
 
         <button className="btn accent big" onClick={() => open()} disabled={!canOpen}>
-          Ouvrir un booster
+          Ouvrir un booster{boosterName ? ` ${boosterName}` : ''}
         </button>
 
         <ExtraBoosters items={status?.booster_types} coins={coinsFree} disabled={!!overlay} onOpen={(it) => open(false, 'type', it.id)} onBuy={buy} onInfo={setOddsFor} />
@@ -308,7 +330,7 @@ export default function Boosters({ goCollection }) {
           <p className="msg info">Toutes les catégories de boosters ont été entièrement tirées. De nouvelles arriveront bientôt.</p>
         )}
 
-        <SubscriptionPanel sub={status?.subscription} baseMinutes={status?.subscription?.active ? null : status?.regen_minutes} onSubscribe={() => setSubOpen(true)} onManage={manageSubscription} busy={subBusy} error={subError} />
+        <SubscriptionPanel sub={status?.subscription} baseMinutes={status?.subscription?.active ? null : status?.regen_minutes} onSubscribe={() => setSubOpen(true)} onManage={manageSubscription} onOpenGift={(it) => open(false, 'type', it.id)} gift={giftItem} pending={subPending} busy={subBusy || !!overlay} error={subError} />
 
         {status?.shop_enabled && (
           <div className="shop">

@@ -8,8 +8,17 @@ const dateFr = (iso) => new Date(iso).toLocaleDateString('fr-FR', { day: 'numeri
 
 // Carte de l'abonnement sur la page Boosters : l'offre (avantages, prix) ou l'état de l'abonné (renouvellement, gestion)
 // sub = status.subscription ; baseMinutes = délai de recharge normal (celui d'un non abonné)
-export function SubscriptionPanel({ sub, baseMinutes, onSubscribe, onManage, busy = false, error = '' }) {
-  if (!sub || (!sub.enabled && !sub.active)) return null
+// pending = retour de paiement : l'abonnement est en cours d'activation (plus de bouton d'abonnement) ; gift = le booster cadeau dans le stock du joueur
+export function SubscriptionPanel({ sub, baseMinutes, onSubscribe, onManage, onOpenGift, gift = null, pending = false, busy = false, error = '' }) {
+  if (!sub || (!sub.enabled && !sub.active && !pending)) return null
+  if (pending && !sub.active) {
+    return (
+      <section className="subscription pending" aria-label={`Abonnement ${sub.name}`} aria-busy="true">
+        <strong className="sub-title">Activation de {sub.name}…</strong>
+        <p className="muted">Ton paiement est validé : tes avantages arrivent dans quelques secondes.</p>
+      </section>
+    )
+  }
   const faster = baseMinutes && sub.regen_minutes < baseMinutes
   const perks = [
     `Recharge de tes boosters toutes les ${sub.regen_minutes} minutes${faster && !sub.active ? ` au lieu de ${baseMinutes}` : ''}`,
@@ -22,7 +31,22 @@ export function SubscriptionPanel({ sub, baseMinutes, onSubscribe, onManage, bus
         <>
           <strong className="sub-title">Abonné {sub.name}</strong>
           {sub.period_end && <p className="muted">{sub.cancel_at_period_end ? `Ton abonnement se termine le ${dateFr(sub.period_end)}.` : `Prochain renouvellement le ${dateFr(sub.period_end)}.`}</p>}
-          <ul className="sub-perks">{perks.map((p) => <li key={p}>{p}</li>)}</ul>
+          <ul className="sub-perks"><li>{perks[0]}</li></ul>
+          <div className="sub-gifts">
+            {sub.booster_name && (
+              <div className="sub-gift" style={{ '--c': sub.booster_color || '#7c3aed' }}>
+                <i className="cat-dot" aria-hidden="true" />
+                <span><small>Ton booster</small><strong>{sub.booster_name}</strong><small>à la place du Standard</small></span>
+              </div>
+            )}
+            {sub.gift_name && sub.gift_quantity > 0 && (
+              <div className="sub-gift" style={{ '--c': gift?.color || '#f59e0b' }}>
+                <i className="cat-dot" aria-hidden="true" />
+                <span><small>Ton cadeau du mois</small><strong>{sub.gift_name}</strong><small>{gift?.quantity > 0 ? `${gift.quantity} à ouvrir` : 'aucun en stock pour l’instant'}</small></span>
+                {gift?.quantity > 0 && <button type="button" className="btn small" onClick={() => onOpenGift?.(gift)} disabled={busy}>Ouvrir</button>}
+              </div>
+            )}
+          </div>
           <button type="button" className="btn ghost" onClick={onManage} disabled={busy}>{busy ? 'Ouverture…' : 'Gérer mon abonnement'}</button>
         </>
       ) : (

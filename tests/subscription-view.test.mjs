@@ -63,10 +63,35 @@ ok('offre : le prix suit le réglage (7,99 €) et le nom suit le réglage (Prem
 const active = { ...offer, active: true, period_end: '2026-11-01T10:00:00+00:00' }
 const a = panel(active)
 ok('abonné : « Abonné OneMore », date du prochain renouvellement, avantages en cours, bouton « Gérer mon abonnement », plus de bouton d\'abonnement', /Abonné OneMore/.test(a) && /Prochain renouvellement le 1 novembre 2026/.test(a) && /toutes les 5 minutes/.test(a) && !/au lieu de/.test(a) && />Gérer mon abonnement</.test(a) && !/S’abonner/.test(a))
+const giftItem = { id: 7, name: 'Art Rare assuré', color: '#f59e0b', quantity: 1 }
+const ag = panel({ ...active, booster_color: '#7c3aed', gift_id: 7 }, { gift: giftItem })
+ok('abonné : on voit SON booster (OneMore, à la place du Standard) et SON cadeau du mois (Art Rare assuré, 1 à ouvrir) avec un bouton Ouvrir', /Ton booster<\/small><strong>OneMore<\/strong><small>à la place du Standard/.test(ag) && /Ton cadeau du mois<\/small><strong>Art Rare assuré<\/strong><small>1 à ouvrir/.test(ag) && /<button type="button" class="btn small">Ouvrir<\/button>/.test(ag) && /--c:#7c3aed/.test(ag) && /--c:#f59e0b/.test(ag))
+ok('abonné : cadeau pas (encore) dans le stock -> « aucun en stock pour l\'instant », sans bouton Ouvrir', /aucun en stock pour l’instant/.test(panel(active, { gift: { ...giftItem, quantity: 0 } })) && !/>Ouvrir</.test(panel(active, { gift: { ...giftItem, quantity: 0 } })) && /aucun en stock pour l’instant/.test(panel(active)))
+ok('abonné : sans cadeau configuré (quantité 0 ou booster absent), seule la ligne du booster reste', !/Ton cadeau du mois/.test(panel({ ...active, gift_quantity: 0 })) && !/Ton cadeau du mois/.test(panel({ ...active, gift_name: null })) && /Ton booster/.test(panel({ ...active, gift_name: null })) && !/Ton booster/.test(panel({ ...active, booster_name: null })))
+const pend = panel(offer, { pending: true })
+ok('retour de paiement : « Activation de OneMore… », plus aucun bouton d\'abonnement, indiqué comme occupé', /Activation de OneMore…/.test(pend) && !/S’abonner/.test(pend) && !/<button/.test(pend) && /aria-busy="true"/.test(pend) && /Ton paiement est validé/.test(pend))
+ok('activation en cours même si l\'abonnement est fermé aux nouveaux ; dès que l\'abonnement est actif, l\'état d\'abonné remplace l\'attente', /Activation de OneMore…/.test(panel({ ...offer, enabled: false }, { pending: true })) && /Abonné OneMore/.test(panel(active, { pending: true })) && !/Activation de/.test(panel(active, { pending: true })))
+ok('ni offre ni attente quand tout est fermé : rien', panel({ ...offer, enabled: false }, { pending: false }) === '')
 ok('abonné qui a résilié : « se termine le … » à la place du renouvellement', /Ton abonnement se termine le 1 novembre 2026\./.test(panel({ ...active, cancel_at_period_end: true })) && !/Prochain renouvellement/.test(panel({ ...active, cancel_at_period_end: true })))
 ok('abonné quand l\'abonnement est fermé aux nouveaux : le panneau reste (gérer / résilier), sans proposer de s\'abonner', /Gérer mon abonnement/.test(panel({ ...active, enabled: false })) && !/S’abonner/.test(panel({ ...active, enabled: false })))
 ok('abonné sans date connue : pas de phrase de date, pas de plantage', !/Invalid|NaN|undefined/.test(panel({ ...active, period_end: null })) && !/renouvellement/.test(panel({ ...active, period_end: null })))
 ok('erreur affichée en alerte ; bouton désactivé pendant une action', /role="alert">Portail indisponible/.test(panel(active, { error: 'Portail indisponible' })) && /disabled="">Ouverture…/.test(panel(active, { busy: true })) && /disabled="">S’abonner à OneMore/.test(panel(offer, { busy: true })))
+
+// ---------- le cadeau s'ouvre depuis le panneau ----------
+{
+  const opened = []
+  const host0 = document.createElement('div'); document.body.appendChild(host0)
+  const r0 = createRoot(host0)
+  await act(async () => { r0.render(React.createElement(SubscriptionPanel, { sub: { ...active, gift_id: 7 }, baseMinutes: 10, onSubscribe: noop, onManage: noop, gift: giftItem, onOpenGift: (it) => opened.push(it.id) })) })
+  await act(async () => { [...host0.querySelectorAll('button')].find((b) => b.textContent === 'Ouvrir').dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
+  ok('cadeau : « Ouvrir » demande l\'ouverture du booster cadeau (identifiant 7)', opened.join() === '7')
+  await act(async () => r0.unmount()); host0.remove()
+}
+{
+  const { readFileSync } = await import('node:fs')
+  const css = readFileSync(path.join(root, 'src/styles.css'), 'utf8')
+  ok('fond du jeu : doré clair pour un abonné (html.subscriber), gris clair sinon', /html\.subscriber \{ --bg: #fbf1d3; \}/.test(css) && /:root \{\s*--bg: #e9ebf4;/.test(css))
+}
 
 // ---------- formulaire de consentement ----------
 const mount = async (element) => {

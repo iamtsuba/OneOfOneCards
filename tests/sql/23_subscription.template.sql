@@ -151,6 +151,7 @@ select pg_temp.expect('abonnement : proposé, prix, nom, abonné actif, fin de p
   (select (s ->> 'enabled', s ->> 'name', s ->> 'price_cents', s ->> 'active', s ->> 'cancel_at_period_end', s ->> 'booster_name', s ->> 'gift_name', s ->> 'gift_quantity') = ('true', 'OneMore', '799', 'true', 'true', 'OneMore', 'Art Rare assuré', '1')
      from (select public.{{P}}status() -> 'subscription' as s) z)
   and (public.{{P}}status() -> 'subscription' ->> 'period_end') is not null);
+select pg_temp.expect('le statut donne la couleur du booster des abonnés et l''identifiant du cadeau (pour les afficher)', (public.{{P}}status() -> 'subscription' ->> 'booster_color') = '#7c3aed' and (public.{{P}}status() -> 'subscription' ->> 'gift_id')::int = :gift);
 update public.{{P}}config set value = 0 where key = 'subscription_enabled';
 select pg_temp.expect('abonnement masqué : le statut l''indique (enabled = false)', (public.{{P}}status() -> 'subscription' ->> 'enabled') = 'false');
 

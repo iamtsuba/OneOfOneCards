@@ -1104,6 +1104,8 @@ begin
                              'cancel_at_period_end', coalesce((select su.cancel_at_period_end from public.{{P}}subscriptions su where su.user_id = p.id), false),
                              'regen_minutes',        least(greatest(public.{{P}}cfg('regen_minutes')::int, 1), greatest(coalesce(public.{{P}}cfg('subscriber_regen_minutes'), public.{{P}}cfg('regen_minutes'))::int, 1)),
                              'booster_name',         (select bt.name from public.{{P}}booster_types bt where bt.role = 'subscriber'),
+                             'booster_color',        (select bt.color from public.{{P}}booster_types bt where bt.role = 'subscriber'),
+                             'gift_id',              (select bt.id from public.{{P}}booster_types bt where bt.role = 'subscription_gift' and bt.enabled),
                              'gift_name',            (select bt.name from public.{{P}}booster_types bt where bt.role = 'subscription_gift' and bt.enabled),
                              'gift_quantity',        coalesce(public.{{P}}cfg('subscription_gift_quantity'), 0)::int),
     'booster_types',       (select coalesce(jsonb_agg(jsonb_build_object('id', bt.id, 'name', bt.name, 'cards', bt.cards, 'color', bt.color, 'price', bt.price_coins,

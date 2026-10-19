@@ -31,7 +31,7 @@
     "test:boosterlogic": "node tests/booster-logic.test.mjs",
     "test:zoom": "node tests/summary-zoom.test.mjs",
     "test:profile": "node tests/profile-auth.test.mjs",
-    "test:subscription": "node tests/subscription-view.test.mjs"
+    "test:subscription": "node tests/subscription-view.test.mjs && node tests/subscription-return.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
