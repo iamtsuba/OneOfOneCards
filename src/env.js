@@ -9,7 +9,6 @@ export const APP_ENV = env.VITE_APP_ENV || 'prod'
 export const IS_PREPROD = APP_ENV === 'preprod'
 export const PREFIX = env.VITE_TABLE_PREFIX || 'o1ocards_'
 export const CHECKOUT_FUNCTION = env.VITE_CHECKOUT_FUNCTION || 'o1ocards-checkout'
-// Abonnement : mêmes préfixes d'environnement que la fonction de paiement (o1ocards-… ou pp-o1ocards-…)
+// Pass Pro (achat unique) : mêmes préfixes d'environnement que la fonction de paiement (o1ocards-… ou pp-o1ocards-…)
 export const SUBSCRIBE_FUNCTION = CHECKOUT_FUNCTION.replace(/checkout$/, 'subscribe')
-export const SUBSCRIPTION_PORTAL_FUNCTION = CHECKOUT_FUNCTION.replace(/checkout$/, 'subscription-portal')
 export const AUTH_STORAGE_KEY = env.VITE_AUTH_STORAGE_KEY || 'o1ocards-auth'

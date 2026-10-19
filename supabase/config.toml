@@ -11,9 +11,6 @@ verify_jwt = false
 [functions.o1ocards-subscribe]
 verify_jwt = false
 
-[functions.o1ocards-subscription-portal]
-verify_jwt = false
-
 [functions.pp-o1ocards-checkout]
 verify_jwt = false
 
@@ -21,7 +18,4 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.pp-o1ocards-subscribe]
-verify_jwt = false
-
-[functions.pp-o1ocards-subscription-portal]
 verify_jwt = false

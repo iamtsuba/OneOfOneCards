@@ -1,13 +1,12 @@
-// 1/1 Cards, environnement __ENV__ : reçoit les notifications de Stripe : crédite les boosters après un paiement réussi
-// et tient à jour l'abonnement des joueurs (événements customer.subscription.created / updated / deleted).
+// 1/1 Cards, environnement __ENV__ : reçoit les notifications de Stripe : crédite les boosters après un paiement réussi, donne le pass Pro (achat unique,
+// à vie) après son paiement et le retire après un remboursement complet.
 // GÉNÉRÉ par scripts/build-functions.mjs à partir de supabase/functions/_templates/ : ne pas modifier à la main.
 // Cette fonction doit être déployée SANS vérification JWT (c'est Stripe qui appelle) :
 // l'authenticité est garantie par la signature Stripe, vérifiée ci-dessous.
 //
 // Secrets requis (Supabase > Edge Functions > Secrets) :
 //   __SP__STRIPE_WEBHOOK_SECRET : secret de signature du webhook (whsec_...)
-// Événements à cocher dans Stripe (Développeurs > Webhooks) : checkout.session.completed, checkout.session.async_payment_succeeded,
-//   customer.subscription.created, customer.subscription.updated, customer.subscription.deleted
+// Événements à cocher dans Stripe (Développeurs > Webhooks) : checkout.session.completed, checkout.session.async_payment_succeeded, charge.refunded
 // SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY sont fournis automatiquement par Supabase.
 import { createClient } from 'npm:@supabase/supabase-js@2'
 
@@ -65,33 +64,22 @@ Deno.serve(async (req) => {
     return new Response('invalid_payload', { status: 400 })
   }
 
-  // Abonnement : état du joueur (statut, période, résiliation programmée) ; le cadeau mensuel est donné par la base, une fois par période
-  if (['customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted'].includes(event.type)) {
-    const sub = event.data?.object
-    const userId = sub?.metadata?.user_id
-    // Abonnement qui ne vient pas de notre application (ou identifiant illisible) : on ignore
-    if (!sub || typeof userId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
-      return Response.json({ received: true, ignored: true })
-    }
-    // Selon la version de l'API Stripe, les dates de période sont sur l'abonnement ou sur sa première ligne
-    const item = sub.items?.data?.[0]
-    const iso = (t: unknown) => (typeof t === 'number' ? new Date(t * 1000).toISOString() : null)
-    const admin2 = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } })
-    const { data, error } = await admin2.rpc(PREFIX + 'subscription_sync', {
-      p_user: userId,
-      p_customer: typeof sub.customer === 'string' ? sub.customer : sub.customer?.id ?? null,
-      p_subscription: sub.id ?? null,
-      p_status: event.type === 'customer.subscription.deleted' ? 'canceled' : sub.status,
-      p_period_start: iso(sub.current_period_start ?? item?.current_period_start),
-      p_period_end: iso(sub.current_period_end ?? item?.current_period_end),
-      p_cancel_at_period_end: sub.cancel_at_period_end === true || (sub.cancel_at ?? null) !== null,
-      p_event_created: iso(event.created) ?? new Date().toISOString(),
-    })
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  const intent = (v: any) => (typeof v === 'string' ? v : v?.id ?? null)
+
+  // Remboursement COMPLET d'un achat du pass Pro : le joueur n'est plus membre (les boosters déjà reçus lui restent).
+  // Un remboursement partiel (charge.refunded = false) ou d'un autre achat (pack de boosters) n'a aucun effet ici.
+  if (event.type === 'charge.refunded') {
+    const charge = event.data?.object
+    const pi = intent(charge?.payment_intent)
+    if (!charge || charge.refunded !== true || !pi) return Response.json({ received: true, ignored: true })
+    const admin3 = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } })
+    const { data, error } = await admin3.rpc(PREFIX + 'pro_revoke', { p_payment_intent: pi })
     if (error) {
-      console.error('Mise à jour de l’abonnement impossible', error.message)
-      return new Response('subscription_failed', { status: 500 }) // Stripe réessaiera
+      console.error('Retrait du pass Pro impossible', error.message)
+      return new Response('revoke_failed', { status: 500 }) // Stripe réessaiera
     }
-    return Response.json({ received: true, subscription: data ?? null })
+    return Response.json({ received: true, revoked: data?.revoked ?? 0 })
   }
 
   const handled = ['checkout.session.completed', 'checkout.session.async_payment_succeeded']
@@ -100,6 +88,26 @@ Deno.serve(async (req) => {
   const session = event.data?.object
   // Paiement pas encore confirmé (ex. virement) : on attend l'événement async_payment_succeeded
   if (!session || session.payment_status !== 'paid') return Response.json({ received: true, credited: false })
+
+  // Achat du pass Pro (paiement unique) : le joueur devient membre à vie. La base ne le fait qu'une fois par achat (la confirmation au retour du paiement fait pareil).
+  if (session.metadata?.kind === 'lifetime') {
+    const proUser = session.metadata?.user_id ?? session.client_reference_id
+    if (typeof proUser !== 'string' || !UUID.test(proUser)) return Response.json({ received: true, ignored: true })
+    const admin4 = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } })
+    const { data, error } = await admin4.rpc(PREFIX + 'pro_grant', {
+      p_user: proUser,
+      p_session: session.id,
+      p_payment_intent: intent(session.payment_intent),
+      p_amount_cents: session.amount_total ?? null,
+      p_currency: session.currency ?? null,
+    })
+    if (error) {
+      console.error('Attribution du pass Pro impossible', error.message)
+      return new Response('pro_failed', { status: 500 }) // Stripe réessaiera
+    }
+    if (data?.extra_payment) console.error('Second paiement du pass Pro par le même joueur : à rembourser', session.id)
+    return Response.json({ received: true, pro: data ?? null })
+  }
 
   const userId = session.metadata?.user_id ?? session.client_reference_id
   const boosters = Number(session.metadata?.boosters)

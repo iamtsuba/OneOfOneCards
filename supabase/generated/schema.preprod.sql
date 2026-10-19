@@ -34,10 +34,10 @@ insert into public.pp_o1ocards_config (key, value, description) values
   ('auction_start_price',    1,    'Prix de départ d''une enchère (pièces)'),
   ('auction_min_increment',  1,    'Surenchère minimale (pièces)'),
   ('auction_extend_seconds', 60,   'Si une mise arrive dans les X dernières secondes, le compteur repart à X secondes'),
-  ('subscription_enabled',       0,   'Abonnement : 1 = proposé aux joueurs, 0 = masqué'),
-  ('subscription_price_cents',    499, 'Abonnement : prix mensuel en centimes d''euro (499 = 4,99 €) ; ne change pas le prix des abonnés déjà inscrits'),
-  ('subscriber_regen_minutes',    5,   'Abonnement : délai entre deux recharges de boosters pour les abonnés (minutes)'),
-  ('subscription_gift_quantity',  1,   'Abonnement : boosters « cadeau des abonnés » offerts à chaque période de facturation'),
+  ('subscription_enabled',       0,   'Pass Pro (achat unique, à vie) : 1 = proposé aux joueurs, 0 = masqué'),
+  ('subscription_price_cents',    999, 'Pass Pro : prix de l''achat unique en centimes d''euro (999 = 9,99 €) ; ne change pas ce que les membres ont déjà payé'),
+  ('subscriber_regen_minutes',    5,   'Pass Pro : délai entre deux recharges de boosters pour les membres Pro (minutes)'),
+  ('subscription_gift_quantity',  1,   'Pass Pro : boosters « cadeau Pro » offerts une seule fois, à l''achat'),
   ('golden_booster_chance',  0.00000001, 'Chance qu''un booster soit doré (0.00000001 = 0,000001 %). Contenu dans pp_o1ocards_golden_contents'),
   ('golden_unique_chance',   0.005, 'Chance qu''un booster doré contienne EN PLUS une carte Unique (1/1) (0.005 = 0,5 %). S''ajoute au contenu garanti de pp_o1ocards_golden_contents, indépendamment de lui'),
   ('series_reward_min_size', 2,    'Une série complétée (toutes ses cartes d''un type) donne un pack doré au premier joueur qui la complète. Taille de série minimale pour être récompensée (0 = désactivé)'),
@@ -1103,8 +1103,7 @@ begin
                              'name',                 coalesce(public.pp_o1ocards_text_cfg('subscription_name'), 'OneMore'),
                              'price_cents',          coalesce(public.pp_o1ocards_cfg('subscription_price_cents'), 0)::int,
                              'active',               public.pp_o1ocards_is_subscriber(p.id),
-                             'period_end',           (select su.current_period_end from public.pp_o1ocards_subscriptions su where su.user_id = p.id),
-                             'cancel_at_period_end', coalesce((select su.cancel_at_period_end from public.pp_o1ocards_subscriptions su where su.user_id = p.id), false),
+                             'since',                (select pm.granted_at from public.pp_o1ocards_pro_members pm where pm.user_id = p.id and pm.revoked_at is null),
                              'regen_minutes',        least(greatest(public.pp_o1ocards_cfg('regen_minutes')::int, 1), greatest(coalesce(public.pp_o1ocards_cfg('subscriber_regen_minutes'), public.pp_o1ocards_cfg('regen_minutes'))::int, 1)),
                              'booster_name',         (select bt.name from public.pp_o1ocards_booster_types bt where bt.role = 'subscriber'),
                              'booster_color',        (select bt.color from public.pp_o1ocards_booster_types bt where bt.role = 'subscriber'),
@@ -1263,34 +1262,33 @@ create table if not exists public.pp_o1ocards_text_config (
   description text
 );
 insert into public.pp_o1ocards_text_config (key, value, description) values
-  ('subscription_name', 'OneMore', 'Nom de l''abonnement (affiché aux joueurs)')
+  ('subscription_name', 'OneMore', 'Nom du pass Pro (affiché aux joueurs)')
 on conflict (key) do nothing;
--- Abonnement : un état par joueur, tenu à jour par les notifications de Stripe (jamais par le joueur)
-create table if not exists public.pp_o1ocards_subscriptions (
-  user_id                uuid primary key references public.pp_o1ocards_profiles (id) on delete cascade,
-  stripe_customer_id     text,
-  stripe_subscription_id text,
-  status                 text not null,
-  current_period_start   timestamptz,
-  current_period_end     timestamptz,
-  cancel_at_period_end   boolean not null default false,
-  last_event_at          timestamptz,
-  created_at             timestamptz not null default now(),
-  updated_at             timestamptz not null default now()
-);
--- Le booster offert aux abonnés n'est donné qu'une fois par période de facturation, même si Stripe renvoie plusieurs fois le même événement
-create table if not exists public.pp_o1ocards_subscription_gifts (
-  user_id         uuid not null references public.pp_o1ocards_profiles (id) on delete cascade,
-  period_start    timestamptz not null,
-  booster_type_id int not null references public.pp_o1ocards_booster_types (id) on delete cascade,
-  quantity        int not null,
-  granted_at      timestamptz not null default now(),
-  primary key (user_id, period_start)
+-- descriptions à jour aussi pour une base qui avait déjà ces réglages
+update public.pp_o1ocards_text_config set description = 'Nom du pass Pro (affiché aux joueurs)' where key = 'subscription_name';
+update public.pp_o1ocards_config set description = case key
+  when 'subscription_enabled' then 'Pass Pro (achat unique, à vie) : 1 = proposé aux joueurs, 0 = masqué'
+  when 'subscription_price_cents' then 'Pass Pro : prix de l''achat unique en centimes d''euro (999 = 9,99 €) ; ne change pas ce que les membres ont déjà payé'
+  when 'subscriber_regen_minutes' then 'Pass Pro : délai entre deux recharges de boosters pour les membres Pro (minutes)'
+  when 'subscription_gift_quantity' then 'Pass Pro : boosters « cadeau Pro » offerts une seule fois, à l''achat' end
+ where key in ('subscription_enabled', 'subscription_price_cents', 'subscriber_regen_minutes', 'subscription_gift_quantity');
+-- Pass Pro : achat UNIQUE, avantages à vie. Une ligne par membre, écrite seulement par le serveur de paiement (jamais par le joueur) ;
+-- un remboursement complet retire le pass (revoked_at). (Remplace l'ancien abonnement mensuel, jamais livré en production.)
+drop table if exists public.pp_o1ocards_subscription_gifts;
+drop table if exists public.pp_o1ocards_subscriptions;
+create table if not exists public.pp_o1ocards_pro_members (
+  user_id               uuid primary key references public.pp_o1ocards_profiles (id) on delete cascade,
+  stripe_session_id     text unique,
+  stripe_payment_intent text,
+  amount_cents          int,
+  currency              text,
+  granted_at            timestamptz not null default now(),
+  gift_granted_at       timestamptz,      -- le booster « cadeau Pro » n'est offert qu'une fois par achat
+  revoked_at            timestamptz
 );
 alter table public.pp_o1ocards_text_config enable row level security;
-alter table public.pp_o1ocards_subscriptions enable row level security;
-alter table public.pp_o1ocards_subscription_gifts enable row level security;
-revoke all on public.pp_o1ocards_text_config, public.pp_o1ocards_subscriptions, public.pp_o1ocards_subscription_gifts from anon, authenticated;
+alter table public.pp_o1ocards_pro_members enable row level security;
+revoke all on public.pp_o1ocards_text_config, public.pp_o1ocards_pro_members from anon, authenticated;
 alter table public.pp_o1ocards_booster_types enable row level security;
 alter table public.pp_o1ocards_booster_type_slots enable row level security;
 alter table public.pp_o1ocards_user_boosters enable row level security;
@@ -3051,12 +3049,10 @@ returns text language sql stable set search_path = public as $$
   select value from public.pp_o1ocards_text_config where key = p_key
 $$;
 
--- Abonné : abonnement actif (ou en essai), avec 2 jours de tolérance après la fin de période si la notification de renouvellement de Stripe tarde
+-- Membre Pro (le pass à vie) : tant qu'il n'a pas été remboursé. (Le nom « abonné » reste dans la base : booster des abonnés, rôle « subscriber ».)
 create or replace function public.pp_o1ocards_is_subscriber(p_uid uuid)
 returns boolean language sql stable security definer set search_path = public as $$
-  select exists (select 1 from public.pp_o1ocards_subscriptions s
-                 where s.user_id = p_uid and s.status in ('active', 'trialing')
-                   and (s.current_period_end is null or s.current_period_end > now() - interval '2 days'))
+  select exists (select 1 from public.pp_o1ocards_pro_members pm where pm.user_id = p_uid and pm.revoked_at is null)
 $$;
 
 -- Délai entre deux recharges : celui des réglages, ou celui des abonnés (s'il est plus court)
@@ -3067,45 +3063,46 @@ returns int language sql stable security definer set search_path = public as $$
                        else public.pp_o1ocards_cfg('regen_minutes') end::int, 1)
 $$;
 
--- Notification de Stripe (appelée seulement par la fonction serveur, avec la clé de service) : état de l'abonnement d'un joueur.
--- Un événement plus ancien que le dernier reçu est ignoré. Le booster « cadeau des abonnés » est offert UNE fois par période de facturation.
-create or replace function public.pp_o1ocards_subscription_sync(p_user uuid, p_customer text, p_subscription text, p_status text, p_period_start timestamptz,
-                                                       p_period_end timestamptz, p_cancel_at_period_end boolean, p_event_created timestamptz default now())
+-- Achat du pass Pro confirmé par Stripe (appelée seulement par la fonction serveur, avec la clé de service) : le joueur devient membre, à vie, et reçoit UNE fois
+-- le booster « cadeau Pro ». Rejouer la même session (confirmation au retour + webhook) ne change rien.
+create or replace function public.pp_o1ocards_pro_grant(p_user uuid, p_session text, p_payment_intent text, p_amount_cents int, p_currency text)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare cur public.pp_o1ocards_subscriptions; v_gift int; v_qty int; v_granted boolean := false; v_rows int;
+declare cur public.pp_o1ocards_pro_members; v_gift int; v_qty int; v_granted boolean := false;
 begin
   if p_user is null or not exists (select 1 from auth.users where id = p_user) then return jsonb_build_object('ignored', true); end if;
-  if p_status is null or char_length(p_status) > 40 then raise exception 'invalid_status'; end if;
+  if p_session is null or char_length(p_session) not between 5 and 255 then raise exception 'invalid_session'; end if;
   perform public.pp_o1ocards_ensure_profile(p_user);
-  select * into cur from public.pp_o1ocards_subscriptions where user_id = p_user for update;
-  if found and cur.last_event_at is not null and p_event_created < cur.last_event_at then return jsonb_build_object('stale', true); end if;
-
-  insert into public.pp_o1ocards_subscriptions (user_id, stripe_customer_id, stripe_subscription_id, status, current_period_start, current_period_end, cancel_at_period_end, last_event_at)
-  values (p_user, p_customer, p_subscription, p_status, p_period_start, p_period_end, coalesce(p_cancel_at_period_end, false), p_event_created)
-  on conflict (user_id) do update set
-    stripe_customer_id = coalesce(excluded.stripe_customer_id, public.pp_o1ocards_subscriptions.stripe_customer_id),
-    stripe_subscription_id = coalesce(excluded.stripe_subscription_id, public.pp_o1ocards_subscriptions.stripe_subscription_id),
-    status = excluded.status,
-    current_period_start = coalesce(excluded.current_period_start, public.pp_o1ocards_subscriptions.current_period_start),
-    current_period_end = coalesce(excluded.current_period_end, public.pp_o1ocards_subscriptions.current_period_end),
-    cancel_at_period_end = excluded.cancel_at_period_end,
-    last_event_at = excluded.last_event_at,
-    updated_at = now();
-
-  if p_status in ('active', 'trialing') and p_period_start is not null then
-    select id into v_gift from public.pp_o1ocards_booster_types where role = 'subscription_gift' and enabled;
-    v_qty := coalesce(public.pp_o1ocards_cfg('subscription_gift_quantity'), 0)::int;
-    if v_gift is not null and v_qty > 0 then
-      insert into public.pp_o1ocards_subscription_gifts (user_id, period_start, booster_type_id, quantity) values (p_user, p_period_start, v_gift, v_qty) on conflict do nothing;
-      get diagnostics v_rows = row_count;
-      if v_rows = 1 then
-        insert into public.pp_o1ocards_user_boosters (user_id, booster_type_id, quantity) values (p_user, v_gift, v_qty)
-        on conflict (user_id, booster_type_id) do update set quantity = public.pp_o1ocards_user_boosters.quantity + excluded.quantity;
-        v_granted := true;
-      end if;
-    end if;
+  select * into cur from public.pp_o1ocards_pro_members where user_id = p_user for update;
+  if found and cur.revoked_at is null then
+    -- déjà membre : même session rejouée (normal) ou second paiement d'une autre session (à rembourser : signalé à l'appelant)
+    return jsonb_build_object('ok', true, 'active', true, 'gift_granted', false, 'already', true, 'extra_payment', cur.stripe_session_id is distinct from p_session);
   end if;
-  return jsonb_build_object('ok', true, 'active', public.pp_o1ocards_is_subscriber(p_user), 'gift_granted', v_granted);
+  if found then   -- ancien membre remboursé qui rachète le pass
+    update public.pp_o1ocards_pro_members set stripe_session_id = p_session, stripe_payment_intent = p_payment_intent, amount_cents = p_amount_cents, currency = p_currency,
+           granted_at = now(), gift_granted_at = null, revoked_at = null where user_id = p_user;
+  else
+    insert into public.pp_o1ocards_pro_members (user_id, stripe_session_id, stripe_payment_intent, amount_cents, currency) values (p_user, p_session, p_payment_intent, p_amount_cents, p_currency);
+  end if;
+  select id into v_gift from public.pp_o1ocards_booster_types where role = 'subscription_gift' and enabled;
+  v_qty := coalesce(public.pp_o1ocards_cfg('subscription_gift_quantity'), 0)::int;
+  if v_gift is not null and v_qty > 0 then
+    insert into public.pp_o1ocards_user_boosters (user_id, booster_type_id, quantity) values (p_user, v_gift, v_qty)
+    on conflict (user_id, booster_type_id) do update set quantity = public.pp_o1ocards_user_boosters.quantity + excluded.quantity;
+    update public.pp_o1ocards_pro_members set gift_granted_at = now() where user_id = p_user;
+    v_granted := true;
+  end if;
+  return jsonb_build_object('ok', true, 'active', true, 'gift_granted', v_granted);
+end $$;
+
+-- Remboursement complet d'un achat du pass Pro : le joueur n'est plus membre (les boosters déjà reçus lui restent acquis)
+create or replace function public.pp_o1ocards_pro_revoke(p_payment_intent text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  if p_payment_intent is null or p_payment_intent = '' then return jsonb_build_object('revoked', 0); end if;
+  update public.pp_o1ocards_pro_members set revoked_at = now() where stripe_payment_intent = p_payment_intent and revoked_at is null;
+  get diagnostics n = row_count;
+  return jsonb_build_object('revoked', n);
 end $$;
 
 -- Réglage texte (admin) : la clé doit exister, 1 à 60 caractères
@@ -3196,8 +3193,11 @@ end $$;
 revoke all on function public.pp_o1ocards_text_cfg(text) from public, anon, authenticated;
 revoke all on function public.pp_o1ocards_is_subscriber(uuid) from public, anon, authenticated;
 revoke all on function public.pp_o1ocards_regen_minutes_for(uuid) from public, anon, authenticated;
-revoke all on function public.pp_o1ocards_subscription_sync(uuid, text, text, text, timestamptz, timestamptz, boolean, timestamptz) from public, anon, authenticated;
-grant execute on function public.pp_o1ocards_subscription_sync(uuid, text, text, text, timestamptz, timestamptz, boolean, timestamptz) to service_role;
+drop function if exists public.pp_o1ocards_subscription_sync(uuid, text, text, text, timestamptz, timestamptz, boolean, timestamptz);
+revoke all on function public.pp_o1ocards_pro_grant(uuid, text, text, int, text) from public, anon, authenticated;
+grant execute on function public.pp_o1ocards_pro_grant(uuid, text, text, int, text) to service_role;
+revoke all on function public.pp_o1ocards_pro_revoke(text) from public, anon, authenticated;
+grant execute on function public.pp_o1ocards_pro_revoke(text) to service_role;
 revoke all on function public.pp_o1ocards_seed_role_boosters() from public, anon, authenticated;
 revoke all on function public.pp_o1ocards_admin_set_text_config(text, text, text) from public, anon;
 grant execute on function public.pp_o1ocards_admin_set_text_config(text, text, text) to authenticated;

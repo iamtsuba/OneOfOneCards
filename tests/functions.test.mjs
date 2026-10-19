@@ -19,7 +19,7 @@ let totalBad = 0
 const waitUp = async (port) => { for (let i = 0; i < 160; i++) { try { await fetch(`http://127.0.0.1:${port}/`, { method: 'OPTIONS' }); return } catch { await new Promise((r) => setTimeout(r, 500)) } } throw new Error('fonction non démarrée ' + port) }
 
 async function runEnv(E) {
-  const state = { confirmSession: null, stripeGets: [], subName: 'OneMore', subscription: null, subCalls: [], portalCalls: [], cfg: { shop_enabled: 1, stripe_pack_boosters: 10, stripe_pack_price_cents: 199, cgv_version: 1, subscription_enabled: 0, subscription_price_cents: 499 }, legal: { seller_name: 'Thomas Test', seller_address: '1 rue du Test, 69000 Lyon', seller_email: 'contact@example.com', consent_cgv_text: 'CGV OK', consent_withdrawal_text: 'Je renonce' }, consents: [], consentFail: false, rpcCalls: [], paths: [], stripeCalls: [], seen: new Set(), stripeFail: false, rpcFail: false }
+  const state = { confirmSession: null, stripeGets: [], subName: 'OneMore', proMember: false, proCalls: [], revokeCalls: [], cfg: { shop_enabled: 1, stripe_pack_boosters: 10, stripe_pack_price_cents: 199, cgv_version: 1, subscription_enabled: 0, subscription_price_cents: 999 }, legal: { seller_name: 'Thomas Test', seller_address: '1 rue du Test, 69000 Lyon', seller_email: 'contact@example.com', consent_cgv_text: 'CGV OK', consent_withdrawal_text: 'Je renonce' }, consents: [], consentFail: false, rpcCalls: [], paths: [], stripeCalls: [], seen: new Set(), stripeFail: false, rpcFail: false }
 
   // ---- faux Supabase + faux Stripe
   const mock = http.createServer((req, res) => {
@@ -49,16 +49,16 @@ async function runEnv(E) {
         return send(200, first)
       }
       if (req.url.startsWith(`/rest/v1/${E.prefix}text_config`)) return send(200, [{ key: 'subscription_name', value: state.subName }])
-      if (req.url.startsWith(`/rest/v1/${E.prefix}subscriptions`)) return send(200, state.subscription ? [state.subscription] : [])
-      if (req.url.startsWith(`/rest/v1/rpc/${E.prefix}subscription_sync`)) {
-        const b = JSON.parse(body); state.subCalls.push(b)
+      if (req.url.startsWith(`/rest/v1/${E.prefix}pro_members`)) return send(200, state.proMember ? [{ user_id: 'aaaaaaaa-1111-2222-3333-444444444444' }] : [])
+      if (req.url.startsWith(`/rest/v1/rpc/${E.prefix}pro_grant`)) {
+        const b = JSON.parse(body); state.proCalls.push(b)
         if (state.rpcFail) return send(500, { message: 'boom' })
-        return send(200, { ok: true, active: true, gift_granted: true })
+        return send(200, { ok: true, active: true, gift_granted: true, extra_payment: !!state.extraPayment })
       }
-      if (req.url.startsWith('/v1/billing_portal/sessions')) {
-        state.portalCalls.push({ auth: req.headers.authorization, form: Object.fromEntries(new URLSearchParams(body)) })
-        if (state.stripeFail) return send(400, { error: { message: 'portal not configured' } })
-        return send(200, { id: 'bps_1', url: 'https://billing.stripe.test/p/session_1' })
+      if (req.url.startsWith(`/rest/v1/rpc/${E.prefix}pro_revoke`)) {
+        const b = JSON.parse(body); state.revokeCalls.push(b)
+        if (state.rpcFail) return send(500, { message: 'boom' })
+        return send(200, { revoked: 1 })
       }
       if (req.method === 'GET' && req.url.startsWith('/v1/checkout/sessions/')) {
         state.stripeGets.push({ url: req.url, auth: req.headers.authorization })
@@ -92,10 +92,10 @@ async function runEnv(E) {
     start(ck, E.port + 4, E.sp ? { STRIPE_SECRET_KEY: 'sk_live_prod_key' } : { PP_STRIPE_SECRET_KEY: 'sk_test_preprod_key' }, [E.sp + 'STRIPE_SECRET_KEY']),
     // réglage non sensible défini seulement sur l'autre jeu de noms
     start(ck, E.port + 5, E.sp ? { STRIPE_TAX_CODE: 'txcd_fallback' } : { PP_STRIPE_TAX_CODE: 'txcd_pp_only' }),
-    start(`${E.dir}-subscribe`, E.port + 6), start(`${E.dir}-subscription-portal`, E.port + 7),
+    start(`${E.dir}-subscribe`, E.port + 6),
     start(`${E.dir}-subscribe`, E.port + 8, { [E.sp + 'STRIPE_SECRET_KEY']: 'sk_live_fake' }),
   ]
-  for (let i = 0; i <= 8; i++) await waitUp(E.port + i)
+  for (const i of [0, 1, 2, 3, 4, 5, 6, 8]) await waitUp(E.port + i)
 
   let bad = 0
   const ok = (name, cond, extra = '') => { console.log(cond ? 'OK  ' : 'FAIL', name, cond ? '' : extra); if (!cond) bad++ }
@@ -197,55 +197,51 @@ async function runEnv(E) {
   state.rpcFail = true; p = event({ id: 'cs_fail' }); r = await hook(p, sign(p)); ok('erreur base de données -> 500 (Stripe réessaiera)', r.status === 500); state.rpcFail = false
   r = await fetch(WH); ok('GET -> 405', r.status === 405)
 
-  console.log(`--- [${E.name}] abonnement (${E.dir}-subscribe)`)
+  console.log(`--- [${E.name}] pass Pro, achat unique (${E.dir}-subscribe)`)
   const SU = `http://127.0.0.1:${E.port + 6}/`, SULIVE = `http://127.0.0.1:${E.port + 8}/`
-  const SCONSENT = JSON.stringify({ consent: { cgv: true, withdrawal: true, recurring: true, version: 1 } })
+  const UID = 'aaaaaaaa-1111-2222-3333-444444444444'
+  const SCONSENT = JSON.stringify({ consent: { cgv: true, withdrawal: true, version: 1 } })
   const subPost = (url = SU, headers = A, body = SCONSENT) => post(url, headers, body)
   r = await fetch(SU, { method: 'OPTIONS' }); ok('préflight CORS', r.status === 200 && r.headers.get('access-control-allow-origin') === '*')
   r = await subPost(SU, {}); ok('sans jeton -> 401', r.status === 401)
   r = await subPost(SU, { Authorization: 'Bearer faux' }); ok('mauvais jeton -> 401', r.status === 401)
-  r = await subPost(); ok('abonnement fermé (réglage à 0) -> 403 subscription_disabled', r.status === 403 && (await r.json()).error === 'subscription_disabled')
+  r = await subPost(); ok('vente fermée (réglage à 0) -> 403 subscription_disabled', r.status === 403 && (await r.json()).error === 'subscription_disabled')
   state.cfg.subscription_enabled = 1
   const n0s = state.stripeCalls.length
   r = await subPost(SU, A, '{}'); ok('sans consentement -> 400 consent_required', r.status === 400 && (await r.json()).error === 'consent_required')
-  r = await subPost(SU, A, JSON.stringify({ consent: { cgv: true, withdrawal: true, version: 1 } })); ok('sans la reconnaissance du renouvellement automatique -> 400', r.status === 400)
-  r = await subPost(SU, A, JSON.stringify({ consent: { cgv: true, withdrawal: false, recurring: true, version: 1 } })); ok('sans la renonciation à la rétractation -> 400', r.status === 400)
-  r = await subPost(SU, A, JSON.stringify({ consent: { cgv: false, withdrawal: true, recurring: true, version: 1 } })); ok('sans les CGV -> 400', r.status === 400)
-  r = await subPost(SU, A, JSON.stringify({ consent: { cgv: true, withdrawal: true, recurring: 'true', version: 1 } })); ok('valeurs non booléennes refusées -> 400', r.status === 400)
-  r = await subPost(SU, A, JSON.stringify({ consent: { cgv: true, withdrawal: true, recurring: true, version: 0 } })); ok('ancienne version des CGV -> 409 cgv_outdated', r.status === 409 && (await r.json()).error === 'cgv_outdated')
+  r = await subPost(SU, A, JSON.stringify({ consent: { cgv: true, withdrawal: false, version: 1 } })); ok('sans la renonciation à la rétractation -> 400', r.status === 400)
+  r = await subPost(SU, A, JSON.stringify({ consent: { cgv: false, withdrawal: true, version: 1 } })); ok('sans les CGV -> 400', r.status === 400)
+  r = await subPost(SU, A, JSON.stringify({ consent: { cgv: true, withdrawal: 'true', version: 1 } })); ok('valeurs non booléennes refusées -> 400', r.status === 400)
+  r = await subPost(SU, A, JSON.stringify({ consent: { cgv: true, withdrawal: true, version: 0 } })); ok('ancienne version des CGV -> 409 cgv_outdated', r.status === 409 && (await r.json()).error === 'cgv_outdated')
   ok('aucune session Stripe créée pour ces refus', state.stripeCalls.length === n0s)
+  ok('plus de case « renouvellement » : deux consentements suffisent (c\'est un achat unique)', (await subPost(SU, A, JSON.stringify({ consent: { cgv: true, withdrawal: true, version: 1 } }))).status === 200)
   const ncs = state.consents.length
-  r = await fetch(SU, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer good-token', 'x-forwarded-for': '203.0.113.9, 10.0.0.1', 'user-agent': 'SubAgent/2.0' }, body: SCONSENT }); j = await r.json()
+  r = await fetch(SU, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer good-token', 'x-forwarded-for': '203.0.113.9, 10.0.0.1', 'user-agent': 'ProAgent/2.0' }, body: SCONSENT }); j = await r.json()
   ok('consentement complet -> url de paiement', r.status === 200 && j.url.includes('checkout.stripe.test'), JSON.stringify(j))
   let sc = state.stripeCalls.at(-1)
   ok('clé secrète envoyée à Stripe', sc.auth === 'Bearer sk_test_fake')
-  ok('mode abonnement, paiement mensuel de 4,99 EUR (prix du réglage, envoyé à Stripe à chaque souscription)', sc.form.mode === 'subscription' && sc.form['line_items[0][price_data][unit_amount]'] === '499' && sc.form['line_items[0][price_data][currency]'] === 'eur' && sc.form['line_items[0][price_data][recurring][interval]'] === 'month')
-  ok('le joueur est identifié sur la session ET sur l\'abonnement (c\'est ce qui revient dans les notifications)', sc.form['metadata[user_id]'] === 'aaaaaaaa-1111-2222-3333-444444444444' && sc.form['subscription_data[metadata][user_id]'] === 'aaaaaaaa-1111-2222-3333-444444444444' && sc.form.client_reference_id === 'aaaaaaaa-1111-2222-3333-444444444444' && sc.form['metadata[kind]'] === 'subscription')
-  ok('retour vers le site avec subscription=success et l\'identifiant de session (accolades laissées telles quelles pour Stripe) / cancel', sc.form.success_url === E.site + '?subscription=success&session_id={CHECKOUT_SESSION_ID}' && sc.form.cancel_url === E.site + '?subscription=cancel', sc.form.success_url)
-  ok('code fiscal par défaut, email prérempli, aucun client Stripe connu', sc.form['line_items[0][price_data][product_data][tax_code]'] === 'txcd_10201000' && sc.form.customer_email === 'thomas@example.com' && !('customer' in sc.form))
-  ok(`produit affiché : « ${sc.form['line_items[0][price_data][product_data][name]']} »`, sc.form['line_items[0][price_data][product_data][name]'] === (E.name === 'preprod' ? 'Abonnement OneMore – 1/1 Cards (test)' : 'Abonnement OneMore – 1/1 Cards'))
+  ok('PAIEMENT UNIQUE (mode payment), 9,99 EUR du réglage, aucune récurrence ni abonnement', sc.form.mode === 'payment' && sc.form['line_items[0][price_data][unit_amount]'] === '999' && sc.form['line_items[0][price_data][currency]'] === 'eur'
+    && !Object.keys(sc.form).some((k) => /recurring|subscription_data/.test(k)))
+  ok('le joueur est identifié sur la session ET sur le paiement (remboursement), type « lifetime »', sc.form['metadata[user_id]'] === UID && sc.form['metadata[kind]'] === 'lifetime' && sc.form.client_reference_id === UID && sc.form['payment_intent_data[metadata][user_id]'] === UID && sc.form['payment_intent_data[metadata][kind]'] === 'lifetime')
+  ok('retour vers le site avec pro=success et l\'identifiant de session (accolades laissées telles quelles pour Stripe) / pro=cancel', sc.form.success_url === E.site + '?pro=success&session_id={CHECKOUT_SESSION_ID}' && sc.form.cancel_url === E.site + '?pro=cancel', sc.form.success_url)
+  ok('code fiscal par défaut, email prérempli', sc.form['line_items[0][price_data][product_data][tax_code]'] === 'txcd_10201000' && sc.form.customer_email === 'thomas@example.com' && !('customer' in sc.form))
+  ok(`produit affiché : « ${sc.form['line_items[0][price_data][product_data][name]']} »`, sc.form['line_items[0][price_data][product_data][name]'] === (E.name === 'preprod' ? 'Pass OneMore à vie – 1/1 Cards (test)' : 'Pass OneMore à vie – 1/1 Cards'))
   const rec2 = state.consents.at(-1)
-  ok('preuve de consentement enregistrée (une de plus), liée à la session Stripe', state.consents.length === ncs + 1 && rec2.stripe_session_id === 'cs_test_abc' && rec2.cgv_version === 1 && rec2.user_id === 'aaaaaaaa-1111-2222-3333-444444444444')
-  ok('preuve : textes acceptés dont le renouvellement automatique, IP, navigateur, prix, aucun booster', /CGV OK\nJe renonce\nAbonnement mensuel renouvelé automatiquement/.test(rec2.statement) && rec2.ip === '203.0.113.9' && rec2.user_agent === 'SubAgent/2.0' && rec2.amount_cents === 499 && rec2.boosters === null && rec2.currency === 'eur')
+  ok('preuve de consentement enregistrée (une de plus), liée à la session Stripe', state.consents.length === ncs + 1 && rec2.stripe_session_id === 'cs_test_abc' && rec2.cgv_version === 1 && rec2.user_id === UID)
+  ok('preuve : textes acceptés dont « achat unique, à vie, sans renouvellement », IP, navigateur, prix, aucun booster', /CGV OK\nJe renonce\nAchat unique du pass OneMore : avantages à vie, sans abonnement ni renouvellement\./.test(rec2.statement) && rec2.ip === '203.0.113.9' && rec2.user_agent === 'ProAgent/2.0' && rec2.amount_cents === 999 && rec2.boosters === null && rec2.currency === 'eur')
   state.subName = 'Premium'; await subPost()
-  ok('le nom vient du réglage texte de l\'admin (« Premium »)', state.stripeCalls.at(-1).form['line_items[0][price_data][product_data][name]'].includes('Abonnement Premium'))
+  ok('le nom vient du réglage texte de l\'admin (« Premium »)', state.stripeCalls.at(-1).form['line_items[0][price_data][product_data][name]'].includes('Pass Premium à vie'))
   state.subName = 'OneMore'
-  state.cfg.subscription_price_cents = 799; await subPost()
-  ok('le prix suit le réglage (7,99 EUR)', state.stripeCalls.at(-1).form['line_items[0][price_data][unit_amount]'] === '799')
+  state.cfg.subscription_price_cents = 1299; await subPost()
+  ok('le prix suit le réglage (12,99 EUR)', state.stripeCalls.at(-1).form['line_items[0][price_data][unit_amount]'] === '1299')
   state.cfg.subscription_price_cents = 10; r = await subPost(); ok('prix absurde (< 0,50 EUR) refusé -> 503', r.status === 503)
   state.cfg.subscription_price_cents = 500000; r = await subPost(); ok('prix absurde (> 1 000 EUR) refusé -> 503', r.status === 503)
-  state.cfg.subscription_price_cents = 499
-  state.subscription = { status: 'canceled', stripe_customer_id: 'cus_old' }; await subPost()
-  sc = state.stripeCalls.at(-1)
-  ok('ancien abonné : son client Stripe est réutilisé (pas de second client ni d\'email prérempli)', sc.form.customer === 'cus_old' && !('customer_email' in sc.form))
-  for (const st of ['active', 'trialing']) {
-    state.subscription = { status: st, stripe_customer_id: 'cus_old' }
-    const nn = state.stripeCalls.length
-    r = await subPost(); ok(`déjà abonné (${st}) -> 409 already_subscribed, aucune session`, r.status === 409 && (await r.json()).error === 'already_subscribed' && state.stripeCalls.length === nn)
-  }
-  state.subscription = { status: 'past_due', stripe_customer_id: 'cus_old' }
-  r = await subPost(); ok('paiement en retard : peut se réabonner', r.status === 200)
-  state.subscription = null
+  state.cfg.subscription_price_cents = 999
+  state.proMember = true
+  const nnp = state.stripeCalls.length
+  r = await subPost(); ok('déjà membre Pro -> 409 already_subscribed, aucune session (pas de second achat)', r.status === 409 && (await r.json()).error === 'already_subscribed' && state.stripeCalls.length === nnp)
+  state.proMember = false
+  r = await subPost(); ok('pass remboursé (plus membre) : peut le racheter', r.status === 200)
   state.stripeFail = true; r = await subPost(); ok('refus de Stripe -> 502', r.status === 502); state.stripeFail = false
   state.consentFail = true; r = await subPost(); ok('preuve non enregistrable -> pas de paiement proposé (500)', r.status === 500); state.consentFail = false
   if (E.name === 'prod') {
@@ -260,86 +256,64 @@ async function runEnv(E) {
   }
   r = await fetch(SU); ok('GET -> 405', r.status === 405)
 
-
   console.log(`--- [${E.name}] confirmation au retour du paiement (${E.dir}-subscribe, action confirm)`)
-  const UID = 'aaaaaaaa-1111-2222-3333-444444444444'
   const confirm = (id = 'cs_test_a1B2c3D4e5F6g7', headers = A) => post(SU, headers, JSON.stringify({ action: 'confirm', session_id: id }))
-  const goodSession = (over = {}, subOver = {}) => ({ id: 'cs_test_a1B2c3D4e5F6g7', mode: 'subscription', status: 'complete', client_reference_id: UID, metadata: { user_id: UID },
-    subscription: { id: 'sub_9', customer: 'cus_9', status: 'active', current_period_start: 1790000000, current_period_end: 1792592000, cancel_at_period_end: false, ...subOver }, ...over })
-  const nsc = state.subCalls.length, ngets = state.stripeGets.length
+  const goodSession = (over = {}) => ({ id: 'cs_test_a1B2c3D4e5F6g7', mode: 'payment', status: 'complete', payment_status: 'paid', client_reference_id: UID, metadata: { user_id: UID, kind: 'lifetime' }, payment_intent: 'pi_777', amount_total: 999, currency: 'eur', ...over })
+  const npc = state.proCalls.length, ngets = state.stripeGets.length
   r = await confirm(undefined, {}); ok('sans jeton -> 401', r.status === 401)
   r = await confirm('pas-un-identifiant'); ok('identifiant de session illisible -> 400 invalid_session, Stripe pas interrogé', r.status === 400 && (await r.json()).error === 'invalid_session' && state.stripeGets.length === ngets)
   r = await confirm('cs_test_../../v1/customers'); ok('tentative de détournement du chemin Stripe refusée -> 400', r.status === 400 && state.stripeGets.length === ngets)
-  state.confirmSession = null; r = await confirm(); ok('session inconnue de Stripe -> 404 session_not_found, rien transmis', r.status === 404 && (await r.json()).error === 'session_not_found' && state.subCalls.length === nsc)
+  state.confirmSession = null; r = await confirm(); ok('session inconnue de Stripe -> 404 session_not_found, rien transmis', r.status === 404 && (await r.json()).error === 'session_not_found' && state.proCalls.length === npc)
   state.confirmSession = goodSession(); state.cfg.subscription_enabled = 0
   r = await confirm(); j = await r.json()
-  ok('session du joueur, terminée : abonnement mis à jour tout de suite (même si l\'abonnement est fermé aux nouveaux)', r.status === 200 && j.ok === true && j.active === true, JSON.stringify(j))
+  ok('session du joueur, payée : pass donné tout de suite (même si la vente est fermée entre-temps)', r.status === 200 && j.ok === true && j.active === true, JSON.stringify(j))
   state.cfg.subscription_enabled = 1
-  const cs = state.subCalls.at(-1)
-  ok('transmis à ' + E.prefix + 'subscription_sync : joueur, abonnement, client, statut et période de Stripe', state.subCalls.length === nsc + 1 && cs.p_user === UID && cs.p_subscription === 'sub_9' && cs.p_customer === 'cus_9' && cs.p_status === 'active' && cs.p_period_end === new Date(1792592000 * 1000).toISOString() && cs.p_period_start === new Date(1790000000 * 1000).toISOString() && cs.p_cancel_at_period_end === false, JSON.stringify(cs))
+  const cs = state.proCalls.at(-1)
+  ok('transmis à ' + E.prefix + 'pro_grant : joueur, session, paiement, montant, devise', state.proCalls.length === npc + 1 && cs.p_user === UID && cs.p_session === 'cs_test_a1B2c3D4e5F6g7' && cs.p_payment_intent === 'pi_777' && cs.p_amount_cents === 999 && cs.p_currency === 'eur', JSON.stringify(cs))
   const sg = state.stripeGets.at(-1)
-  ok('la session est relue chez Stripe avec la clé secrète, abonnement inclus (expand)', sg.auth === 'Bearer sk_test_fake' && /\/v1\/checkout\/sessions\/cs_test_a1B2c3D4e5F6g7\?expand(\[\]|%5B%5D)=subscription/.test(sg.url), sg.url)
-  state.confirmSession = goodSession({}, { current_period_start: undefined, current_period_end: undefined, items: { data: [{ current_period_start: 1795000000, current_period_end: 1797592000 }] } }); await confirm()
-  ok('API Stripe récente : dates lues sur la ligne de l\'abonnement', state.subCalls.at(-1).p_period_end === new Date(1797592000 * 1000).toISOString())
-  state.confirmSession = goodSession({ client_reference_id: 'bbbbbbbb-1111-2222-3333-444444444444', metadata: { user_id: 'bbbbbbbb-1111-2222-3333-444444444444' } })
-  const n3 = state.subCalls.length; r = await confirm(); ok('session d\'un AUTRE joueur -> 403 wrong_user, rien transmis (impossible d\'activer l\'abonnement d\'un autre)', r.status === 403 && (await r.json()).error === 'wrong_user' && state.subCalls.length === n3)
-  state.confirmSession = goodSession({ mode: 'payment' }); r = await confirm(); ok('session d\'un achat de boosters (pas un abonnement) -> 403', r.status === 403 && state.subCalls.length === n3)
-  state.confirmSession = goodSession({ status: 'open' }); r = await confirm(); ok('paiement pas terminé -> 409 not_complete, rien transmis', r.status === 409 && (await r.json()).error === 'not_complete' && state.subCalls.length === n3)
-  state.confirmSession = goodSession({ subscription: 'sub_9' }); r = await confirm(); ok('abonnement non développé par Stripe -> 409, rien transmis', r.status === 409 && state.subCalls.length === n3)
-  state.confirmSession = goodSession({ client_reference_id: null, metadata: {} }); r = await confirm(); ok('session sans joueur -> 403', r.status === 403 && state.subCalls.length === n3)
+  ok('la session est relue chez Stripe avec la clé secrète', sg.auth === 'Bearer sk_test_fake' && /\/v1\/checkout\/sessions\/cs_test_a1B2c3D4e5F6g7$/.test(sg.url), sg.url)
+  state.confirmSession = goodSession({ client_reference_id: 'bbbbbbbb-1111-2222-3333-444444444444', metadata: { user_id: 'bbbbbbbb-1111-2222-3333-444444444444', kind: 'lifetime' } })
+  const n3 = state.proCalls.length; r = await confirm(); ok('session d\'un AUTRE joueur -> 403 wrong_user, rien transmis (impossible d\'activer le pass d\'un autre)', r.status === 403 && (await r.json()).error === 'wrong_user' && state.proCalls.length === n3)
+  state.confirmSession = goodSession({ metadata: { user_id: UID, boosters: '10' } }); r = await confirm(); ok('session d\'un achat de pack de boosters (pas le pass) -> 403, rien transmis', r.status === 403 && state.proCalls.length === n3)
+  state.confirmSession = goodSession({ mode: 'subscription' }); r = await confirm(); ok('session d\'un autre mode de paiement -> 403', r.status === 403 && state.proCalls.length === n3)
+  state.confirmSession = goodSession({ status: 'open', payment_status: 'unpaid' }); r = await confirm(); ok('paiement pas terminé -> 409 not_complete, rien transmis', r.status === 409 && (await r.json()).error === 'not_complete' && state.proCalls.length === n3)
+  state.confirmSession = goodSession({ payment_status: 'unpaid' }); r = await confirm(); ok('session terminée mais pas payée (virement en attente) -> 409, rien transmis', r.status === 409 && state.proCalls.length === n3)
+  state.confirmSession = goodSession({ client_reference_id: null, metadata: { kind: 'lifetime' } }); r = await confirm(); ok('session sans joueur -> 403', r.status === 403 && state.proCalls.length === n3)
+  state.confirmSession = goodSession({ payment_intent: { id: 'pi_obj' } }); await confirm(); ok('paiement donné sous forme d\'objet : identifiant retrouvé', state.proCalls.at(-1).p_payment_intent === 'pi_obj')
   state.confirmSession = goodSession(); state.rpcFail = true; r = await confirm(); ok('erreur base de données -> 500', r.status === 500); state.rpcFail = false
   state.confirmSession = null
 
-  console.log(`--- [${E.name}] gestion de l'abonnement (${E.dir}-subscription-portal)`)
-  const PO = `http://127.0.0.1:${E.port + 7}/`
-  r = await post(PO, {}, '{}'); ok('sans jeton -> 401', r.status === 401)
-  r = await post(PO, A, '{}'); ok('aucun abonnement connu -> 404 no_subscription', r.status === 404 && (await r.json()).error === 'no_subscription')
-  state.subscription = { status: 'active', stripe_customer_id: 'cus_9' }
-  r = await post(PO, A, JSON.stringify({ customer: 'cus_evil' })); j = await r.json()
-  ok('abonné -> adresse du portail Stripe', r.status === 200 && j.url.includes('billing.stripe.test'), JSON.stringify(j))
-  const pc = state.portalCalls.at(-1)
-  ok('le client est retrouvé côté serveur : celui envoyé par le navigateur (cus_evil) est ignoré', pc.form.customer === 'cus_9' && pc.auth === 'Bearer sk_test_fake')
-  ok('retour vers le site avec subscription=portal', pc.form.return_url === E.site + '?subscription=portal', pc.form.return_url)
-  state.subscription = { status: 'canceled', stripe_customer_id: 'cus_9' }
-  r = await post(PO, A, '{}'); ok('ancien abonné : peut encore consulter ses factures (portail)', r.status === 200)
-  state.subscription = { status: 'active', stripe_customer_id: null }
-  r = await post(PO, A, '{}'); ok('abonnement sans client Stripe connu -> 404', r.status === 404)
-  state.subscription = { status: 'active', stripe_customer_id: 'cus_9' }
-  state.stripeFail = true; r = await post(PO, A, '{}'); ok('portail non activé chez Stripe -> 502', r.status === 502); state.stripeFail = false
-  r = await fetch(PO); ok('GET -> 405', r.status === 405)
-  state.subscription = null
-
-  console.log(`--- [${E.name}] webhook : événements d'abonnement`)
-  const subEvent = (type, over = {}, created = 1790000000) => JSON.stringify({ id: 'evt_s', type, created, data: { object: { id: 'sub_1', customer: 'cus_1', status: 'active', current_period_start: 1790000000, current_period_end: 1792592000, cancel_at_period_end: false, metadata: { user_id: 'aaaaaaaa-1111-2222-3333-444444444444' }, ...over } } })
-  const nsub = state.subCalls.length
-  p = subEvent('customer.subscription.created'); r = await hook(p, sign(p)); j = await r.json()
-  const sy = state.subCalls.at(-1)
-  ok('abonnement créé -> état envoyé à la base via ' + E.prefix + 'subscription_sync', r.status === 200 && state.subCalls.length === nsub + 1 && sy.p_user === 'aaaaaaaa-1111-2222-3333-444444444444' && sy.p_status === 'active' && sy.p_customer === 'cus_1' && sy.p_subscription === 'sub_1', JSON.stringify(sy))
-  ok('dates de période converties (secondes -> horodatage) et événement daté', sy.p_period_start === new Date(1790000000 * 1000).toISOString() && sy.p_period_end === new Date(1792592000 * 1000).toISOString() && sy.p_event_created === new Date(1790000000 * 1000).toISOString() && sy.p_cancel_at_period_end === false)
-  p = subEvent('customer.subscription.updated', { current_period_start: undefined, current_period_end: undefined, items: { data: [{ current_period_start: 1795000000, current_period_end: 1797592000 }] } }); await hook(p, sign(p))
-  ok('API Stripe récente : dates lues sur la ligne de l\'abonnement', state.subCalls.at(-1).p_period_end === new Date(1797592000 * 1000).toISOString() && state.subCalls.at(-1).p_period_start === new Date(1795000000 * 1000).toISOString())
-  p = subEvent('customer.subscription.updated', { cancel_at_period_end: true }); await hook(p, sign(p))
-  ok('résiliation programmée (cancel_at_period_end) transmise', state.subCalls.at(-1).p_cancel_at_period_end === true)
-  p = subEvent('customer.subscription.updated', { cancel_at_period_end: false, cancel_at: 1792592000 }); await hook(p, sign(p))
-  ok('résiliation programmée par date (cancel_at) transmise aussi', state.subCalls.at(-1).p_cancel_at_period_end === true)
-  p = subEvent('customer.subscription.updated', { status: 'past_due' }); await hook(p, sign(p))
-  ok('paiement en retard : statut past_due transmis', state.subCalls.at(-1).p_status === 'past_due')
-  p = subEvent('customer.subscription.deleted', { status: 'active' }); await hook(p, sign(p))
-  ok('abonnement supprimé -> statut canceled, quel que soit l\'objet reçu', state.subCalls.at(-1).p_status === 'canceled')
-  p = subEvent('customer.subscription.created', { customer: { id: 'cus_obj' } }); await hook(p, sign(p))
-  ok('client donné sous forme d\'objet : identifiant retrouvé', state.subCalls.at(-1).p_customer === 'cus_obj')
-  const n2 = state.subCalls.length
-  p = subEvent('customer.subscription.created', { metadata: {} }); r = await hook(p, sign(p)); j = await r.json()
-  ok('abonnement qui ne vient pas de l\'application (sans joueur) -> ignoré', r.status === 200 && j.ignored === true && state.subCalls.length === n2)
-  p = subEvent('customer.subscription.created', { metadata: { user_id: "x'; drop table" } }); r = await hook(p, sign(p)); j = await r.json()
-  ok('identifiant de joueur illisible -> ignoré, jamais transmis à la base', r.status === 200 && j.ignored === true && state.subCalls.length === n2)
-  p = subEvent('customer.subscription.created'); r = await hook(p, sign(p, undefined, 'whsec_autre')); ok('mauvaise signature -> 400, rien transmis', r.status === 400 && state.subCalls.length === n2)
-  r = await hook(p, sign(p, undefined, E.otherWhsec)); ok('signature de l\'autre environnement -> 400', r.status === 400 && state.subCalls.length === n2)
-  state.rpcFail = true; p = subEvent('customer.subscription.updated'); r = await hook(p, sign(p)); ok('erreur base de données -> 500 (Stripe réessaiera)', r.status === 500); state.rpcFail = false
-  const nCredits = state.rpcCalls.length
-  p = JSON.stringify({ id: 'evt_sub_checkout', type: 'checkout.session.completed', data: { object: { id: 'cs_sub', mode: 'subscription', payment_status: 'paid', metadata: { user_id: 'aaaaaaaa-1111-2222-3333-444444444444', kind: 'subscription' }, client_reference_id: 'aaaaaaaa-1111-2222-3333-444444444444' } } })
-  r = await hook(p, sign(p)); j = await r.json()
-  ok('fin du paiement d\'un abonnement : aucun pack de boosters crédité (l\'état vient des événements d\'abonnement)', r.status === 200 && state.rpcCalls.length === nCredits && j.credited !== true)
+  console.log(`--- [${E.name}] webhook : pass Pro (achat unique) et remboursement`)
+  const sess = (over = {}) => JSON.stringify({ id: 'evt_pro', type: 'checkout.session.completed', data: { object: { id: 'cs_pro_1', mode: 'payment', payment_status: 'paid', payment_intent: 'pi_pro_1', amount_total: 999, currency: 'eur', client_reference_id: UID, metadata: { user_id: UID, kind: 'lifetime' }, ...over } } })
+  const nprev = state.proCalls.length, ncred = state.rpcCalls.length
+  p = sess(); r = await hook(p, sign(p)); j = await r.json()
+  const pg = state.proCalls.at(-1)
+  ok('achat du pass payé -> ' + E.prefix + 'pro_grant (joueur, session, paiement, montant), aucun pack de boosters crédité', r.status === 200 && state.proCalls.length === nprev + 1 && pg.p_user === UID && pg.p_session === 'cs_pro_1' && pg.p_payment_intent === 'pi_pro_1' && pg.p_amount_cents === 999 && pg.p_currency === 'eur' && state.rpcCalls.length === ncred, JSON.stringify(pg))
+  p = JSON.stringify({ id: 'evt_pro2', type: 'checkout.session.async_payment_succeeded', data: { object: { id: 'cs_pro_2', mode: 'payment', payment_status: 'paid', payment_intent: { id: 'pi_pro_2' }, amount_total: 999, currency: 'eur', metadata: { user_id: UID, kind: 'lifetime' } } } }); await hook(p, sign(p))
+  ok('paiement différé enfin payé (async_payment_succeeded) : pass donné, paiement sous forme d\'objet retrouvé', state.proCalls.at(-1).p_session === 'cs_pro_2' && state.proCalls.at(-1).p_payment_intent === 'pi_pro_2')
+  const nn2 = state.proCalls.length
+  p = sess({ payment_status: 'unpaid' }); r = await hook(p, sign(p)); ok('paiement pas encore reçu (unpaid) : aucun pass', r.status === 200 && state.proCalls.length === nn2)
+  p = sess({ metadata: { kind: 'lifetime' }, client_reference_id: undefined }); r = await hook(p, sign(p)); j = await r.json(); ok('pass sans joueur -> ignoré', r.status === 200 && j.ignored === true && state.proCalls.length === nn2)
+  p = sess({ metadata: { kind: 'lifetime', user_id: "x'; drop table" }, client_reference_id: undefined }); r = await hook(p, sign(p)); j = await r.json(); ok('identifiant de joueur illisible -> ignoré, jamais transmis à la base', r.status === 200 && j.ignored === true && state.proCalls.length === nn2)
+  p = sess(); r = await hook(p, sign(p, undefined, 'whsec_autre')); ok('mauvaise signature -> 400, rien transmis', r.status === 400 && state.proCalls.length === nn2)
+  r = await hook(p, sign(p, undefined, E.otherWhsec)); ok('signature de l\'autre environnement -> 400', r.status === 400 && state.proCalls.length === nn2)
+  state.rpcFail = true; r = await hook(p, sign(p)); ok('erreur base de données -> 500 (Stripe réessaiera)', r.status === 500); state.rpcFail = false
+  state.extraPayment = true; p = sess({ id: 'cs_pro_dbl' }); r = await hook(p, sign(p)); ok('second paiement du même joueur : accepté sans erreur (la base le signale, rien de plus à faire côté Stripe)', r.status === 200); state.extraPayment = false
+  const nPack = state.rpcCalls.length
+  p = JSON.stringify({ id: 'evt_pack', type: 'checkout.session.completed', data: { object: { id: 'cs_pack', payment_status: 'paid', metadata: { user_id: UID, boosters: '10' }, amount_total: 199, currency: 'eur', payment_intent: 'pi_pack' } } })
+  await hook(p, sign(p))
+  ok('un achat de pack de boosters continue de créditer les boosters (et ne donne pas le pass)', state.rpcCalls.length === nPack + 1 && state.proCalls.at(-1).p_session !== 'cs_pack')
+  const nr = state.revokeCalls.length
+  const refund = (over = {}) => JSON.stringify({ id: 'evt_ref', type: 'charge.refunded', data: { object: { id: 'ch_1', refunded: true, payment_intent: 'pi_pro_1', amount: 999, amount_refunded: 999, ...over } } })
+  p = refund(); r = await hook(p, sign(p)); j = await r.json()
+  ok('remboursement complet -> pass retiré via ' + E.prefix + 'pro_revoke (identifiant du paiement)', r.status === 200 && state.revokeCalls.length === nr + 1 && state.revokeCalls.at(-1).p_payment_intent === 'pi_pro_1' && j.revoked === 1, JSON.stringify(j))
+  p = refund({ refunded: false, amount_refunded: 300 }); r = await hook(p, sign(p)); ok('remboursement PARTIEL -> le pass est gardé (rien transmis)', r.status === 200 && state.revokeCalls.length === nr + 1)
+  p = refund({ payment_intent: null }); r = await hook(p, sign(p)); ok('remboursement sans paiement associé -> ignoré', r.status === 200 && state.revokeCalls.length === nr + 1)
+  p = refund({ payment_intent: { id: 'pi_obj_2' } }); await hook(p, sign(p)); ok('paiement donné sous forme d\'objet : identifiant retrouvé', state.revokeCalls.at(-1).p_payment_intent === 'pi_obj_2')
+  p = refund(); r = await hook(p, sign(p, undefined, 'whsec_autre')); ok('remboursement avec mauvaise signature -> 400, rien transmis', r.status === 400 && state.revokeCalls.length === nr + 2)
+  state.rpcFail = true; p = refund(); r = await hook(p, sign(p)); ok('erreur base de données au remboursement -> 500 (Stripe réessaiera)', r.status === 500); state.rpcFail = false
+  p = JSON.stringify({ id: 'evt_x', type: 'customer.subscription.created', data: { object: { id: 'sub_1', status: 'active', metadata: { user_id: UID } } } }); r = await hook(p, sign(p)); j = await r.json()
+  ok('les anciens événements d\'abonnement sont simplement acquittés (plus d\'abonnement)', r.status === 200 && j.received === true && state.proCalls.length > 0 && !j.subscription)
 
   console.log(`--- [${E.name}] isolation des environnements`)
   const other = E.name === 'prod' ? 'pp_o1ocards_' : 'o1ocards_'

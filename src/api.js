@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 import { glowOf } from './boosterLogic'
-import { PREFIX, CHECKOUT_FUNCTION, SUBSCRIBE_FUNCTION, SUBSCRIPTION_PORTAL_FUNCTION } from './env'
+import { PREFIX, CHECKOUT_FUNCTION, SUBSCRIBE_FUNCTION } from './env'
 
 // Tous les noms de tables et de fonctions de la base portent le préfixe de l'environnement (o1ocards_ ou pp_o1ocards_)
 const table = (name) => PREFIX + name
@@ -101,16 +101,14 @@ async function urlFunction(name, body) {
   if (!data?.url) throw new Error('checkout:no_url')
   return data.url
 }
-// Abonnement : demande la page de paiement mensuel de Stripe (les trois consentements sont exigés par le serveur)
+// Pass Pro : demande la page de paiement unique de Stripe (les deux consentements sont exigés par le serveur)
 export const startSubscription = (consent) => urlFunction(SUBSCRIBE_FUNCTION, { consent })
-// Abonnement : au retour du paiement, demande au serveur de relire la session chez Stripe et d'activer l'abonnement tout de suite (le webhook fait pareil, en différé)
+// Pass Pro : au retour du paiement, demande au serveur de relire la session chez Stripe et de donner le pass tout de suite (le webhook fait pareil, en différé)
 export async function confirmSubscription(sessionId) {
   const { data, error } = await supabase.functions.invoke(SUBSCRIBE_FUNCTION, { body: { action: 'confirm', session_id: sessionId } })
   if (error) throw new Error('checkout:confirm_failed')
   return data
 }
-// Abonnement : adresse du portail de Stripe pour résilier, changer de carte ou voir les factures
-export const openSubscriptionPortal = () => urlFunction(SUBSCRIPTION_PORTAL_FUNCTION, {})
 
 // Infos légales du vendeur, textes de consentement et réglages de la boutique (lisibles sans être connecté)
 export async function getLegal() {
@@ -198,10 +196,9 @@ export function explain(e) {
   const m = e?.message || String(e)
   const low = m.match(/bid_too_low:(\d+)/)
   if (low) return `Mise trop basse : minimum ${low[1]} pièce${Number(low[1]) > 1 ? 's' : ''}.`
-  if (m.includes('checkout:consent_required')) return 'Pour payer, coche toutes les cases : conditions de vente, exécution immédiate (et renouvellement pour un abonnement).'
-  if (m.includes('checkout:subscription_disabled')) return 'L’abonnement n’est pas disponible pour le moment.'
-  if (m.includes('checkout:already_subscribed')) return 'Tu es déjà abonné : utilise « Gérer mon abonnement ».'
-  if (m.includes('checkout:no_subscription')) return 'Aucun abonnement à gérer pour ce compte.'
+  if (m.includes('checkout:consent_required')) return 'Pour payer, coche les deux cases : conditions de vente et exécution immédiate.'
+  if (m.includes('checkout:subscription_disabled')) return 'Le pass n’est pas disponible pour le moment.'
+  if (m.includes('checkout:already_subscribed')) return 'Tu as déjà ce pass : il est à toi pour toujours.'
   if (m.includes('checkout:cgv_outdated')) return 'Les conditions de vente ont changé : recharge la page puis réessaie.'
   if (m.includes('checkout:legal_incomplete')) return 'Les informations légales du vendeur ne sont pas encore renseignées : le paiement est indisponible.'
   if (m.startsWith('checkout:'))

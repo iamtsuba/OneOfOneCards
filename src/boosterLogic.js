@@ -17,8 +17,8 @@ export const glowOf = (id) => (GLOWS.some((g) => g.id === id) ? id : 'none')
 // Rôles particuliers d'un booster (un seul booster par rôle ; le Standard n'en a pas) : '' = booster ordinaire
 export const ROLES = [
   { id: '', label: 'Booster ordinaire', help: 'Se reçoit en cadeau de l’admin ou s’achète en pièces si un prix est fixé.' },
-  { id: 'subscriber', label: 'Booster des abonnés', help: 'Remplace le Standard pour les abonnés (même stock gratuit). Jamais en vente.' },
-  { id: 'subscription_gift', label: 'Cadeau des abonnés', help: 'Offert aux abonnés à chaque période de facturation (la quantité se règle dans Réglages).' },
+  { id: 'subscriber', label: 'Booster des membres Pro', help: 'Remplace le Standard pour les membres Pro (même stock gratuit). Jamais en vente.' },
+  { id: 'subscription_gift', label: 'Cadeau Pro', help: 'Offert une seule fois, à l’achat du pass Pro (la quantité se règle dans Réglages).' },
   { id: 'card_reward', label: 'Récompense : carte complétée', help: 'Le booster Gold : gagné quand tous les emplacements d’une carte sont remplis dans l’album. Jamais en vente. Peut contenir Alpha, Omega et une carte numérotée de la carte complétée ; une rareté ordinaire n’y donne que des cartes « du milieu ».' },
 ]
 export const roleLabel = (id) => ROLES.find((r) => r.id === (id ?? ''))?.label ?? ''

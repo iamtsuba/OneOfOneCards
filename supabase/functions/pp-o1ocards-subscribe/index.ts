@@ -1,4 +1,4 @@
-// 1/1 Cards, environnement preprod : crée une session Stripe Checkout pour s'abonner (paiement mensuel renouvelé automatiquement).
+// 1/1 Cards, environnement preprod : crée une session Stripe Checkout pour acheter le pass Pro (paiement UNIQUE, avantages à vie, aucun renouvellement).
 // GÉNÉRÉ par scripts/build-functions.mjs à partir de supabase/functions/_templates/ : ne pas modifier à la main.
 // Appelée par l'application avec le jeton de connexion du joueur.
 //
@@ -10,12 +10,12 @@
 //   PP_STRIPE_MANAGED_PAYMENTS : mettre "false" pour ne pas utiliser Managed Payments
 //   (les réglages facultatifs retombent sur ceux de la production s'ils ne sont pas définis ; jamais les clés Stripe)
 //
-// Le prix (centimes par mois) et l'ouverture de l'abonnement viennent des réglages de pp_o1ocards_config, le nom de pp_o1ocards_text_config.
-// Le prix est envoyé à Stripe à chaque souscription (price_data) : changer le réglage ne touche pas les abonnés déjà inscrits.
+// Le prix (en centimes, achat unique) et l'ouverture de la vente viennent des réglages de pp_o1ocards_config, le nom de pp_o1ocards_text_config.
+// Le prix est envoyé à Stripe à chaque achat (price_data) : changer le réglage ne touche pas ce que les membres ont déjà payé.
 // Deuxième usage, au retour du paiement : { action: 'confirm', session_id } relit la session auprès de Stripe (avec la clé secrète), vérifie qu'elle appartient bien
-// au joueur connecté et met son abonnement à jour tout de suite, sans attendre le webhook (qui reste la source de vérité pour la suite : renouvellements, résiliation).
-// Avant de créer le paiement, la fonction exige les conditions de vente, la renonciation au droit de rétractation (contenu numérique)
-// ET la reconnaissance du renouvellement automatique, puis enregistre cette preuve dans pp_o1ocards_consents (date, version, textes, IP).
+// au joueur connecté et qu'elle est payée, et lui donne le pass tout de suite, sans attendre le webhook (qui fait pareil : la base ne l'attribue qu'une fois par achat).
+// Avant de créer le paiement, la fonction exige les conditions de vente ET la renonciation au droit de rétractation (contenu numérique),
+// puis enregistre cette preuve dans pp_o1ocards_consents (date, version, textes, IP).
 // SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY sont fournis automatiquement par Supabase.
 import { createClient } from 'npm:@supabase/supabase-js@2'
 
@@ -34,23 +34,7 @@ const CORS = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } })
 
-// Arguments de subscription_sync tirés d'un abonnement Stripe (selon la version de l'API, les dates de période sont sur l'abonnement ou sur sa première ligne)
-const iso = (t: unknown) => (typeof t === 'number' ? new Date(t * 1000).toISOString() : null)
-function syncArgs(userId: string, sub: any) {
-  const item = sub.items?.data?.[0]
-  return {
-    p_user: userId,
-    p_customer: typeof sub.customer === 'string' ? sub.customer : sub.customer?.id ?? null,
-    p_subscription: sub.id ?? null,
-    p_status: sub.status,
-    p_period_start: iso(sub.current_period_start ?? item?.current_period_start),
-    p_period_end: iso(sub.current_period_end ?? item?.current_period_end),
-    p_cancel_at_period_end: sub.cancel_at_period_end === true || (sub.cancel_at ?? null) !== null,
-    p_event_created: new Date().toISOString(),
-  }
-}
-
-const RECURRING_TEXT = 'Abonnement mensuel renouvelé automatiquement jusqu’à résiliation, que je peux faire à tout moment depuis « Gérer mon abonnement ».'
+const lifetimeText = (name: string) => `Achat unique du pass ${name} : avantages à vie, sans abonnement ni renouvellement.`
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -89,20 +73,25 @@ Deno.serve(async (req) => {
     const user = auth?.user
     if (authError || !user) return json({ error: 'not_authenticated' }, 401)
 
-    // Confirmation au retour du paiement : la session Stripe doit appartenir au joueur connecté
+    // Confirmation au retour du paiement : la session Stripe doit appartenir au joueur connecté et être payée
     if (body?.action === 'confirm') {
       const sid = String(body?.session_id ?? '')
       if (!/^cs_(test|live)_[A-Za-z0-9]{10,200}$/.test(sid)) return json({ error: 'invalid_session' }, 400)
       const base0 = secret('STRIPE_API_BASE') ?? 'https://api.stripe.com'
-      const r0 = await fetch(`${base0}/v1/checkout/sessions/${sid}?expand[]=subscription`, { headers: { Authorization: `Bearer ${stripeKey}` } })
+      const r0 = await fetch(`${base0}/v1/checkout/sessions/${sid}`, { headers: { Authorization: `Bearer ${stripeKey}` } })
       const sess = await r0.json()
       if (!r0.ok) { console.error('Session Stripe introuvable', sess?.error?.message); return json({ error: 'session_not_found' }, 404) }
-      if (sess.mode !== 'subscription' || (sess.client_reference_id ?? sess.metadata?.user_id) !== user.id) return json({ error: 'wrong_user' }, 403)
-      const sub = sess.subscription
-      if (sess.status !== 'complete' || !sub || typeof sub !== 'object') return json({ error: 'not_complete' }, 409)
-      const { data: synced, error: syncError } = await admin.rpc(PREFIX + 'subscription_sync', syncArgs(user.id, sub))
-      if (syncError) { console.error('Mise à jour de l’abonnement impossible', syncError.message); return json({ error: 'server_error' }, 500) }
-      return json({ ok: true, active: synced?.active === true })
+      if (sess.mode !== 'payment' || sess.metadata?.kind !== 'lifetime' || (sess.client_reference_id ?? sess.metadata?.user_id) !== user.id) return json({ error: 'wrong_user' }, 403)
+      if (sess.status !== 'complete' || sess.payment_status !== 'paid') return json({ error: 'not_complete' }, 409)
+      const { data: granted, error: grantError } = await admin.rpc(PREFIX + 'pro_grant', {
+        p_user: user.id,
+        p_session: sess.id,
+        p_payment_intent: typeof sess.payment_intent === 'string' ? sess.payment_intent : sess.payment_intent?.id ?? null,
+        p_amount_cents: sess.amount_total ?? null,
+        p_currency: sess.currency ?? null,
+      })
+      if (grantError) { console.error('Attribution du pass Pro impossible', grantError.message); return json({ error: 'server_error' }, 500) }
+      return json({ ok: true, active: granted?.active === true })
     }
 
     const { data: rows, error: cfgError } = await admin
@@ -113,15 +102,14 @@ Deno.serve(async (req) => {
     const cents = Math.round(cfg.subscription_price_cents)
     if (!(cents >= 50 && cents <= 100000) || !Number.isInteger(cfg.cgv_version)) return json({ error: 'not_configured' }, 503)
 
-    // Déjà abonné : pas de second abonnement
-    const { data: subRows, error: subError } = await admin
-      .from(PREFIX + 'subscriptions').select('status,stripe_customer_id').eq('user_id', user.id).limit(1)
-    if (subError) throw subError
-    const current = subRows?.[0]
-    if (current && ['active', 'trialing'].includes(current.status)) return json({ error: 'already_subscribed' }, 409)
+    // Déjà membre Pro (pass non remboursé) : pas de second achat
+    const { data: proRows, error: proError } = await admin
+      .from(PREFIX + 'pro_members').select('user_id').eq('user_id', user.id).is('revoked_at', null).limit(1)
+    if (proError) throw proError
+    if (proRows && proRows.length > 0) return json({ error: 'already_subscribed' }, 409)
 
-    // Consentement obligatoire : CGV, renonciation à la rétractation, renouvellement automatique
-    if (!(consent?.cgv === true && consent?.withdrawal === true && consent?.recurring === true)) return json({ error: 'consent_required' }, 400)
+    // Consentement obligatoire : CGV et renonciation à la rétractation (contenu numérique)
+    if (!(consent?.cgv === true && consent?.withdrawal === true)) return json({ error: 'consent_required' }, 400)
     if (Number(consent?.version) !== cfg.cgv_version) return json({ error: 'cgv_outdated' }, 409)
 
     const { data: legalRows, error: legalError } = await admin.from(PREFIX + 'legal').select('key,value')
@@ -137,14 +125,14 @@ Deno.serve(async (req) => {
     const name = String(textRows?.[0]?.value ?? '').trim() || 'OneMore'
 
     const success = new URL(back)
-    success.searchParams.set('subscription', 'success')
+    success.searchParams.set('pro', 'success')
     // Stripe remplace {CHECKOUT_SESSION_ID} par l'identifiant de la session (les accolades doivent rester telles quelles : pas d'encodage d'adresse)
     const successUrl = success.toString() + '&session_id={CHECKOUT_SESSION_ID}'
     const cancel = new URL(back)
-    cancel.searchParams.set('subscription', 'cancel')
+    cancel.searchParams.set('pro', 'cancel')
 
     const form = new URLSearchParams({
-      mode: 'subscription',
+      mode: 'payment',
       locale: 'fr',
       success_url: successUrl,
       cancel_url: cancel.toString(),
@@ -152,16 +140,15 @@ Deno.serve(async (req) => {
       'line_items[0][quantity]': '1',
       'line_items[0][price_data][currency]': 'eur',
       'line_items[0][price_data][unit_amount]': String(cents),
-      'line_items[0][price_data][recurring][interval]': 'month',
-      'line_items[0][price_data][product_data][name]': `Abonnement ${name} – 1/1 Cards${ENV === 'preprod' ? ' (test)' : ''}`,
+      'line_items[0][price_data][product_data][name]': `Pass ${name} à vie – 1/1 Cards${ENV === 'preprod' ? ' (test)' : ''}`,
       'line_items[0][price_data][product_data][tax_code]': setting('STRIPE_TAX_CODE') || 'txcd_10201000',
       'metadata[user_id]': user.id,
-      'metadata[kind]': 'subscription',
-      // c'est cette copie qui revient dans les notifications de l'abonnement (le joueur est reconnu sans autre recherche)
-      'subscription_data[metadata][user_id]': user.id,
+      'metadata[kind]': 'lifetime',
+      // recopiés sur le paiement : retrouver le joueur depuis un remboursement
+      'payment_intent_data[metadata][user_id]': user.id,
+      'payment_intent_data[metadata][kind]': 'lifetime',
     })
-    if (current?.stripe_customer_id) form.set('customer', current.stripe_customer_id)
-    else if (user.email) form.set('customer_email', user.email)
+    if (user.email) form.set('customer_email', user.email)
     if (setting('STRIPE_MANAGED_PAYMENTS') === 'false') form.set('managed_payments[enabled]', 'false')
 
     const base = secret('STRIPE_API_BASE') ?? 'https://api.stripe.com'
@@ -172,7 +159,7 @@ Deno.serve(async (req) => {
     })
     const session = await res.json()
     if (!res.ok || !session.url) {
-      console.error('Stripe a refusé la création de la session d’abonnement', session?.error?.message)
+      console.error('Stripe a refusé la création de la session du pass Pro', session?.error?.message)
       return json({ error: 'stripe_error' }, 502)
     }
 
@@ -180,7 +167,7 @@ Deno.serve(async (req) => {
     const { error: consentError } = await admin.from(PREFIX + 'consents').insert({
       user_id: user.id,
       cgv_version: cfg.cgv_version,
-      statement: [legal.consent_cgv_text, legal.consent_withdrawal_text, RECURRING_TEXT].filter(Boolean).join('\n'),
+      statement: [legal.consent_cgv_text, legal.consent_withdrawal_text, lifetimeText(name)].filter(Boolean).join('\n'),
       ip: forwarded || req.headers.get('cf-connecting-ip') || null,
       user_agent: req.headers.get('user-agent'),
       boosters: null,

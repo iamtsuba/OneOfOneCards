@@ -39,7 +39,8 @@ export default function App() {
 }
 
 function Game({ session }) {
-  const [tab, setTab] = useState('boosters')
+  // retour du paiement du pass Pro (?pro=…) : on arrive sur le profil, où le pass s'active
+  const [tab, setTab] = useState(() => (new URLSearchParams(window.location.search).has('pro') ? 'profile' : 'boosters'))
   const [marketView, setMarketView] = useState('browse')
   const [marketListingId, setMarketListingId] = useState(null)
   const [revealing, setRevealing] = useState(false)
