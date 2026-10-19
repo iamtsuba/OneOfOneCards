@@ -3043,6 +3043,73 @@ grant execute on function public.pp_o1ocards_open_gold_reward(bigint) to authent
 grant execute on function public.pp_o1ocards_ack_gold_rewards() to authenticated;
 select public.pp_o1ocards_gold_rewards_backfill();
 
+-- ---------- Lien d'invitation : devenir ami en ouvrant un lien ----------
+-- Chaque joueur a UN code d'invitation (20 caractères hexadécimaux au hasard). Celui qui ouvre le lien, une fois connecté, devient ami tout de suite avec son propriétaire
+-- (sans demande à accepter). Le propriétaire peut générer un nouveau code : l'ancien lien ne marche plus.
+create table if not exists public.pp_o1ocards_friend_invites (
+  user_id    uuid primary key references public.pp_o1ocards_profiles (id) on delete cascade,
+  code       text not null unique,
+  created_at timestamptz not null default now(),
+  uses       int not null default 0
+);
+alter table public.pp_o1ocards_friend_invites enable row level security;
+revoke all on public.pp_o1ocards_friend_invites from anon, authenticated;
+
+create or replace function public.pp_o1ocards_friend_invite_code(p_reset boolean default false)
+returns text language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); v text;
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  perform public.pp_o1ocards_ensure_profile(uid);
+  if not coalesce(p_reset, false) then
+    select code into v from public.pp_o1ocards_friend_invites where user_id = uid;
+    if v is not null then return v; end if;
+  end if;
+  v := substr(replace(gen_random_uuid()::text, '-', ''), 1, 20);
+  insert into public.pp_o1ocards_friend_invites (user_id, code, uses) values (uid, v, 0)
+  on conflict (user_id) do update set code = excluded.code, created_at = now(), uses = 0;
+  return v;
+end $$;
+
+-- Pseudo du propriétaire d'un code (null si le code n'existe pas) : appelable avant la connexion pour afficher « invité par … »
+create or replace function public.pp_o1ocards_friend_invite_preview(p_code text)
+returns text language sql stable security definer set search_path = public as $$
+  select pr.username from public.pp_o1ocards_friend_invites i join public.pp_o1ocards_profiles pr on pr.id = i.user_id
+  where p_code ~ '^[0-9a-f]{20}$' and i.code = p_code
+$$;
+
+create or replace function public.pp_o1ocards_friend_accept_invite(p_code text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); v_owner uuid; v_name text; f public.pp_o1ocards_friendships%rowtype;
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  perform public.pp_o1ocards_ensure_profile(uid);
+  if p_code is null or p_code !~ '^[0-9a-f]{20}$' then raise exception 'invalid_invite'; end if;
+  select i.user_id, pr.username into v_owner, v_name from public.pp_o1ocards_friend_invites i join public.pp_o1ocards_profiles pr on pr.id = i.user_id where i.code = p_code;
+  if v_owner is null then raise exception 'invalid_invite'; end if;
+  if v_owner = uid then raise exception 'cannot_friend_self'; end if;
+  perform pg_advisory_xact_lock(hashtext(least(uid, v_owner)::text || greatest(uid, v_owner)::text));
+  select * into f from public.pp_o1ocards_friendships
+   where least(requester_id, addressee_id) = least(uid, v_owner) and greatest(requester_id, addressee_id) = greatest(uid, v_owner);
+  if found then
+    if f.status = 'accepted' then return jsonb_build_object('ok', true, 'already', true, 'friend', v_name); end if;
+    update public.pp_o1ocards_friendships set status = 'accepted', responded_at = now() where id = f.id;   -- une demande en attente (dans un sens ou dans l'autre) devient une amitié
+  else
+    if (select count(*) from public.pp_o1ocards_friendships where requester_id = uid or addressee_id = uid) >= 200 then raise exception 'too_many_friends'; end if;
+    if (select count(*) from public.pp_o1ocards_friendships where requester_id = v_owner or addressee_id = v_owner) >= 200 then raise exception 'inviter_full'; end if;
+    insert into public.pp_o1ocards_friendships (requester_id, addressee_id, status, responded_at) values (uid, v_owner, 'accepted', now());
+  end if;
+  update public.pp_o1ocards_friend_invites set uses = uses + 1 where user_id = v_owner;
+  return jsonb_build_object('ok', true, 'already', false, 'friend', v_name);
+end $$;
+
+revoke all on function public.pp_o1ocards_friend_invite_code(boolean) from public, anon;
+grant execute on function public.pp_o1ocards_friend_invite_code(boolean) to authenticated;
+revoke all on function public.pp_o1ocards_friend_accept_invite(text) from public, anon;
+grant execute on function public.pp_o1ocards_friend_accept_invite(text) to authenticated;
+revoke all on function public.pp_o1ocards_friend_invite_preview(text) from public;
+grant execute on function public.pp_o1ocards_friend_invite_preview(text) to anon, authenticated;
+
 -- ---------- Abonnement, rôles de boosters, réglages texte ----------
 create or replace function public.pp_o1ocards_text_cfg(p_key text)
 returns text language sql stable set search_path = public as $$

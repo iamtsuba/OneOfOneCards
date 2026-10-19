@@ -8,7 +8,9 @@ export const isBonus = (rarity) => SPECIAL_KINDS.includes(rarity?.kind)
 export const specialSuffix = (rarity) => ({ unique: '1/1', alpha: '1/N', omega: 'N/N' })[rarity?.kind] ?? ''
 
 // rows : sortie de album_view (un emplacement par carte et par rareté). Le master set = tous les emplacements sauf Unique, Alpha et Omega.
-export function albumStats(rows, rarityMap) {
+// allRarities (facultatif) : toutes les raretés du jeu ; le décompte par rareté les liste TOUTES (0/0 quand la catégorie n'a aucun emplacement de cette rareté),
+// pour qu'aucune rareté existante (Art Rare…) ne manque, quel que soit le contenu de la catégorie.
+export function albumStats(rows, rarityMap, allRarities = null) {
   const base = { filled: 0, total: 0 }
   const bonus = { filled: 0, total: 0 }
   let fillable = 0
@@ -31,6 +33,9 @@ export function albumStats(rows, rarityMap) {
     e.total += 1
     if (filled) e.filled += 1
     byRarity.set(r.rarity_id, e)
+  }
+  for (const r of allRarities ?? []) {
+    if (!byRarity.has(r.id)) byRarity.set(r.id, { id: r.id, total: 0, filled: 0, bonus: isBonus(r), suffix: specialSuffix(r) })
   }
   const pct = base.total ? (base.filled / base.total) * 100 : 0
   return {

@@ -144,7 +144,7 @@ export function InfoSheet({ title, onClose, children }) {
 export function AlbumStats({ rows, rarityMap, initialInfo = false }) {
   const [info, setInfo] = useState(initialInfo)
   if (!rows) return <div className="collection-head"><p className="fine">Chargement de l’album…</p></div>
-  const st = albumStats(rows, rarityMap)
+  const st = albumStats(rows, rarityMap, Object.values(rarityMap))   // toutes les raretés existantes, pas seulement celles qui ont des emplacements ici
   const { base, bonus } = st
   return (
     <div className="collection-head">
@@ -158,7 +158,7 @@ export function AlbumStats({ rows, rarityMap, initialInfo = false }) {
       {st.byRarity.length > 0 && (
         <ul className="album-rarity-stats" aria-label="Emplacements remplis par rareté">
           {st.byRarity.map((e) => (
-            <li key={e.id} style={{ '--r1': rarityMap[e.id]?.color, '--r2': rarityMap[e.id]?.color2 }}>
+            <li key={e.id} className={e.total === 0 ? 'none' : undefined} title={e.total === 0 ? 'Aucun emplacement de cette rareté dans cette catégorie' : undefined} style={{ '--r1': rarityMap[e.id]?.color, '--r2': rarityMap[e.id]?.color2 }}>
               <i className="rarity-dot" aria-hidden="true" />
               {rarityMap[e.id]?.name ?? e.id} <strong>{e.filled}/{e.total}</strong>
               {e.suffix && <span className="muted"> · {e.suffix}</span>}

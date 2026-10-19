@@ -896,3 +896,21 @@ html.subscriber { --bg: #fbf1d3; }
 .glow-swatch { flex: none; width: 18px; height: 18px; border-radius: 50%; background: transparent; box-shadow: inset 0 0 0 1.5px rgba(27, 31, 59, .25); }
 .glow-swatch.glow-gold, .glow-swatch.glow-silver, .glow-swatch.glow-red, .glow-swatch.glow-blue, .glow-swatch.glow-green, .glow-swatch.glow-purple { background: var(--glow); box-shadow: 0 0 10px var(--glow); }
 .glow-swatch.glow-rainbow { background: conic-gradient(#ff4a3d, #ffcf3a, #34d17a, #3da5ff, #b36bff, #ff5fa8, #ff4a3d); box-shadow: 0 0 10px #b36bff; }
+
+/* Inviter un ami par lien */
+.friends-invite { display: grid; gap: 10px; padding: 14px; border-radius: 16px; background: #fff; box-shadow: inset 0 0 0 1.5px var(--line); }
+.friends-invite h3 { margin: 0; }
+.friends-invite .btn.accent { justify-self: start; }
+.invite-link { width: 100%; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 12px; background: #f6f7fc; font: inherit; font-size: 13px; color: var(--ink-soft); text-overflow: ellipsis; }
+.invite-notice { margin: 0 0 12px; }
+
+/* Décompte par rareté : une rareté sans emplacement dans la catégorie reste listée (0/0), en retrait */
+.album-rarity-stats li.none { opacity: .55; }
+/* Étagère de jusqu'à 3 boosters */
+.pack-shelf { display: flex; justify-content: center; align-items: flex-end; gap: 10px; width: 100%; }
+.shelf-pack { position: relative; flex: 1 1 0; max-width: 34%; padding: 0; border: 0; background: none; cursor: pointer; opacity: .72; transform: scale(.9); transition: transform .2s, opacity .2s; }
+.shelf-pack.on { opacity: 1; transform: scale(1.04); }
+.shelf-pack:disabled { cursor: not-allowed; }
+.shelf-pack .pack-wrap { width: 100%; }
+.shelf-pack:focus-visible { outline: 3px solid #ffe27a; outline-offset: 4px; border-radius: 10px; }
+.shelf-count { position: absolute; top: -8px; right: -2px; min-width: 28px; padding: 2px 8px; border-radius: 99px; background: #14173f; color: #fff; font-weight: 800; font-size: 13px; box-shadow: 0 2px 6px rgba(20, 23, 63, .35); }

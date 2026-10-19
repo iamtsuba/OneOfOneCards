@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '../supabase'
-import { explain, usernameAvailable } from '../api'
+import { explain, usernameAvailable, friendInvitePreview } from '../api'
+import { loadPendingInvite } from '../invite'
 import Brand from './Brand'
 import LegalSheet from './Legal'
 import Landing from './Landing'
@@ -14,6 +15,14 @@ export default function Auth() {
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
   const [terms, setTerms] = useState(false)
+  const [inviter, setInviter] = useState('')   // pseudo de l'ami dont on a ouvert le lien d'invitation
+
+  // Lien d'invitation ouvert avant de se connecter : on dit qui invite, l'amitié se fera toute seule une fois connecté
+  useEffect(() => {
+    const code = loadPendingInvite(window.localStorage)
+    if (!code) return
+    friendInvitePreview(code).then((name) => { if (typeof name === 'string' && name) setInviter(name) }).catch(() => {})
+  }, [])
 
   async function submit(e) {
     e.preventDefault()
@@ -58,6 +67,7 @@ export default function Auth() {
         <p className="auth-lead">
           Ouvre des boosters de cartes numérotées, chacune en un seul exemplaire, et complète ton album.
         </p>
+        {inviter && <p className="msg info invite-banner" role="status">Tu as été invité par <strong>{inviter}</strong> : connecte-toi ou crée ton compte, et vous deviendrez amis automatiquement.</p>}
 
         <div className="segmented" role="tablist" aria-label="Mode de connexion">
           <button role="tab" aria-selected={!signup} className={!signup ? 'on' : ''} onClick={() => { setMode('login'); setError('') }} type="button">Se connecter</button>

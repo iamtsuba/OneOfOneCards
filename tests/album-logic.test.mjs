@@ -74,5 +74,18 @@ ok('secrète découverte : 1 trouvée sur 1, toujours hors master set et hors ca
 ok('secrète découverte : ses emplacements remplissables comptent parmi ceux qu’on peut remplir', found.fillable === st.fillable + 1)
 ok('aucune secrète : 0 sur 0', albumStats(rows, rarityMap).secrets.total === 0)
 
+// ---- Décompte par rareté : toutes les raretés EXISTANTES, même sans emplacement dans la catégorie (ex. Art Rare)
+const allList = [...Object.values(rarityMap), { id: 'artrare', kind: 'range', sort_order: 5 }, { id: 'peu', kind: 'range', sort_order: 6.5 }]
+const rmAll = Object.fromEntries(allList.map((r) => [r.id, r]))
+const stAll = albumStats(rows, rmAll, allList)
+ok('sans la liste des raretés (appel ancien) : seulement celles qui ont des emplacements', eq(albumStats(rows, rmAll).byRarity.map((e) => e.id), ['common', 'rare', 'omega', 'alpha', 'unique']))
+ok('avec la liste : TOUTES les raretés existantes sont là, de la plus répandue à la plus rare (Peu Commune, Art Rare comprises)', eq(stAll.byRarity.map((e) => e.id), ['common', 'peu', 'rare', 'artrare', 'omega', 'alpha', 'unique']))
+ok('une rareté sans emplacement dans la catégorie : 0 rempli sur 0 (Art Rare, Peu Commune)', stAll.byRarity.find((e) => e.id === 'artrare').total === 0 && stAll.byRarity.find((e) => e.id === 'artrare').filled === 0 && stAll.byRarity.find((e) => e.id === 'peu').total === 0)
+ok('les raretés qui ont des emplacements gardent leurs compteurs (Commune 2/2, Rare 1/2)', stAll.byRarity.find((e) => e.id === 'common').filled === 2 && stAll.byRarity.find((e) => e.id === 'common').total === 2 && stAll.byRarity.find((e) => e.id === 'rare').filled === 1)
+ok('les raretés ajoutées ne changent ni le master set, ni le hors master set, ni le pourcentage', stAll.base.filled === st.base.filled && stAll.base.total === st.base.total && stAll.bonus.total === st.bonus.total && stAll.base.pct === st.base.pct)
+ok('les raretés spéciales absentes gardent leur mention (Alpha 1/N, Omega N/N, Unique 1/1) et leur statut hors master set', albumStats([], rmAll, allList).byRarity.filter((e) => e.bonus).map((e) => e.suffix).join('|') === 'N/N|1/N|1/1')
+ok('album vide : toutes les raretés listées à 0/0, master set 0/0, pas de plantage', (() => { const e = albumStats([], rmAll, allList); return e.byRarity.length === 7 && e.byRarity.every((x) => x.total === 0 && x.filled === 0) && e.base.total === 0 && e.base.pct === 0 })())
+ok('une rareté créée plus tard apparaît toute seule (aucune liste écrite en dur)', albumStats(rows, { ...rmAll, nouvelle: { id: 'nouvelle', kind: 'range', sort_order: 4 } }, [...allList, { id: 'nouvelle', kind: 'range', sort_order: 4 }]).byRarity.some((e) => e.id === 'nouvelle'))
+
 if (bad) { console.error(`\n${bad} contrôle(s) en échec`); process.exit(1) }
 console.log('\nAlbum et piles (logique) : tous les contrôles sont passés.')

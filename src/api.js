@@ -47,6 +47,10 @@ export const ackGoldRewards = () => rpc('ack_gold_rewards')
 // Amis : recherche par début de pseudo, demandes, liste, collection d'un ami (ses doubles : p_doubles)
 export const friendSearch = (query) => rpc('friend_search', { p_query: query })
 export const friendRequest = (userId) => rpc('friend_request', { p_user: userId })
+// Lien d'invitation : le code du joueur (p_reset = nouveau code, l'ancien lien ne marche plus), devenir ami en ouvrant un lien, pseudo du propriétaire d'un code (avant connexion)
+export const friendInviteCode = (reset = false) => rpc('friend_invite_code', { p_reset: reset })
+export const friendAcceptInvite = (code) => rpc('friend_accept_invite', { p_code: code })
+export const friendInvitePreview = (code) => rpc('friend_invite_preview', { p_code: code })
 export const friendRespond = (friendshipId, accept) => rpc('friend_respond', { p_id: friendshipId, p_accept: accept })
 export const friendRemove = (userId) => rpc('friend_remove', { p_user: userId })
 export const friendsList = () => rpc('friends_list')
@@ -254,6 +258,8 @@ export function explain(e) {
   if (m.includes('invalid_booster_slots')) return 'Répartition invalide : chaque carte a au moins une rareté, avec un poids positif, sans doublon.'
   if (m.includes('invalid_booster')) return 'Booster invalide : nom de 1 à 40 caractères, 1 à 10 cartes, couleur, prix entier ou vide.'
   if (m.includes('booster_is_standard')) return 'Le booster Standard ne peut pas être supprimé.'
+  if (m.includes('invalid_invite')) return 'Ce lien d’invitation n’est plus valide : demande à ton ami de t’en envoyer un nouveau.'
+  if (m.includes('inviter_full')) return 'Ton ami a atteint la limite de 200 amis : vous ne pouvez pas devenir amis pour l’instant.'
   if (m.includes('booster_protected')) return 'Ce booster est la récompense d’une carte complétée : il ne peut ni être supprimé ni perdre ce rôle (donne ce rôle à un autre booster à la place).'
   if (m.includes('booster_has_holders')) return 'Des joueurs possèdent encore ce booster : désactive-le plutôt que de le supprimer.'
   if (m.includes('not_for_sale')) return 'Ce booster n’est pas en vente.'

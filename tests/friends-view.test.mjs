@@ -58,7 +58,7 @@ ok('page : demandes reçues (Accepter, Refuser), demandes envoyées (Annuler), p
 ok('page : amis avec leur nombre de cartes et de doubles (pluriel et singulier)', /Zoé<\/strong><small class="muted">6 cartes · 3 doubles</.test(h) && /Max<\/strong><small class="muted">1 carte · 1 double</.test(h) && /Léa<\/strong><small class="muted">0 carte · 0 double</.test(h))
 ok('page : « Mes amis (3) » compte seulement les amis, pas les demandes', /Mes amis \(3\)/.test(h))
 ok('page : Voir et Retirer pour chaque ami (Retirer annoncé avec le nom)', (h.match(/>Voir</g) || []).length === 3 && /aria-label="Retirer Zoé"/.test(h))
-ok('page : sans ami ni demande, une phrase d’aide', /Aucun ami pour l’instant\. Cherche un joueur par son pseudo\./.test(page({ rows: [] })) && !/Demandes/.test(page({ rows: [] })))
+ok('page : sans ami ni demande, une phrase d’aide', /Aucun ami pour l’instant\. Cherche un joueur par son pseudo ou envoie-lui ton lien d’invitation\./.test(page({ rows: [] })) && !/Demandes/.test(page({ rows: [] })))
 ok('page : chargement tant que la liste n’est pas arrivée', /Chargement…/.test(page({ rows: null })) && !/Aucun ami/.test(page({ rows: null })))
 const res = [
   { user_id: 'x', username: 'Ami_Nouveau', relation: 'none' }, { user_id: 'y', username: 'Ami_Envoyé', relation: 'sent' },

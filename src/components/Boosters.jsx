@@ -54,6 +54,24 @@ export function CardZoom({ cards, index, rarityMap, catalog, onClose, onMove }) 
   )
 }
 
+// Étagère : jusqu'à 3 boosters visibles à la fois (le booster du stock gratuit, puis les autres boosters que le joueur a en stock). On touche un paquet pour le choisir.
+// packs = [{ key, name, glow, count }] ; selected = clé du paquet choisi. Avec un seul paquet, l'affichage reste celui d'un grand paquet.
+export const SHELF_MAX = 3
+export function PackShelf({ packs, selected, category, disabled, onSelect }) {
+  if (packs.length < 2) return null
+  return (
+    <div className={`pack-shelf n${packs.length}`} role="group" aria-label="Tes boosters">
+      {packs.map((p) => (
+        <button key={p.key} type="button" className={`shelf-pack${p.key === selected ? ' on' : ''}`} aria-pressed={p.key === selected} disabled={disabled}
+          aria-label={`Booster ${p.name}, ${p.count} en stock`} onClick={() => onSelect(p.key)}>
+          <Pack dim={p.count === 0 || !category} category={category} label={p.name} glow={p.glow} />
+          <span className="shelf-count" aria-hidden="true">×{fmt(p.count)}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // Autres types de boosters (Silver, Gold, Légende…) : en stock et/ou en vente contre des pièces ; « i » ouvre leurs chances
 export function ExtraBoosters({ items, coins, disabled, onOpen, onBuy, onInfo }) {
   if (!items || items.length === 0) return null
@@ -129,7 +147,15 @@ export default function Boosters({ goCollection }) {
   const total = boosters + bonus
   const category = catalog.categoryMap[status?.active_category_id]
   const nextCategory = status?.next_category
+  // Étagère : le booster du stock gratuit + jusqu'à 2 autres boosters que le joueur a en stock (3 au plus)
+  const [pick, setPick] = useState(null)   // clé du paquet choisi : 'main' ou 't<id>' ; null = choix automatique
+  const shelfTypes = (status?.booster_types ?? []).filter((b) => b.quantity > 0).slice(0, SHELF_MAX - 1)
+  const shelfPacks = [{ key: 'main', name: status?.standard_booster?.name, glow: status?.standard_booster?.glow, count: total }, ...shelfTypes.map((b) => ({ key: `t${b.id}`, name: b.name, glow: b.glow, count: b.quantity }))]
+  const auto = total > 0 || shelfTypes.length === 0 ? 'main' : `t${shelfTypes[0].id}`
+  const selectedKey = shelfPacks.some((p) => p.key === pick) ? pick : auto
+  const selType = selectedKey === 'main' ? null : shelfTypes.find((b) => `t${b.id}` === selectedKey) ?? null
   const canOpen = status && total > 0 && !overlay && !!category
+  const canOpenSel = selType ? !overlay && !!category && selType.quantity > 0 : canOpen
   const [consentOpen, setConsentOpen] = useState(false)
   const [termsOpen, setTermsOpen] = useState(false)
   const [notice, setNotice] = useState('')
@@ -222,14 +248,20 @@ export default function Boosters({ goCollection }) {
       <h1 className="page-title">Boosters</h1>
 
       <div className="pack-stage">
-        <button className="pack-button" onClick={() => open()} disabled={!canOpen} aria-label={boosterName ? `Ouvrir un booster ${boosterName}` : 'Ouvrir un booster'}>
-          <Pack dim={total === 0 || !category} category={category} label={status?.standard_booster?.name} glow={status?.standard_booster?.glow} />
-        </button>
+        {shelfPacks.length > 1 ? (
+          <PackShelf packs={shelfPacks} selected={selectedKey} category={category} disabled={!!overlay} onSelect={setPick} />
+        ) : (
+          <button className="pack-button" onClick={() => open()} disabled={!canOpen} aria-label={boosterName ? `Ouvrir un booster ${boosterName}` : 'Ouvrir un booster'}>
+            <Pack dim={total === 0 || !category} category={category} label={status?.standard_booster?.name} glow={status?.standard_booster?.glow} />
+          </button>
+        )}
 
-        {category && <p className="pack-name">Booster {boosterName ? `${boosterName} ` : ''}« {category.name} »</p>}
+        {category && <p className="pack-name">Booster {selType ? `${selType.name} ` : boosterName ? `${boosterName} ` : ''}« {category.name} »</p>}
         <p className="stock">
           {status ? (
-            total > 0 ? (
+            selType ? (
+              <><strong>{fmt(selType.quantity)}</strong> {selType.quantity > 1 ? 'boosters prêts' : 'booster prêt'}<span className="muted stock-bonus"> · {selType.cards} carte{selType.cards > 1 ? 's' : ''} <InfoButton onClick={() => setOddsFor(selType)} label={`Chances du booster ${selType.name}`} /></span></>
+            ) : total > 0 ? (
               <>
                 <strong>{fmt(total)}</strong> {total > 1 ? 'boosters prêts' : 'booster prêt'}
                 {bonus > 0 && <span className="muted stock-bonus"> dont {fmt(bonus)} acheté{bonus > 1 ? 's' : ''}</span>}
@@ -242,11 +274,11 @@ export default function Boosters({ goCollection }) {
           )}
         </p>
 
-        <button className="btn accent big" onClick={() => open()} disabled={!canOpen}>
-          Ouvrir un booster{boosterName ? ` ${boosterName}` : ''}
+        <button className="btn accent big" onClick={() => (selType ? open(false, 'type', selType.id) : open())} disabled={!canOpenSel}>
+          Ouvrir un booster{selType ? ` ${selType.name}` : boosterName ? ` ${boosterName}` : ''}
         </button>
 
-        <ExtraBoosters items={status?.booster_types} coins={coinsFree} disabled={!!overlay} onOpen={(it) => open(false, 'type', it.id)} onBuy={buy} onInfo={setOddsFor} />
+        <ExtraBoosters items={(status?.booster_types ?? []).filter((b) => !shelfTypes.some((s) => s.id === b.id))} coins={coinsFree} disabled={!!overlay} onOpen={(it) => open(false, 'type', it.id)} onBuy={buy} onInfo={setOddsFor} />
         {oddsFor && category && <BoosterOddsSheet category={category} boosterType={oddsFor} rarityMap={rarityMap} onClose={() => setOddsFor(null)} />}
         <GoldRewardList rewards={goldRewards} typeMap={catalog?.typeMap} name={status?.reward_booster?.name} disabled={!!overlay} onOpen={(id) => open(false, 'gold', id)} />
         {goldenPacks > 0 && (
@@ -323,6 +355,19 @@ export default function Boosters({ goCollection }) {
         />
       )}
     </section>
+  )
+}
+
+// Texte sous la carte révélée. Seule une carte Unique (série de 1) n'existe qu'en un seul exemplaire ; les autres sont des exemplaires NUMÉROTÉS d'une série
+// (ex. 17/120) : on dit que celui-ci est à toi, sans prétendre qu'il n'y en a qu'un.
+export function RevealLine({ rarity, card, catalog }) {
+  const name = catalog?.typeMap?.[card.type_id]?.name
+  const ref = catalog?.cardRef?.(card.type_id, card.base_rarity, card.number, card.series)
+  return (
+    <p className="reveal-line" aria-live="polite">
+      <strong>{rarity?.name}</strong> : « {name} »{ref}{' '}
+      {Number(card.series) === 1 ? 'n’existe qu’en un seul exemplaire, et c’est le tien.' : 'Cet exemplaire numéroté est à toi, et à personne d’autre.'}
+    </p>
   )
 }
 
@@ -425,9 +470,7 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
 
         {isSpecial(rarity) && <Fireworks rarity={rarity} />}
 
-        <p className="reveal-line" aria-live="polite">
-          <strong>{rarity?.name}</strong> : « {catalog?.typeMap?.[c.type_id]?.name} »{catalog?.cardRef?.(c.type_id, c.base_rarity, c.number, c.series)} n’existe qu’en un exemplaire, et c’est le tien.
-        </p>
+        <RevealLine rarity={rarity} card={c} catalog={catalog} />
         {c.is_new && <p className="reveal-new">⭐ Nouvelle carte : elle est déjà dans ton album.</p>}
         <p className="overlay-hint">{last ? 'Touche la carte pour voir le résumé.' : 'Touche la carte pour passer à la suivante.'}</p>
       </div>

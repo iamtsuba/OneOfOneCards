@@ -4,13 +4,37 @@ import { explain } from '../api'
 import { useGame, fmt } from '../game'
 import Card from './Card'
 import CardModal from './CardModal'
+import { inviteLink } from '../invite'
 
 // Page « Amis » : chercher un joueur, gérer les demandes, voir la collection d'un ami et ses doubles, lui proposer une offre sur un double.
 // Les vues (FriendsView, FriendCollectionView) sont pures : tout vient des propriétés, c'est ce qui est testé sans navigateur.
 
 const plural = (n, one, many) => `${fmt(n)} ${n > 1 ? many : one}`
 
-export function FriendsView({ rows, results, query, notice, error, busy, onQuery, onSearch, onRequest, onRespond, onRemove, onOpen }) {
+// Inviter par lien : on copie son lien et on l'envoie à un ami ; en l'ouvrant il devient ami automatiquement.
+// invite = { link, copied, canShare, busy, error } ; le lien est préparé d'avance pour que la copie parte directement du toucher.
+export function InviteBlock({ invite, onCopy, onShare, onReset }) {
+  const { link, copied, canShare, busy, error } = invite
+  return (
+    <section className="friends-invite" aria-label="Inviter un ami par lien">
+      <h3>Inviter un ami par lien</h3>
+      <p className="muted">Envoie ton lien à un ami : quand il l’ouvre (et se connecte ou crée son compte), vous devenez amis automatiquement.</p>
+      <button type="button" className="btn accent" disabled={busy} onClick={onCopy}>{copied ? 'Lien copié ✓' : 'Copier mon lien d’invitation'}</button>
+      {link && (
+        <>
+          <input className="invite-link" readOnly value={link} aria-label="Ton lien d’invitation" onFocus={(e) => e.target.select()} />
+          <span className="friend-actions">
+            {canShare && <button type="button" className="btn small" disabled={busy} onClick={onShare}>Partager</button>}
+            <button type="button" className="btn small ghost" disabled={busy} onClick={onReset}>Nouveau lien</button>
+          </span>
+        </>
+      )}
+      {error && <p className="msg error" role="alert">{error}</p>}
+    </section>
+  )
+}
+
+export function FriendsView({ rows, results, query, notice, error, busy, invite, onCopyInvite, onShareInvite, onResetInvite, onQuery, onSearch, onRequest, onRespond, onRemove, onOpen }) {
   const received = (rows ?? []).filter((r) => r.relation === 'received')
   const sent = (rows ?? []).filter((r) => r.relation === 'sent')
   const friends = (rows ?? []).filter((r) => r.relation === 'friend')
@@ -39,6 +63,8 @@ export function FriendsView({ rows, results, query, notice, error, busy, onQuery
           </ul>
         )}
       </section>
+
+      {invite && <InviteBlock invite={invite} onCopy={onCopyInvite} onShare={onShareInvite} onReset={onResetInvite} />}
 
       {notice && <p className="msg info" role="status">{notice}</p>}
       {error && <p className="msg error" role="alert">{error}</p>}
@@ -77,7 +103,7 @@ export function FriendsView({ rows, results, query, notice, error, busy, onQuery
 
       <section aria-label="Mes amis">
         <h3>Mes amis{friends.length > 0 ? ` (${friends.length})` : ''}</h3>
-        {rows !== null && friends.length === 0 && <p className="muted">Aucun ami pour l’instant. Cherche un joueur par son pseudo.</p>}
+        {rows !== null && friends.length === 0 && <p className="muted">Aucun ami pour l’instant. Cherche un joueur par son pseudo ou envoie-lui ton lien d’invitation.</p>}
         <ul className="friend-rows">
           {friends.map((r) => (
             <li key={r.friendship_id} className="friend-row">
@@ -185,6 +211,40 @@ export default function Friends() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(null)
+  const [code, setCode] = useState(null)        // code d'invitation (préparé d'avance)
+  const [copied, setCopied] = useState(false)
+  const [inviteBusy, setInviteBusy] = useState(false)
+  const [inviteError, setInviteError] = useState('')
+  const link = code ? inviteLink(window.location.origin, code) : ''
+
+  // Le code est demandé dès l'ouverture de l'écran : au toucher, la copie part tout de suite (le navigateur n'autorise la copie que juste après un toucher)
+  useEffect(() => { api.friendInviteCode(false).then(setCode).catch(() => {}) }, [])
+
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true } catch { return false }
+  }
+  async function copyInvite() {
+    setInviteError('')
+    let c = code
+    if (!c) {
+      setInviteBusy(true)
+      try { c = await api.friendInviteCode(false); setCode(c) } catch (e) { setInviteError(explain(e)); setInviteBusy(false); return }
+      setInviteBusy(false)
+    }
+    const ok = await copyText(inviteLink(window.location.origin, c))
+    setCopied(ok)
+    if (ok) setTimeout(() => setCopied(false), 2500)
+    else setInviteError('Copie automatique impossible : touche le lien ci-dessous pour le sélectionner, puis copie-le.')
+  }
+  async function shareInvite() {
+    try { await navigator.share({ title: '1/1 Cards', text: 'Deviens mon ami sur 1/1 Cards :', url: link }) } catch { /* partage annulé */ }
+  }
+  async function resetInvite() {
+    if (!window.confirm('Générer un nouveau lien ? L’ancien lien ne fonctionnera plus.')) return
+    setInviteBusy(true)
+    setInviteError('')
+    try { setCode(await api.friendInviteCode(true)); setCopied(false) } catch (e) { setInviteError(explain(e)) } finally { setInviteBusy(false) }
+  }
 
   const load = useCallback(async () => {
     try { setRows(await api.friendsList()) } catch (e) { setError(explain(e)) }
@@ -216,6 +276,8 @@ export default function Friends() {
   if (open) return <FriendCollection friend={open} onBack={() => { setOpen(null); load() }} />
   return (
     <FriendsView rows={rows} results={results} query={query} notice={notice} error={error} busy={busy}
+      invite={{ link, copied, canShare: typeof navigator !== 'undefined' && typeof navigator.share === 'function', busy: inviteBusy, error: inviteError }}
+      onCopyInvite={copyInvite} onShareInvite={shareInvite} onResetInvite={resetInvite}
       onQuery={setQuery} onSearch={search} onOpen={setOpen}
       onRequest={(id) => act(() => api.friendRequest(id), (r) => (r?.status === 'accepted' ? 'Vous êtes amis !' : 'Demande envoyée.'))}
       onRespond={(id, accept) => act(() => api.friendRespond(id, accept), accept ? 'Vous êtes amis !' : 'Demande refusée.')}

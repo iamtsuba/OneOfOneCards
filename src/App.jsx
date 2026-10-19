@@ -3,6 +3,7 @@ import { supabase } from './supabase'
 import * as api from './api'
 import { explain } from './api'
 import { GameContext, fmt, fmtCoins } from './game'
+import { captureInviteFromUrl, runPendingInvite, inviteMessage } from './invite'
 import Auth from './components/Auth'
 import Brand from './components/Brand'
 import TabBar from './components/TabBar'
@@ -38,6 +39,9 @@ export default function App() {
   )
 }
 
+// Lien d'invitation (?ami=…) : retenu dès l'arrivée sur le site, même avant la connexion, pour être accepté une fois connecté
+captureInviteFromUrl(window)
+
 function Game({ session }) {
   // retour du paiement du pass Pro (?pro=…) : on arrive sur le profil, où le pass s'active
   const [tab, setTab] = useState(() => (new URLSearchParams(window.location.search).has('pro') ? 'profile' : 'boosters'))
@@ -48,6 +52,7 @@ function Game({ session }) {
   const [catalogRaw, setCatalogRaw] = useState(null)
   const [status, setStatusRaw] = useState(null)
   const [error, setError] = useState('')
+  const [inviteNotice, setInviteNotice] = useState('')
 
   const setStatus = useCallback((s) => {
     setStatusRaw({ ...s, offset: new Date(s.server_now).getTime() - Date.now() })
@@ -67,6 +72,16 @@ function Game({ session }) {
   }, [refreshStatus, refreshCatalog])
 
   useEffect(() => { load() }, [load])
+  // Une invitation d'ami en attente (lien ouvert avant de se connecter ou de créer le compte) : on devient ami, puis on arrive sur l'écran Amis
+  useEffect(() => {
+    let alive = true
+    runPendingInvite(window.localStorage, api.friendAcceptInvite).then((r) => {
+      if (!alive || r.kind === 'none') return
+      setInviteNotice(inviteMessage(r, explain))
+      if (r.kind !== 'error') { setTab('friends'); refreshStatus().catch(() => {}) }
+    })
+    return () => { alive = false }
+  }, [refreshStatus])
   // Abonné : le fond du jeu passe du gris clair au doré clair
   const subscriberOn = !!status?.subscription?.active
   useEffect(() => {
@@ -136,6 +151,9 @@ function Game({ session }) {
         </div>
       </header>
       <main>
+        {inviteNotice && (
+          <p className="msg info invite-notice" role="status">{inviteNotice} <button type="button" className="link" onClick={() => setInviteNotice('')}>Fermer</button></p>
+        )}
         {tab === 'boosters' && <Boosters goCollection={() => setTab('collection')} />}
         {tab === 'collection' && <Collection goMarket={(v) => { setMarketView(v || 'browse'); setMarketListingId(null); setTab('market') }} />}
         {tab === 'market' && <Market key={`${marketView}-${marketListingId || ''}`} initialView={marketView} initialListingId={marketListingId} />}

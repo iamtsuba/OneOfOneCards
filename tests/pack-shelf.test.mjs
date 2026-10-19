@@ -1,0 +1,141 @@
+// Page Boosters : étagère de jusqu'à 3 boosters (le booster du stock gratuit + les autres boosters en stock), choix d'un paquet, ouverture du bon booster.
+//   node tests/pack-shelf.test.mjs
+import { build } from 'esbuild'
+import { createRequire } from 'node:module'
+import { mkdtempSync, rmSync } from 'node:fs'
+import path from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { JSDOM, VirtualConsole } from 'jsdom'
+
+const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: 'https://pp.1o1cards.cc/', pretendToBeVisual: true, virtualConsole: new VirtualConsole() })
+globalThis.window = dom.window
+globalThis.document = dom.window.document
+Object.defineProperty(globalThis, 'navigator', { value: dom.window.navigator, configurable: true })
+globalThis.IS_REACT_ACT_ENVIRONMENT = true
+globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} }
+
+const json = (v, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
+const opened = []   // ouvertures demandées au serveur
+globalThis.fetch = async (url, init) => {
+  const u = String(url)
+  const body = init?.body ? JSON.parse(init.body) : {}
+  if (u.includes('open_booster_of_type')) { opened.push(['type', body.p_type]); return json({ message: 'ouverture simulée' }, 400) }
+  if (u.includes('open_booster')) { opened.push(['main']); return json({ message: 'ouverture simulée' }, 400) }
+  return json([])
+}
+
+const require = createRequire(import.meta.url)
+const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
+const out = mkdtempSync(path.join(root, 'tests', '.out-shelf-'))
+await build({
+  stdin: { contents: "export { default as Boosters, PackShelf, SHELF_MAX } from './src/components/Boosters.jsx'; export { GameContext } from './src/game.js'", resolveDir: root, loader: 'js' },
+  bundle: true, format: 'esm', platform: 'node', jsx: 'automatic', outfile: path.join(out, 'bundle.mjs'),
+  external: ['react', 'react-dom', 'react/jsx-runtime', 'react-dom/client'],
+  define: { 'import.meta.env': JSON.stringify({ MODE: 'preprod', VITE_APP_ENV: 'preprod', VITE_TABLE_PREFIX: 'pp_o1ocards_' }) }, logLevel: 'silent',
+})
+const React = require('react')
+const { renderToStaticMarkup } = require('react-dom/server')
+const { createRoot } = require('react-dom/client')
+const { act, useState } = React
+const { Boosters, PackShelf, SHELF_MAX, GameContext } = await import(pathToFileURL(path.join(out, 'bundle.mjs')).href)
+rmSync(out, { recursive: true, force: true })
+
+let bad = 0
+const ok = (name, cond) => { console.log(cond ? 'OK  ' : 'FAIL', name); if (!cond) bad++ }
+const wait = (ms) => act(async () => { await new Promise((r) => setTimeout(r, ms)) })
+const text = (h) => h.textContent.replace(/\s+/g, ' ')
+
+const silver = { id: 21, name: 'Silver', cards: 5, color: '#c0c0c0', glow: 'silver', price: 50, quantity: 2 }
+const art = { id: 22, name: 'Art Rare assuré', cards: 5, color: '#f59e0b', glow: 'purple', price: null, quantity: 1 }
+const legende = { id: 23, name: 'Légende', cards: 3, color: '#111111', glow: 'rainbow', price: 80, quantity: 4 }
+const forSale = { id: 24, name: 'Bronze', cards: 2, color: '#b45309', glow: 'none', price: 20, quantity: 0 }
+const base = { id: 'u1', username: 'Tsuba', boosters: 10, bonus_boosters: 0, coins: 500, coins_locked: 0, golden_packs: 0, gold_rewards: [], unseen_rewards: [], max_boosters: 10, regen_minutes: 10, regen_amount: 10,
+  active_category_id: 5, next_refill_at: null, cards_taken: 10, total_cards: 100, cgv_version: 3, shop_enabled: false, booster_types: [], standard_booster: { id: 1, name: 'Standard', glow: 'none' }, server_now: new Date().toISOString(),
+  subscription: { enabled: false, active: false } }
+const catalog = { categoryMap: { 5: { id: 5, name: 'Chattrapez les tous !', color: '#f59e0b', color2: '#c2410c', text_color: '#fff', image: '🐱' } }, typeMap: {}, types: [], rarities: [], cardRef: () => '', numberHidden: () => false }
+
+let setExternal = () => {}
+async function mountPage(initial) {
+  const host = document.createElement('div'); document.body.appendChild(host)
+  const reactRoot = createRoot(host)
+  function Harness() {
+    const [status, setStatus] = useState(initial)
+    setExternal = setStatus
+    return React.createElement(GameContext.Provider, { value: { status, setStatus, refreshStatus: async () => status, rarityMap: {}, catalog, setRevealing: () => {} } }, React.createElement(Boosters, { goCollection: () => {} }))
+  }
+  await act(async () => { reactRoot.render(React.createElement(Harness)) })
+  await wait(50)
+  return { host, unmount: async () => { await act(async () => reactRoot.unmount()); host.remove() } }
+}
+const bands = (h) => [...h.querySelectorAll('.pack-shelf .pack-band')].map((b) => b.textContent)
+const counts = (h) => [...h.querySelectorAll('.pack-shelf .shelf-count')].map((b) => b.textContent)
+const pressed = (h) => [...h.querySelectorAll('.pack-shelf .shelf-pack')].map((b) => b.getAttribute('aria-pressed') === 'true')
+const btn = (h, re) => [...h.querySelectorAll('button')].find((b) => re.test(b.textContent))
+const click = async (el) => { await act(async () => { el.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true })) }) }
+
+// ---------- le composant ----------
+const sp = (props) => renderToStaticMarkup(React.createElement(PackShelf, { category: catalog.categoryMap[5], selected: 'main', onSelect: () => {}, ...props }))
+ok('étagère : 3 boosters au plus', SHELF_MAX === 3)
+ok('étagère : avec 0 ou 1 paquet, rien (la page garde son grand paquet)', sp({ packs: [] }) === '' && sp({ packs: [{ key: 'main', name: 'Standard', glow: 'none', count: 3 }] }) === '')
+const three = sp({ packs: [{ key: 'main', name: 'Standard', glow: 'none', count: 10 }, { key: 't21', name: 'Silver', glow: 'silver', count: 2 }, { key: 't22', name: 'Art Rare assuré', glow: 'purple', count: 1 }] })
+ok('étagère : 3 paquets, chacun avec son nom sur la bande, son halo, son stock (×10, ×2, ×1) et un libellé lisible aux lecteurs d\'écran', (three.match(/class="shelf-pack/g) || []).length === 3 && /Silver<\/text>/.test(three) && /Art Rare assuré<\/text>/.test(three) && /glow-silver/.test(three) && /glow-purple/.test(three) && /×10/.test(three) && /×2/.test(three) && /×1/.test(three) && /aria-label="Booster Silver, 2 en stock"/.test(three))
+ok('étagère : le paquet choisi est marqué (aria-pressed) et seul lui', /class="shelf-pack on" aria-pressed="true"/.test(three) && (three.match(/aria-pressed="true"/g) || []).length === 1)
+ok('étagère : un paquet vide est éteint (sans halo), les boutons sont désactivés quand une ouverture est en cours', !/glow-gold/.test(sp({ packs: [{ key: 'main', name: 'Standard', glow: 'gold', count: 0 }, { key: 't21', name: 'Silver', glow: 'none', count: 2 }] })) && /dim/.test(sp({ packs: [{ key: 'main', name: 'Standard', glow: 'none', count: 0 }, { key: 't21', name: 'Silver', glow: 'none', count: 2 }] })) && (sp({ packs: [{ key: 'main', name: 'S', glow: 'none', count: 1 }, { key: 't1', name: 'T', glow: 'none', count: 1 }], disabled: true }).match(/disabled=""/g) || []).length === 2)
+
+// ---------- la page ----------
+{
+  const m = await mountPage(base)
+  ok('un seul booster (rien d\'autre en stock) : le grand paquet comme avant, pas d\'étagère, bouton « Ouvrir un booster »', !m.host.querySelector('.pack-shelf') && !!m.host.querySelector('.pack-button') && !!btn(m.host, /^Ouvrir un booster$/) && /10 boosters prêts/.test(text(m.host)))
+  await m.unmount()
+}
+{
+  const m = await mountPage({ ...base, booster_types: [silver, art, forSale] })
+  ok('Standard + 2 autres boosters en stock : 3 paquets côte à côte, avec leur nom sur la bande et leur stock', bands(m.host).join('|') === 'Standard|Silver|Art Rare assuré' && counts(m.host).join('|') === '×10|×2|×1' && !m.host.querySelector('.pack-button'))
+  ok('les halos de chaque booster : aucun, argenté, violet', ['', 'glow-silver', 'glow-purple'].every((c, i) => (c ? m.host.querySelectorAll('.pack-shelf .pack-wrap')[i].className.includes(c) : !m.host.querySelectorAll('.pack-shelf .pack-wrap')[i].className.includes('glow'))))
+  ok('par défaut le booster du stock gratuit est choisi : « Ouvrir un booster », 10 boosters prêts', pressed(m.host).join() === 'true,false,false' && !!btn(m.host, /^Ouvrir un booster$/) && /10 boosters prêts/.test(text(m.host)) && /Booster « Chattrapez les tous ! »/.test(text(m.host)))
+  ok('« Autres boosters » ne répète pas les paquets déjà visibles ; il garde ceux qui sont à acheter (Bronze)', (() => { const list = m.host.querySelector('.extra-boosters'); return !!list && /Bronze/.test(list.textContent) && !/Silver|Art Rare assuré/.test(list.textContent) })())
+  await click(m.host.querySelectorAll('.pack-shelf .shelf-pack')[1])
+  ok('toucher le paquet Silver le choisit : titre « Booster Silver », 2 boosters prêts, 5 cartes, bouton « Ouvrir un booster Silver »', pressed(m.host).join() === 'false,true,false' && /Booster Silver « Chattrapez les tous ! »/.test(text(m.host)) && /2 boosters prêts/.test(text(m.host)) && /5 cartes/.test(text(m.host)) && !!btn(m.host, /^Ouvrir un booster Silver$/))
+  opened.length = 0
+  await click(btn(m.host, /^Ouvrir un booster Silver$/)); await wait(30)
+  ok('« Ouvrir un booster Silver » ouvre bien un Silver (booster de stock n°21), pas le Standard', opened.length === 1 && opened[0][0] === 'type' && opened[0][1] === 21)
+  await wait(900)
+  await click(m.host.querySelectorAll('.pack-shelf .shelf-pack')[2])
+  ok('toucher « Art Rare assuré » : 1 booster prêt (singulier), bouton adapté', pressed(m.host).join() === 'false,false,true' && /1 booster prêt/.test(text(m.host)) && !!btn(m.host, /^Ouvrir un booster Art Rare assuré$/))
+  await click(m.host.querySelectorAll('.pack-shelf .shelf-pack')[0])
+  opened.length = 0
+  await click(btn(m.host, /^Ouvrir un booster$/)); await wait(30)
+  ok('revenir au premier paquet : « Ouvrir un booster » ouvre le booster du stock gratuit', opened.length === 1 && opened[0][0] === 'main')
+  await m.unmount()
+}
+{
+  const m = await mountPage({ ...base, booster_types: [silver, art, legende, forSale] })
+  ok('plus de 2 autres boosters en stock : 3 paquets visibles au plus (Standard, Silver, Art Rare assuré)', bands(m.host).join('|') === 'Standard|Silver|Art Rare assuré' && m.host.querySelectorAll('.pack-shelf .shelf-pack').length === 3)
+  ok('le 4e (Légende, 4 en stock) n\'est pas perdu : il est dans « Autres boosters », avec son bouton Ouvrir', (() => { const list = m.host.querySelector('.extra-boosters'); return /Légende/.test(list.textContent) && !!list.querySelector('button[aria-label="Ouvrir un booster Légende"]') })())
+  await m.unmount()
+}
+{
+  const m = await mountPage({ ...base, boosters: 0, bonus_boosters: 0, booster_types: [silver] })
+  ok('stock gratuit vide mais un Silver en stock : le Silver est choisi d\'office, le paquet vide est éteint, le bouton ouvre le Silver', pressed(m.host).join() === 'false,true' && m.host.querySelectorAll('.pack-shelf .pack-wrap')[0].className.includes('dim') && !!btn(m.host, /^Ouvrir un booster Silver$/) && btn(m.host, /^Ouvrir un booster Silver$/).disabled === false)
+  await m.unmount()
+  const m2 = await mountPage({ ...base, boosters: 0, bonus_boosters: 0, booster_types: [] })
+  ok('plus rien en stock : un seul paquet éteint, bouton d\'ouverture désactivé, « Aucun booster pour le moment »', !m2.host.querySelector('.pack-shelf') && btn(m2.host, /^Ouvrir un booster$/).disabled === true && /Aucun booster pour le moment/.test(text(m2.host)))
+  await m2.unmount()
+}
+{
+  const member = { ...base, standard_booster: { id: 9, name: 'OneMore', glow: 'gold' }, subscription: { enabled: true, active: true, name: 'OneMore', booster_name: 'OneMore' }, booster_types: [silver] }
+  const m = await mountPage(member)
+  ok('membre Pro : son paquet « OneMore » avec halo doré est le premier de l\'étagère, choisi par défaut ; bouton « Ouvrir un booster OneMore »', bands(m.host)[0] === 'OneMore' && m.host.querySelectorAll('.pack-shelf .pack-wrap')[0].className.includes('glow-gold') && pressed(m.host)[0] === true && !!btn(m.host, /^Ouvrir un booster OneMore$/) && /Booster OneMore « Chattrapez/.test(text(m.host)))
+  await m.unmount()
+}
+{
+  const m = await mountPage({ ...base, booster_types: [silver] })
+  await click(m.host.querySelectorAll('.pack-shelf .shelf-pack')[1])
+  await act(async () => { setExternal({ ...base, booster_types: [{ ...silver, quantity: 0 }] }) })
+  ok('le booster choisi vient d\'être ouvert (plus aucun en stock) : retour automatique au premier paquet, plus d\'étagère', !m.host.querySelector('.pack-shelf') && !!btn(m.host, /^Ouvrir un booster$/) && !/Booster Silver/.test(text(m.host)))
+  await m.unmount()
+}
+
+if (bad) { console.error(`\n${bad} ÉCHEC(S)`); process.exit(1) }
+console.log('\nÉtagère de boosters : tous les contrôles sont passés.')
+process.exit(0)
