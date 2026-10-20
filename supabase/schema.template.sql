@@ -823,8 +823,9 @@ $$;
 -- Même pondération que les boosters normaux : poids d'une carte = taille de série ^ exposant.
 -- (jit = off : le plan de ces requêtes est jugé coûteux par PostgreSQL, qui le compilerait à chaque appel pour ~35 ms de plus)
 drop function if exists public.{{P}}draw_rarity(text, int);
+drop function if exists public.{{P}}draw_rarity(text, int, int[]);
 create or replace function public.{{P}}draw_rarity(
-  p_rarity text, p_category int, out o_type int, out o_base text, out o_series int, out o_number int
+  p_rarity text, p_category int, p_exclude int[] default '{}', out o_type int, out o_base text, out o_series int, out o_number int
 )
 language plpgsql security definer set search_path = public set jit = off as $$
 declare
@@ -862,6 +863,7 @@ begin
     where ty.category_id = p_category
       and (rar.kind in ('unique', 'alpha', 'omega') or c.rarity_id = p_rarity)
       and (rar.kind <> 'unique' or c.numbered >= 1)   -- pas d'Unique sur une rareté sans numéro visible
+      and not (ty.id = any(coalesce(p_exclude, '{}'::int[])))   -- jamais un type déjà tiré dans ce booster
   )
   select array_agg(q.type_id order by q.type_id, q.base, q.m), array_agg(q.base order by q.type_id, q.base, q.m),
          array_agg(q.m order by q.type_id, q.base, q.m), array_agg(q.avail order by q.type_id, q.base, q.m),
@@ -1153,6 +1155,7 @@ declare
   v_new boolean;
   v_base text;
   res  jsonb := '[]'::jsonb;
+  v_excl int[] := '{}';   -- types déjà tirés dans ce booster : jamais deux fois la même carte (sauf s'il n'y a plus d'autre carte)
 begin
   for gc in select rarity_id, quantity from public.{{P}}golden_contents order by rarity_id loop
     for q in 1 .. gc.quantity loop
@@ -1160,13 +1163,17 @@ begin
       while t2 < 10 loop
         t2 := t2 + 1;
         select d2.o_type, d2.o_base, d2.o_series, d2.o_number into tid, v_base, m, num
-        from public.{{P}}draw_rarity(gc.rarity_id, p_cat) d2;
+        from public.{{P}}draw_rarity(gc.rarity_id, p_cat, v_excl) d2;
+        if tid is null and cardinality(v_excl) > 0 then   -- plus de carte différente : un doublon plutôt qu'un booster incomplet
+          select d2.o_type, d2.o_base, d2.o_series, d2.o_number into tid, v_base, m, num from public.{{P}}draw_rarity(gc.rarity_id, p_cat) d2;
+        end if;
         exit when tid is null;
         v_new := not public.{{P}}owns_card_rarity(p_uid, tid, public.{{P}}rarity_id(num, m, tid, v_base));
         insert into public.{{P}}cards (type_id, base_rarity, series, number, owner_id) values (tid, v_base, m, num, p_uid)
         on conflict (type_id, base_rarity, series, number) do nothing;
         get diagnostics rows = row_count;
         if rows = 1 then
+          v_excl := array_append(v_excl, tid);
           if v_new then perform public.{{P}}auto_place_album(p_uid, tid, v_base, m, num); end if;
           res := res || jsonb_build_array(jsonb_build_object(
             'type_id', tid, 'base_rarity', v_base, 'series', m, 'number', num, 'rarity_id', public.{{P}}rarity_id(num, m, tid, v_base), 'is_new', v_new
@@ -1183,7 +1190,10 @@ begin
     while t2 < 10 loop
       t2 := t2 + 1;
       select d2.o_type, d2.o_base, d2.o_series, d2.o_number into tid, v_base, m, num
-      from public.{{P}}draw_rarity('unique', p_cat) d2;
+      from public.{{P}}draw_rarity('unique', p_cat, v_excl) d2;
+      if tid is null and cardinality(v_excl) > 0 then
+        select d2.o_type, d2.o_base, d2.o_series, d2.o_number into tid, v_base, m, num from public.{{P}}draw_rarity('unique', p_cat) d2;
+      end if;
       exit when tid is null;
       v_new := not public.{{P}}owns_card_rarity(p_uid, tid, public.{{P}}rarity_id(num, m, tid, v_base));
       insert into public.{{P}}cards (type_id, base_rarity, series, number, owner_id) values (tid, v_base, m, num, p_uid)
@@ -1505,7 +1515,9 @@ declare
   n_cards   int;
   e         double precision := coalesce(public.{{P}}cfg('rarity_exponent'), 0)::double precision;
   v_uid     text;
-  v_seen    jsonb := '{}'::jsonb;
+  v_seen    jsonb := '{}'::jsonb;   -- pour CHAQUE rareté : la liste des types déjà tirés dans ce booster (toutes raretés confondues)
+  v_drawn   jsonb := '[]'::jsonb;   -- types déjà tirés dans ce booster
+  v_seen_r  jsonb := '{}'::jsonb;   -- repli : par rareté, les types déjà tirés de CETTE rareté
   v_key     text;
   res       jsonb := '[]'::jsonb;
   got       int := 0;
@@ -1520,9 +1532,12 @@ begin
   while got < n_cards and tries < n_cards * 25 loop
     tries := tries + 1;
     tid := null; v_base := null; m := null;
-    -- La carte numéro got+1 suit la répartition du booster ; une carte déjà tirée de la même rareté est écartée
+    -- La carte numéro got+1 suit la répartition du booster ; une carte (un type) déjà tirée dans ce booster est écartée, quelle que soit sa rareté
     select ps.type_id, ps.base, ps.g into tid, v_base, m from public.{{P}}pick_series(p_cat, p_btype, got + 1, e, v_seen) ps;
-    if tid is null and v_seen <> '{}'::jsonb then   -- plus assez de cartes différentes dans cette rareté : un doublon plutôt qu'un booster incomplet
+    if tid is null and got > 0 then   -- aucun type nouveau n'a de carte de cette rareté (très peu de types) : au moins une carte différente de celles déjà tirées de cette rareté
+      select ps.type_id, ps.base, ps.g into tid, v_base, m from public.{{P}}pick_series(p_cat, p_btype, got + 1, e, v_seen_r) ps;
+    end if;
+    if tid is null and got > 0 then   -- vraiment plus aucune carte différente de cette rareté : un doublon plutôt qu'un booster incomplet
       select ps.type_id, ps.base, ps.g into tid, v_base, m from public.{{P}}pick_series(p_cat, p_btype, got + 1, e) ps;
     end if;
     if tid is null then   -- aucune rareté possible à cette place : n'importe quelle carte encore disponible
@@ -1549,8 +1564,10 @@ begin
     if v_new then perform public.{{P}}auto_place_album(p_uid, tid, v_base, m, num); end if;   -- nouvelle carte : directement dans l'album
 
     got := got + 1;
+    v_drawn := v_drawn || to_jsonb(tid);
+    v_seen := (select coalesce(jsonb_object_agg(r.id, v_drawn), '{}'::jsonb) from public.{{P}}rarities r);
     v_key := coalesce(case when m = 1 and public.{{P}}number_visible(tid, v_base, 1) then v_uid else v_base end, '');
-    v_seen := jsonb_set(v_seen, array[v_key], coalesce(v_seen -> v_key, '[]'::jsonb) || to_jsonb(tid), true);
+    v_seen_r := jsonb_set(v_seen_r, array[v_key], coalesce(v_seen_r -> v_key, '[]'::jsonb) || to_jsonb(tid), true);
     res := res || jsonb_build_array(jsonb_build_object(
       'type_id', tid, 'base_rarity', v_base, 'series', m, 'number', num, 'rarity_id', public.{{P}}rarity_id(num, m, tid, v_base), 'is_new', v_new));
   end loop;
@@ -2980,7 +2997,8 @@ $$;
 
 -- Tire UNE carte libre : p_mode = plain (rareté p_rarity, sans Alpha/Omega/Unique), numbered (carte à numéro visible du type p_type), anyplain (n'importe
 -- quelle carte ordinaire), alpha, omega, unique. Ne renvoie rien s'il n'y a aucune carte possible.
-create or replace function public.{{P}}gold_pick_card(p_cat int, p_mode text, p_rarity text, p_type int, p_e double precision)
+drop function if exists public.{{P}}gold_pick_card(int, text, text, int, double precision);
+create or replace function public.{{P}}gold_pick_card(p_cat int, p_mode text, p_rarity text, p_type int, p_e double precision, p_exclude int[] default '{}')
 returns table (c_type int, c_base text, c_series int, c_number int)
 language plpgsql volatile security definer set search_path = public set jit = off as $$
 declare r record; k int; v_num int;
@@ -2994,7 +3012,8 @@ begin
                           when 'alpha' then gp.a_free when 'omega' then gp.o_free when 'unique' then (case when gp.g = 1 and gp.vis then 1 else 0 end) else 0 end)
              * power(gp.g::double precision, p_e) as w
       from public.{{P}}gold_pool(p_cat, case when p_mode = 'numbered' then p_type end) gp
-      where case p_mode when 'plain' then gp.base = p_rarity and (gp.g > 1 or not gp.vis)
+      where not (gp.type_id = any(coalesce(p_exclude, '{}'::int[])))   -- jamais une carte (un type) déjà tirée dans ce booster
+        and case p_mode when 'plain' then gp.base = p_rarity and (gp.g > 1 or not gp.vis)
                         when 'numbered' then gp.vis and gp.g > 2
                         when 'anyplain' then (gp.g > 1 or not gp.vis)
                         else true end
@@ -3031,6 +3050,7 @@ declare
   res     jsonb := '[]'::jsonb;
   slot    int; mode text; modes text[]; tries int; ok boolean; c record; v_new boolean; rows int; o record;
   opts    text[]; wts double precision[]; tw double precision; r double precision; acc double precision; pick int; i int; k int;
+  v_excl  int[] := '{}';   -- types déjà tirés dans ce booster
 begin
   select t.category_id into v_cat from public.{{P}}types t where t.id = p_type;
   if v_cat is null then return res; end if;
@@ -3067,7 +3087,10 @@ begin
       modes := array_append(modes, opts[pick]);
       wts[pick] := 0;
     end loop;
-    modes := array_append(modes, 'anyplain'::text);
+    -- « ! » = en dernier recours, un doublon plutôt qu'un booster incomplet : d'abord les options du poste avec une carte jamais tirée dans ce booster, puis les mêmes options autorisant un doublon,
+    -- puis n'importe quelle carte ordinaire (jamais tirée d'abord)
+    modes := modes || array(select m || '!' from unnest(modes) m);
+    modes := array_append(array_append(modes, 'anyplain'::text), 'anyplain!'::text);
 
     ok := false;
     foreach mode in array modes loop
@@ -3075,7 +3098,7 @@ begin
       tries := 0;
       while tries < 5 and not ok loop
         tries := tries + 1;
-        select * into c from public.{{P}}gold_pick_card(v_cat, split_part(mode, ':', 1), nullif(split_part(mode, ':', 2), ''), p_type, e);
+        select * into c from public.{{P}}gold_pick_card(v_cat, split_part(rtrim(mode, '!'), ':', 1), nullif(split_part(rtrim(mode, '!'), ':', 2), ''), p_type, e, case when mode like '%!' then '{}'::int[] else v_excl end);
         exit when c.c_type is null;
         v_new := not public.{{P}}owns_card_rarity(p_uid, c.c_type, public.{{P}}rarity_id(c.c_number, c.c_series, c.c_type, c.c_base));
         insert into public.{{P}}cards (type_id, base_rarity, series, number, owner_id) values (c.c_type, c.c_base, c.c_series, c.c_number, p_uid)
@@ -3083,6 +3106,7 @@ begin
         get diagnostics rows = row_count;
         if rows = 1 then
           ok := true;
+          v_excl := array_append(v_excl, c.c_type);
           if v_new then perform public.{{P}}auto_place_album(p_uid, c.c_type, c.c_base, c.c_series, c.c_number); end if;
           res := res || jsonb_build_array(jsonb_build_object(
             'type_id', c.c_type, 'base_rarity', c.c_base, 'series', c.c_series, 'number', c.c_number,
@@ -3143,7 +3167,7 @@ revoke all on function public.{{P}}rarity_by_name(text) from public, anon, authe
 revoke all on function public.{{P}}type_album_slots(int) from public, anon, authenticated;
 revoke all on function public.{{P}}check_type_reward(uuid, int) from public, anon, authenticated;
 revoke all on function public.{{P}}gold_pool(int, int) from public, anon, authenticated;
-revoke all on function public.{{P}}gold_pick_card(int, text, text, int, double precision) from public, anon, authenticated;
+revoke all on function public.{{P}}gold_pick_card(int, text, text, int, double precision, int[]) from public, anon, authenticated;
 revoke all on function public.{{P}}draw_gold_reward(uuid, int) from public, anon, authenticated;
 revoke all on function public.{{P}}gold_rewards_backfill() from public, anon, authenticated;
 revoke all on function public.{{P}}open_gold_reward(bigint) from public, anon;
@@ -4127,7 +4151,7 @@ revoke all on function public.{{P}}sync(uuid) from public, anon, authenticated;
 revoke all on function public.{{P}}settle_due() from public, anon, authenticated;
 revoke all on function public.{{P}}status_json(public.{{P}}profiles) from public, anon, authenticated;
 revoke all on function public.{{P}}cards_counter() from public, anon, authenticated;
-revoke all on function public.{{P}}draw_rarity(text, int) from public, anon, authenticated;
+revoke all on function public.{{P}}draw_rarity(text, int, int[]) from public, anon, authenticated;
 revoke all on function public.{{P}}draw_golden(uuid, int) from public, anon, authenticated;
 revoke all on function public.{{P}}owns_card_rarity(uuid, int, text) from public, anon, authenticated;
 revoke all on function public.{{P}}series_rewards_backfill() from public, anon, authenticated;

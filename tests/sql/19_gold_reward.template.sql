@@ -156,7 +156,7 @@ select pg_temp.expect('les anciens réglages de poids du Gold ont disparu : tout
 select pg_temp.expect('joueur connecté : peut ouvrir et acquitter ; ni tirer, ni créer une récompense, ni lire la table',
   has_function_privilege('authenticated', 'public.{{P}}open_gold_reward(bigint)', 'execute') and has_function_privilege('authenticated', 'public.{{P}}ack_gold_rewards()', 'execute')
   and not has_function_privilege('authenticated', 'public.{{P}}draw_gold_reward(uuid, int)', 'execute') and not has_function_privilege('authenticated', 'public.{{P}}check_type_reward(uuid, int)', 'execute')
-  and not has_function_privilege('authenticated', 'public.{{P}}gold_pick_card(int, text, text, int, double precision)', 'execute')
+  and not has_function_privilege('authenticated', 'public.{{P}}gold_pick_card(int, text, text, int, double precision, int[])', 'execute')
   and not has_function_privilege('anon', 'public.{{P}}open_gold_reward(bigint)', 'execute') and not has_table_privilege('authenticated', 'public.{{P}}gold_rewards', 'select'));
 
 -- nettoyage
