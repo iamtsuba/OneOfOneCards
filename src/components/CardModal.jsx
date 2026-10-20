@@ -92,7 +92,7 @@ export default function CardModal({ sel, rarity, onClose, onChanged, onRefresh, 
               aria-pressed={favorited} aria-label={favorited ? 'Retirer des favoris' : 'Ajouter aux favoris'}>
               <span aria-hidden="true">{favorited ? '♥' : '♡'}</span> {favorited ? 'Favorite' : 'Mettre en favori'}
             </button>
-            <p className="overlay-hint">{sel.friend ? `Un double de ${sel.ownerName}.${sel.iOwn === true ? ' Tu as déjà une carte de cet emplacement.' : sel.iOwn === false ? ' Cette carte te manque.' : ''} Propose-lui une offre : tes pièces ne sont débitées que si elle est acceptée.` : toneMsg[sel.state]}</p>
+            <p className="overlay-hint">{sel.friend ? `Un double de ${sel.ownerName}.${sel.iOwn === true ? ' Tu as déjà une carte de cet emplacement.' : sel.iOwn === false ? ' Cette carte te manque.' : ''} Propose-lui une offre : tes pièces ne sont débitées que si elle est acceptée.` : `${toneMsg[sel.state] ?? ''}${sel.state === 'taken' && sel.iOwn === true ? ' Tu as déjà une carte de cet emplacement dans ton album.' : sel.state === 'taken' && sel.iOwn === false ? ' Cette carte manque à ton album.' : ''}`}</p>
             {sel.state === 'taken' && (
               <div className="sheet">
                 <section>

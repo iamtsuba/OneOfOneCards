@@ -2370,6 +2370,8 @@ end $$;
 
 -- Mes cartes favorites et leur état actuel (propriétaire, en vente ou non)
 drop function if exists public.{{P}}list_favorites();
+-- Favoris du joueur. i_own : il a déjà une carte de cet emplacement d'album (même type, même rareté affichée) ; is_mine : c'est justement sa carte.
+drop function if exists public.{{P}}list_favorites();
 create or replace function public.{{P}}list_favorites()
 returns table (
   card_type     int,
@@ -2382,7 +2384,9 @@ returns table (
   listing_id    bigint,
   listing_kind  text,
   listing_price int,
-  created_at    timestamptz
+  created_at    timestamptz,
+  is_mine       boolean,
+  i_own         boolean
 )
 language plpgsql security definer set search_path = public as $$
 declare uid uuid := auth.uid();
@@ -2392,7 +2396,9 @@ begin
   select f.type_id, f.base_rarity, f.series, f.number, public.{{P}}rarity_id(f.number, f.series, f.type_id, f.base_rarity),
          c.owner_id, p.username, l.id, l.kind,
          case when l.kind = 'auction' then coalesce(l.current_bid, l.price) else l.price end,
-         f.created_at
+         f.created_at,
+         coalesce(c.owner_id = uid, false),
+         public.{{P}}owns_card_rarity(uid, f.type_id, public.{{P}}rarity_id(f.number, f.series, f.type_id, f.base_rarity))
   from public.{{P}}favorites f
   left join public.{{P}}cards c on c.type_id = f.type_id and c.base_rarity = f.base_rarity and c.series = f.series and c.number = f.number
   left join public.{{P}}profiles p on p.id = c.owner_id

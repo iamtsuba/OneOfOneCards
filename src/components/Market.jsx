@@ -3,6 +3,7 @@ import * as api from '../api'
 import { explain } from '../api'
 import { useGame, useNow, fmt, fmtAgo, fmtClock, fmtCoins } from '../game'
 import Card from './Card'
+import CardModal from './CardModal'
 
 const KINDS = [[null, 'Toutes'], ['auction', 'Enchères'], ['buy_now', 'Achat direct']]
 const SORTS = [['ending', 'Fin proche'], ['price', 'Prix croissant'], ['rarity', 'Plus rares'], ['recent', 'Récentes']]
@@ -175,7 +176,7 @@ export default function Market({ initialView = 'browse', initialListingId = null
       )}
 
       {view === 'favorites' && (
-        <FavoritesPanel rows={favorites} loading={loading} rarityMap={rarityMap} catalog={catalog} reload={load} onOpenListing={(id) => { setView('browse'); setSelectedId(id) }} />
+        <FavoritesPanel rows={favorites} loading={loading} rarityMap={rarityMap} catalog={catalog} reload={load} onOpenListing={(id) => { setView('browse'); setSelectedId(id) }} onGoMarket={() => setView('browse')} />
       )}
 
       {selected && (
@@ -278,9 +279,12 @@ function OffersPanel({ rows, loading, rarityMap, catalog, status, setStatus, rel
   )
 }
 
-function FavoritesPanel({ rows, loading, rarityMap, catalog, reload, onOpenListing }) {
+// Favoris : pour chaque carte, ce qu'il en est (en vente, chez un joueur, encore dans les boosters), si elle manque encore à mon album (« Manque à ton album » / « Déjà dans ton album »)
+// et, quand un autre joueur la possède, un bouton « Faire une offre » (même formulaire que depuis la collection).
+export function FavoritesPanel({ rows, loading, rarityMap, catalog, reload, onOpenListing, onGoMarket = () => {} }) {
   const [busyKey, setBusyKey] = useState(null)
   const [error, setError] = useState('')
+  const [sel, setSel] = useState(null)   // carte dont on prépare l'offre
 
   async function unfav(r) {
     const key = `${r.card_type}-${r.card_series}-${r.card_number}`
@@ -317,6 +321,10 @@ function FavoritesPanel({ rows, loading, rarityMap, catalog, reload, onOpenListi
                 <div className="mine-card"><Card typeId={r.card_type} base={r.card_base} series={r.card_series} number={r.card_number} rarity={rarityMap[r.rarity_id]} size="sm" /></div>
                 <div className="mine-text">
                   <strong>{catalog.typeMap[r.card_type]?.name}{catalog.cardRef(r.card_type, r.card_base, r.card_number, r.card_series)}</strong>
+                  {/* Est-ce que cet emplacement de mon album est encore vide ? (information : une offre reste toujours possible) */}
+                  {r.is_mine ? <small className="friend-tag owned">C’est ta carte</small>
+                    : r.i_own === true ? <small className="friend-tag owned">Déjà dans ton album</small>
+                    : r.i_own === false ? <small className="friend-tag missing">Manque à ton album</small> : null}
                   {r.listing_id ? (
                     <span>En vente à {fmtCoins(r.listing_price)} ({r.listing_kind === 'auction' ? 'enchère' : 'achat direct'}).</span>
                   ) : r.owner_name ? (
@@ -326,6 +334,11 @@ function FavoritesPanel({ rows, loading, rarityMap, catalog, reload, onOpenListi
                   )}
                   <div className="row">
                     {r.listing_id && <button className="btn accent sm" onClick={() => onOpenListing(r.listing_id)}>Voir l’annonce</button>}
+                    {r.owner_id && !r.is_mine && (
+                      <button className={`btn sm${r.listing_id ? ' ghost' : ' accent'}`} onClick={() => setSel({ typeId: r.card_type, base: r.card_base, series: r.card_series, number: r.card_number, rarityId: r.rarity_id, state: 'taken', ownerName: r.owner_name, favorited: true, iOwn: r.i_own })}>
+                        Faire une offre
+                      </button>
+                    )}
                     <button className="btn ghost sm" disabled={busyKey === key} onClick={() => unfav(r)}>Retirer des favoris</button>
                   </div>
                 </div>
@@ -334,6 +347,7 @@ function FavoritesPanel({ rows, loading, rarityMap, catalog, reload, onOpenListi
           )
         })}
       </ul>
+      {sel && <CardModal sel={sel} rarity={rarityMap[sel.rarityId]} onClose={() => setSel(null)} onChanged={() => setSel(null)} onRefresh={reload} goMarket={(v) => { setSel(null); onGoMarket(v) }} />}
     </>
   )
 }
