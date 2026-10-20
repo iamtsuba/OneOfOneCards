@@ -258,6 +258,7 @@ export function explain(e) {
   if (m.includes('invalid_booster_slots')) return 'Répartition invalide : chaque carte a au moins une rareté, avec un poids positif, sans doublon.'
   if (m.includes('invalid_booster')) return 'Booster invalide : nom de 1 à 40 caractères, 1 à 10 cartes, couleur, prix entier ou vide.'
   if (m.includes('booster_is_standard')) return 'Le booster Standard ne peut pas être supprimé.'
+  if (m.includes('open_timeout')) return 'L’ouverture prend trop de temps. Ton booster a peut-être été ouvert : vérifie ton stock et ta collection, puis réessaie.'
   if (m.includes('invalid_invite')) return 'Ce lien d’invitation n’est plus valide : demande à ton ami de t’en envoyer un nouveau.'
   if (m.includes('inviter_full')) return 'Ton ami a atteint la limite de 200 amis : vous ne pouvez pas devenir amis pour l’instant.'
   if (m.includes('booster_protected')) return 'Ce booster est la récompense d’une carte complétée : il ne peut ni être supprimé ni perdre ce rôle (donne ce rôle à un autre booster à la place).'

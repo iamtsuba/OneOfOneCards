@@ -1348,7 +1348,7 @@ $$;
 -- Tire une série (type, rareté de base, numéro de série) pour la carte numéro p_pos du booster p_btype ; p_btype nul = toutes les cartes restantes.
 -- p_seen = les cartes déjà tirées dans ce booster par rareté ({"rare": [3, 8]}) : elles sont écartées pour les cartes de la même rareté.
 -- Ne renvoie aucune ligne s'il n'y a plus de carte possible.
-create or replace function public.{{P}}pick_series(p_cat int, p_btype int, p_pos int, p_e double precision, p_seen jsonb default '{}'::jsonb)
+create or replace function public.{{P}}pick_series_slow(p_cat int, p_btype int, p_pos int, p_e double precision, p_seen jsonb default '{}'::jsonb)
 returns table (type_id int, base text, g int)
 language plpgsql volatile security definer set search_path = public set jit = off as $$
 declare v_opt text; v_uid text;
@@ -1394,6 +1394,98 @@ begin
   where t.tw > 0 and z.cs > t.rr * t.tw
   order by z.cs, z.type_id, z.base, z.g
   limit 1;
+end $$;
+
+-- Pioche RAPIDE (exposant de rareté 0, tirage d'un type de booster) : même résultat que pick_series_slow, sans énumérer les centaines de milliers de séries.
+--  1. Rareté : pour chaque (type, rareté de base), cartes libres = n(n+1)/2 - cartes déjà tirées (n = plus grande série) ; la série 1 d'une rareté à numéro visible compte pour « Unique ».
+--  2. Carte : (type, rareté) tiré au prorata des cartes libres, puis la série au prorata de ses cartes libres, par recherche dichotomique sur le cumul (j - tirées_j).
+create or replace function public.{{P}}pick_cfg(p_cat int)
+returns table (tid int, base text, smax int, uniq_free int, base_free bigint)
+language sql stable security definer set search_path = public as $$
+  select c.tid, c.base, c.smax,
+         (case when c.numbered >= 1 and 1 > coalesce(t1.taken, 0) then 1 else 0 end),
+         c.smax::bigint * (c.smax + 1) / 2 - coalesce(tt.total, 0)
+           - (case when c.numbered >= 1 and 1 > coalesce(t1.taken, 0) then 1 else 0 end)
+  from (select ty.id as tid, cf.rarity_id as base, cf.smax, cf.numbered
+        from public.{{P}}types ty cross join lateral public.{{P}}type_config(ty.id) cf where ty.category_id = p_cat) c
+  left join (select st.type_id, st.base_rarity, sum(st.taken) as total from public.{{P}}series_taken st group by st.type_id, st.base_rarity) tt
+         on tt.type_id = c.tid and tt.base_rarity = c.base
+  left join public.{{P}}series_taken t1 on t1.type_id = c.tid and t1.base_rarity = c.base and t1.series = 1
+$$;
+revoke all on function public.{{P}}pick_cfg(int) from public, anon, authenticated;
+
+create or replace function public.{{P}}pick_series_fast(p_cat int, p_btype int, p_pos int, p_seen jsonb default '{}'::jsonb)
+returns table (type_id int, base text, g int)
+language plpgsql volatile security definer set search_path = public set jit = off as $$
+declare
+  v_uid text; v_opt text; v_tid int; v_base text; v_smax int; v_free bigint; v_uf int;
+  v_r bigint; lo int; hi int; mid int; f bigint; t_mid bigint;
+begin
+  select id into v_uid from public.{{P}}rarities where kind = 'unique' limit 1;
+  -- 1. choix de la rareté (mêmes poids que pick_series_slow)
+  with pool as (
+    select k.base as opt, sum(k.base_free)::bigint as rem from public.{{P}}pick_cfg(p_cat) k
+    where k.base_free > 0 and not (coalesce(p_seen -> k.base, '[]'::jsonb) @> to_jsonb(k.tid)) group by k.base
+    union all
+    select v_uid, sum(k.uniq_free)::bigint from public.{{P}}pick_cfg(p_cat) k
+    where v_uid is not null and k.uniq_free > 0 and not (coalesce(p_seen -> v_uid, '[]'::jsonb) @> to_jsonb(k.tid)) having sum(k.uniq_free) > 0
+  ),
+  wts as (
+    select pool.opt, bs.weight as wt
+    from pool join public.{{P}}booster_type_slots bs on bs.booster_type_id = p_btype and bs.position = p_pos and bs.rarity_id = pool.opt
+    where pool.rem > 0
+  ),
+  pos as (select wts.opt, wts.wt, sum(wts.wt) over (order by wts.opt) as cs from wts where wts.wt > 0),
+  tot as (select sum(pos.wt) as tw, random() as rr from pos)
+  select pos.opt into v_opt
+  from pos cross join tot
+  where tot.tw > 0 and pos.cs > tot.rr * tot.tw
+  order by pos.cs limit 1;
+  if v_opt is null then return; end if;
+
+  -- 2a. Unique : une des cartes 1/1 libres des raretés à numéro visible, au hasard
+  if v_opt = v_uid then
+    select k.tid, k.base into v_tid, v_base from public.{{P}}pick_cfg(p_cat) k
+    where k.uniq_free > 0 and not (coalesce(p_seen -> v_uid, '[]'::jsonb) @> to_jsonb(k.tid))
+    order by random() limit 1;
+    if v_tid is null then return; end if;
+    return query select v_tid, v_base, 1;
+    return;
+  end if;
+
+  -- 2b. (type, rareté) au prorata de ses cartes libres
+  select z.tid, z.base, z.smax, z.base_free, z.uniq_free into v_tid, v_base, v_smax, v_free, v_uf
+  from (select k.*, sum(k.base_free) over (order by k.tid) as cs from public.{{P}}pick_cfg(p_cat) k
+        where k.base = v_opt and k.base_free > 0 and not (coalesce(p_seen -> v_opt, '[]'::jsonb) @> to_jsonb(k.tid))) z
+  cross join (select sum(k.base_free) as tw, random() as rr from public.{{P}}pick_cfg(p_cat) k
+              where k.base = v_opt and k.base_free > 0 and not (coalesce(p_seen -> v_opt, '[]'::jsonb) @> to_jsonb(k.tid))) t
+  where t.tw > 0 and z.cs > t.rr * t.tw
+  order by z.cs, z.tid limit 1;
+  if v_tid is null then return; end if;
+
+  -- 3. série au prorata de ses cartes libres : plus petit g tel que cumul(g) >= r, cumul(g) = g(g+1)/2 - cartes tirées jusqu'à g - (1/1 réservée à Unique)
+  v_r := 1 + floor(random() * v_free)::bigint;
+  lo := 1; hi := v_smax;
+  while lo < hi loop
+    mid := (lo + hi) / 2;
+    select coalesce(sum(st.taken), 0) into t_mid from public.{{P}}series_taken st where st.type_id = v_tid and st.base_rarity = v_base and st.series <= mid;
+    f := mid::bigint * (mid + 1) / 2 - t_mid - v_uf;
+    if f >= v_r then hi := mid; else lo := mid + 1; end if;
+  end loop;
+  return query select v_tid, v_base, lo;
+end $$;
+revoke all on function public.{{P}}pick_series_fast(int, int, int, jsonb) from public, anon, authenticated;
+
+create or replace function public.{{P}}pick_series(p_cat int, p_btype int, p_pos int, p_e double precision, p_seen jsonb default '{}'::jsonb)
+returns table (type_id int, base text, g int)
+language plpgsql volatile security definer set search_path = public set jit = off as $$
+begin
+  -- exposant de rareté 0 (le réglage normal) et type de booster connu : pioche rapide ; sinon l'ancienne pioche, qui énumère toutes les séries
+  if p_btype is not null and coalesce(p_e, 0) = 0 then
+    return query select * from public.{{P}}pick_series_fast(p_cat, p_btype, p_pos, p_seen);
+  else
+    return query select * from public.{{P}}pick_series_slow(p_cat, p_btype, p_pos, p_e, p_seen);
+  end if;
 end $$;
 
 -- Une carte nouvelle (le joueur n'avait rien dans cet emplacement de l'album) est placée d'office dans l'album, à son emplacement

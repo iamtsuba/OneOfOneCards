@@ -16,11 +16,12 @@ globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} 
 
 const json = (v, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
 const opened = []   // ouvertures demandées au serveur
+let openDelay = 0    // temps de réponse simulé du serveur (ms)
 globalThis.fetch = async (url, init) => {
   const u = String(url)
   const body = init?.body ? JSON.parse(init.body) : {}
-  if (u.includes('open_booster_of_type')) { opened.push(['type', body.p_type]); return json({ message: 'ouverture simulée' }, 400) }
-  if (u.includes('open_booster')) { opened.push(['main']); return json({ message: 'ouverture simulée' }, 400) }
+  if (u.includes('open_booster_of_type')) { opened.push(['type', body.p_type]); if (openDelay) await new Promise((r) => setTimeout(r, openDelay)); return json({ message: 'ouverture simulée' }, 400) }
+  if (u.includes('open_booster')) { opened.push(['main']); if (openDelay) await new Promise((r) => setTimeout(r, openDelay)); return json({ message: 'ouverture simulée' }, 400) }
   return json([])
 }
 
@@ -28,7 +29,7 @@ const require = createRequire(import.meta.url)
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const out = mkdtempSync(path.join(root, 'tests', '.out-shelf-'))
 await build({
-  stdin: { contents: "export { default as Boosters, PackShelf, SHELF_MAX } from './src/components/Boosters.jsx'; export { GameContext } from './src/game.js'", resolveDir: root, loader: 'js' },
+  stdin: { contents: "export { default as Boosters, PackShelf, SHELF_MAX, OPEN_TIMING, withTimeout } from './src/components/Boosters.jsx'; export { GameContext } from './src/game.js'", resolveDir: root, loader: 'js' },
   bundle: true, format: 'esm', platform: 'node', jsx: 'automatic', outfile: path.join(out, 'bundle.mjs'),
   external: ['react', 'react-dom', 'react/jsx-runtime', 'react-dom/client'],
   define: { 'import.meta.env': JSON.stringify({ MODE: 'preprod', VITE_APP_ENV: 'preprod', VITE_TABLE_PREFIX: 'pp_o1ocards_' }) }, logLevel: 'silent',
@@ -37,13 +38,14 @@ const React = require('react')
 const { renderToStaticMarkup } = require('react-dom/server')
 const { createRoot } = require('react-dom/client')
 const { act, useState } = React
-const { Boosters, PackShelf, SHELF_MAX, GameContext } = await import(pathToFileURL(path.join(out, 'bundle.mjs')).href)
+const { Boosters, PackShelf, SHELF_MAX, OPEN_TIMING, withTimeout, GameContext } = await import(pathToFileURL(path.join(out, 'bundle.mjs')).href)
 rmSync(out, { recursive: true, force: true })
 
 let bad = 0
 const ok = (name, cond) => { console.log(cond ? 'OK  ' : 'FAIL', name); if (!cond) bad++ }
 const wait = (ms) => act(async () => { await new Promise((r) => setTimeout(r, ms)) })
 const text = (h) => h.textContent.replace(/\s+/g, ' ')
+const until = async (fn, ms = 4000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (fn()) return true; await wait(15) } return fn() }
 
 const silver = { id: 21, name: 'Silver', cards: 5, color: '#c0c0c0', glow: 'silver', price: 50, quantity: 2 }
 const art = { id: 22, name: 'Art Rare assuré', cards: 5, color: '#f59e0b', glow: 'purple', price: null, quantity: 1 }
@@ -135,6 +137,34 @@ ok('étagère : un paquet vide est éteint (sans halo), les boutons sont désact
   await click(m.host.querySelectorAll('.pack-shelf .shelf-pack')[1])
   await act(async () => { setExternal({ ...base, booster_types: [{ ...silver, quantity: 0 }] }) })
   ok('le booster choisi vient d\'être ouvert (plus aucun en stock) : retour automatique au premier paquet, plus d\'étagère', !m.host.querySelector('.pack-shelf') && !!btn(m.host, /^Ouvrir un booster$/) && !/Booster Silver/.test(text(m.host)))
+  await m.unmount()
+}
+
+// ---------- limite d'attente de l'ouverture : plus de paquet figé ----------
+{
+  let unhandled = 0
+  process.on('unhandledRejection', () => { unhandled++ })
+  ok('withTimeout : une réponse rapide passe telle quelle, aucune erreur tardive', (await withTimeout(Promise.resolve(42), 50)) === 42 && (await new Promise((r) => setTimeout(() => r(unhandled === 0), 120))))
+  ok('withTimeout : une réponse trop lente donne « open_timeout » ; une vraie erreur du serveur reste elle-même', await withTimeout(new Promise((r) => setTimeout(r, 200)), 40).then(() => '', (e) => e.message) === 'open_timeout' && await withTimeout(Promise.reject(new Error('pool_empty')), 40).then(() => '', (e) => e.message) === 'pool_empty')
+  ok('la limite par défaut est généreuse (25 secondes) pour ne pas couper une ouverture lente mais normale', OPEN_TIMING.timeout === 25000)
+  OPEN_TIMING.timeout = 250
+  const m = await mountPage(base)
+  openDelay = 800   // le serveur répond, mais bien trop tard
+  opened.length = 0
+  await click(btn(m.host, /^Ouvrir un booster$/))
+  ok('ouverture lancée : le paquet tremble (écran d\'ouverture affiché)', !!document.querySelector('.overlay'))
+  await wait(120)
+  ok('toujours en attente avant la limite : l\'écran d\'ouverture reste (pas de fermeture prématurée)', !!document.querySelector('.overlay'))
+  await until(() => !document.querySelector('.overlay'))
+  ok('passé la limite : l\'écran d\'ouverture se ferme, un message clair s\'affiche (« prend trop de temps »)', !document.querySelector('.overlay') && /L’ouverture prend trop de temps/.test(text(m.host)))
+  ok('le bouton d\'ouverture est de nouveau utilisable (on peut réessayer)', btn(m.host, /^Ouvrir un booster$/).disabled === false)
+  await wait(900)   // la réponse tardive du serveur arrive : elle ne rouvre rien
+  ok('la réponse tardive du serveur ne ressuscite pas l\'écran d\'ouverture', !document.querySelector('.overlay') && opened.length === 1)
+  openDelay = 0
+  opened.length = 0
+  await click(btn(m.host, /^Ouvrir un booster$/)); await wait(60)
+  ok('une ouverture rapide qui échoue côté serveur : fermeture immédiate et message d\'erreur (comportement inchangé)', !document.querySelector('.overlay') && opened.length === 1)
+  OPEN_TIMING.timeout = 25000
   await m.unmount()
 }
 

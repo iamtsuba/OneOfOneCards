@@ -55,6 +55,15 @@ export function CardZoom({ cards, index, rarityMap, catalog, onClose, onMove }) 
   )
 }
 
+// Limite d'attente de l'ouverture : au-delà, le paquet cesse de trembler, un message clair s'affiche et on peut réessayer (au lieu de rester figé).
+// Le serveur peut très bien avoir ouvert le booster entre-temps : le stock est relu pour le vérifier. Durée en millisecondes (les tests la raccourcissent).
+export const OPEN_TIMING = { timeout: 25000 }
+export function withTimeout(promise, ms = OPEN_TIMING.timeout) {
+  let timer
+  const limit = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('open_timeout')), ms) })
+  return Promise.race([promise, limit]).finally(() => clearTimeout(timer))
+}
+
 // Étagère : jusqu'à 3 boosters visibles à la fois (le booster du stock gratuit, puis les autres boosters que le joueur a en stock). On touche un paquet pour le choisir.
 // packs = [{ key, name, glow, count }] ; selected = clé du paquet choisi. Avec un seul paquet, l'affichage reste celui d'un grand paquet.
 export const SHELF_MAX = 3
@@ -222,7 +231,7 @@ export default function Boosters({ goCollection }) {
     setOverlay({ phase: 'shake', categoryId: (goldCategory ?? category).id, golden: isPack, gold: isGold, label: shakeBooster?.name, glow: shakeBooster?.glow, color: shakeBooster?.color })
     const t0 = Date.now()
     try {
-      const res = isType ? await api.openBoosterType(rewardId) : isGold ? await api.openGoldReward(rewardId) : isPack ? await api.openGoldenPack() : await api.openBooster()
+      const res = await withTimeout(isType ? api.openBoosterType(rewardId) : isGold ? api.openGoldReward(rewardId) : isPack ? api.openGoldenPack() : api.openBooster())
       setStatus(res.status)
       // Les cartes les plus rares sont révélées en dernier
       const cards = [...res.cards].sort(
