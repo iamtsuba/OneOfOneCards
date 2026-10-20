@@ -35,8 +35,9 @@ export const listCard = ({ type, base, series, number, kind, price = null }) =>
 export const cancelListing = (id) => rpc('cancel_listing', { p_id: id })
 export const buyNow = (id) => rpc('buy_now', { p_id: id })
 export const placeBid = (id, amount) => rpc('place_bid', { p_id: id, p_amount: amount })
-export const marketList = ({ kind = null, sort = 'ending', limit = 60, offset = 0 } = {}) =>
-  rpc('market_list', { p_kind: kind, p_sort: sort, p_limit: limit, p_offset: offset })
+// Filtres (rareté affichée, seulement les cartes qui manquent à mon album) : envoyés seulement quand ils sont actifs (un serveur plus ancien répond encore à l'appel de base)
+export const marketList = ({ kind = null, sort = 'ending', limit = 60, offset = 0, rarity = null, missing = false } = {}) =>
+  rpc('market_list', { p_kind: kind, p_sort: sort, p_limit: limit, p_offset: offset, ...(rarity ? { p_rarity: rarity } : {}), ...(missing ? { p_missing: true } : {}) })
 export const marketMine = () => rpc('market_mine')
 
 // Album : un exemplaire numéroté choisi par carte (type) et par rareté

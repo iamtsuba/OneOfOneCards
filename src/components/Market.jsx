@@ -14,6 +14,8 @@ export default function Market({ initialView = 'browse', initialListingId = null
   const [view, setView] = useState(initialView)
   const [kind, setKind] = useState(null)
   const [sort, setSort] = useState('ending')
+  const [rarity, setRarity] = useState('')      // filtre par rareté affichée ('' = toutes)
+  const [missing, setMissing] = useState(false) // seulement les cartes qui manquent à mon album
   const [browse, setBrowse] = useState([])
   const [mine, setMine] = useState([])
   const [offers, setOffers] = useState([])
@@ -30,7 +32,7 @@ export default function Market({ initialView = 'browse', initialListingId = null
     lastLoad.current = Date.now()
     try {
       if (view === 'browse') {
-        const rows = await api.marketList({ kind, sort, limit: 60 })
+        const rows = await api.marketList({ kind, sort, limit: 60, rarity, missing })
         if (rows[0]?.server_now) setSkew(new Date(rows[0].server_now).getTime() - Date.now())
         setBrowse(rows)
       } else if (view === 'mine') {
@@ -48,7 +50,7 @@ export default function Market({ initialView = 'browse', initialListingId = null
     } finally {
       setLoading(false)
     }
-  }, [view, kind, sort])
+  }, [view, kind, sort, rarity, missing])
 
   useEffect(() => { setLoading(true); load() }, [load])
   useEffect(() => { refreshStatus().catch(() => {}) }, [refreshStatus])
@@ -97,50 +99,8 @@ export default function Market({ initialView = 'browse', initialListingId = null
       {error && <p className="msg error" role="alert">{error}</p>}
 
       {view === 'browse' && (
-        <>
-          <div className="chips" role="group" aria-label="Type d’annonce">
-            {KINDS.map(([k, label]) => (
-              <button key={String(k)} className={`chip ${kind === k ? 'on' : ''}`} onClick={() => setKind(k)} aria-pressed={kind === k}>{label}</button>
-            ))}
-          </div>
-          <div className="toolbar">
-            <span className="muted">{loading ? 'Chargement…' : `${fmt(browse.length)} annonce${browse.length > 1 ? 's' : ''}`}</span>
-            <label className="select">
-              <span className="sr">Trier</span>
-              <select value={sort} onChange={(e) => setSort(e.target.value)}>
-                {SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
-            </label>
-          </div>
-
-          {!loading && browse.length === 0 ? (
-            <div className="empty">
-              <p><strong>Aucune annonce pour l’instant.</strong></p>
-              <p>Ouvre ta collection, choisis une carte à toi et mets-la en vente.</p>
-            </div>
-          ) : (
-            <ul className="tiles">
-              {browse.map((r) => {
-                const ms = left(r)
-                return (
-                  <li key={r.listing_id}>
-                    <button className="tile" onClick={() => setSelectedId(r.listing_id)}>
-                      <Card typeId={r.card_type} base={r.card_base} series={r.card_series} number={r.card_number} rarity={rarityMap[r.rarity_id]} size="sm" />
-                      <span className="tile-name">{catalog.typeMap[r.card_type]?.name}</span>
-                      <span className="tile-kind">{r.kind === 'auction' ? 'Enchère' : 'Achat direct'}</span>
-                      <span className="tile-price">{fmtCoins(r.price)}</span>
-                      {r.kind === 'auction' && ms !== null && (
-                        <span className={`tile-time ${ms < 60000 ? 'urgent' : ''}`}>{fmtClock(ms)}</span>
-                      )}
-                      {r.is_mine && <span className="tile-flag">Ta vente</span>}
-                      {r.is_leading && <span className="tile-flag good">Tu es en tête</span>}
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </>
+        <BrowsePanel rows={browse} loading={loading} kind={kind} setKind={setKind} sort={sort} setSort={setSort} rarity={rarity} setRarity={setRarity} missing={missing} setMissing={setMissing}
+          rarityMap={rarityMap} catalog={catalog} left={left} onSelect={setSelectedId} />
       )}
 
       {view === 'mine' && (
@@ -217,6 +177,79 @@ function describe(r, ms) {
 }
 
 const OFFER_STATUS_LABEL = { pending: 'En attente', accepted: 'Acceptée', declined: 'Refusée', cancelled: 'Annulée' }
+
+// Liste des annonces à vendre : type d'annonce, filtre « Non possédées » (cartes dont l'emplacement d'album manque encore), filtre par rareté, tri ; une pastille « Non possédée » sur chaque
+// annonce dont la carte n'est pas encore à moi. Les filtres sont appliqués par le serveur avant la limite d'annonces.
+export function BrowsePanel({ rows, loading, kind, setKind, sort, setSort, rarity, setRarity, missing, setMissing, rarityMap, catalog, left, onSelect }) {
+  const rarities = Object.values(rarityMap ?? {}).sort((a, b) => b.sort_order - a.sort_order)
+  const filtered = missing || !!rarity
+  return (
+    <>
+      <div className="chips wrap" role="group" aria-label="Filtres des annonces">
+        {KINDS.map(([k, label]) => (
+          <button key={String(k)} className={`chip ${kind === k ? 'on' : ''}`} onClick={() => setKind(k)} aria-pressed={kind === k}>{label}</button>
+        ))}
+        <button className={`chip ${missing ? 'on' : ''}`} onClick={() => setMissing(!missing)} aria-pressed={missing}>Non possédées</button>
+      </div>
+      <div className="toolbar">
+        <span className="muted">{loading ? 'Chargement…' : `${fmt(rows.length)} annonce${rows.length > 1 ? 's' : ''}`}</span>
+        <span className="toolbar-selects">
+          <label className="select">
+            <span className="sr">Filtrer par rareté</span>
+            <select value={rarity} onChange={(e) => setRarity(e.target.value)}>
+              <option value="">Toutes les raretés</option>
+              {rarities.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </label>
+          <label className="select">
+            <span className="sr">Trier</span>
+            <select value={sort} onChange={(e) => setSort(e.target.value)}>
+              {SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </label>
+        </span>
+      </div>
+
+      {!loading && rows.length === 0 ? (
+        <div className="empty">
+          {filtered ? (
+            <>
+              <p><strong>Aucune annonce ne correspond à ces filtres.</strong></p>
+              <p><button type="button" className="btn ghost sm" onClick={() => { setMissing(false); setRarity('') }}>Retirer les filtres</button></p>
+            </>
+          ) : (
+            <>
+              <p><strong>Aucune annonce pour l’instant.</strong></p>
+              <p>Ouvre ta collection, choisis une carte à toi et mets-la en vente.</p>
+            </>
+          )}
+        </div>
+      ) : (
+        <ul className="tiles">
+          {rows.map((r) => {
+            const ms = left(r)
+            return (
+              <li key={r.listing_id}>
+                <button className="tile" onClick={() => onSelect(r.listing_id)}>
+                  <Card typeId={r.card_type} base={r.card_base} series={r.card_series} number={r.card_number} rarity={rarityMap[r.rarity_id]} size="sm" />
+                  <span className="tile-name">{catalog.typeMap[r.card_type]?.name}</span>
+                  <span className="tile-kind">{r.kind === 'auction' ? 'Enchère' : 'Achat direct'}</span>
+                  <span className="tile-price">{fmtCoins(r.price)}</span>
+                  {r.kind === 'auction' && ms !== null && (
+                    <span className={`tile-time ${ms < 60000 ? 'urgent' : ''}`}>{fmtClock(ms)}</span>
+                  )}
+                  {r.is_mine && <span className="tile-flag">Ta vente</span>}
+                  {r.is_leading && <span className="tile-flag good">Tu es en tête</span>}
+                  {r.i_own === false && <span className="tile-flag missing">Non possédée</span>}
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </>
+  )
+}
 
 function OffersPanel({ rows, loading, rarityMap, catalog, status, setStatus, reload }) {
   const [busyId, setBusyId] = useState(null)

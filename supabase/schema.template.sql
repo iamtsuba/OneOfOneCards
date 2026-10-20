@@ -2339,11 +2339,16 @@ end $$;
 
 -- Annonces en cours
 drop function if exists public.{{P}}market_list(text, text, int, int);
+-- Annonces à vendre. Filtres appliqués AVANT la limite : p_rarity = rareté affichée de la carte ; p_missing = seulement les cartes dont l'emplacement d'album manque encore au joueur.
+-- i_own : le joueur a déjà une carte de cet emplacement (même type, même rareté affichée).
+drop function if exists public.{{P}}market_list(text, text, int, int);
 create or replace function public.{{P}}market_list(
-  p_kind   text default null,
-  p_sort   text default 'ending',
-  p_limit  int  default 40,
-  p_offset int  default 0
+  p_kind    text    default null,
+  p_sort    text    default 'ending',
+  p_limit   int     default 40,
+  p_offset  int     default 0,
+  p_rarity  text    default null,
+  p_missing boolean default false
 )
 returns table (
   listing_id  bigint,
@@ -2362,7 +2367,8 @@ returns table (
   is_mine     boolean,
   is_leading  boolean,
   total       bigint,
-  server_now  timestamptz
+  server_now  timestamptz,
+  i_own       boolean
 )
 language plpgsql security definer set search_path = public as $$
 declare uid uuid := auth.uid(); inc int := public.{{P}}cfg('auction_min_increment')::int;
@@ -2370,16 +2376,20 @@ begin
   if uid is null then raise exception 'not_authenticated'; end if;
   perform public.{{P}}settle_due();
   return query
-  select l.id, l.type_id, l.base_rarity, l.series, l.number, public.{{P}}rarity_id(l.number, l.series, l.type_id, l.base_rarity), p.username, l.kind,
+  select l.id, l.type_id, l.base_rarity, l.series, l.number, x.rid, p.username, l.kind,
          case when l.kind = 'auction' then coalesce(l.current_bid, l.price) else l.price end,
          l.current_bid, l.bid_count, l.ends_at,
          case when l.kind = 'auction'
               then (case when l.current_bid is null then l.price else l.current_bid + inc end) end,
-         l.seller_id = uid, l.current_bidder = uid, count(*) over (), now()
+         l.seller_id = uid, l.current_bidder = uid, count(*) over (), now(),
+         public.{{P}}owns_card_rarity(uid, l.type_id, x.rid)
   from public.{{P}}listings l
   join public.{{P}}profiles p on p.id = l.seller_id
-  left join public.{{P}}rarities r on r.id = public.{{P}}rarity_id(l.number, l.series, l.type_id, l.base_rarity)
+  cross join lateral (select public.{{P}}rarity_id(l.number, l.series, l.type_id, l.base_rarity) as rid) x
+  left join public.{{P}}rarities r on r.id = x.rid
   where l.status = 'active' and (p_kind is null or l.kind = p_kind)
+    and (p_rarity is null or p_rarity = '' or x.rid = p_rarity)
+    and (not coalesce(p_missing, false) or not public.{{P}}owns_card_rarity(uid, l.type_id, x.rid))
   order by
     case when p_sort = 'price' then (case when l.kind = 'auction' then coalesce(l.current_bid, l.price) else l.price end) end asc nulls last,
     case when p_sort = 'rarity' then r.sort_order end asc nulls last,
@@ -4143,7 +4153,7 @@ revoke all on function public.{{P}}list_card(int, text, int, int, text, int)    
 revoke all on function public.{{P}}cancel_listing(bigint)                            from public, anon;
 revoke all on function public.{{P}}buy_now(bigint)                                   from public, anon;
 revoke all on function public.{{P}}place_bid(bigint, int)                            from public, anon;
-revoke all on function public.{{P}}market_list(text, text, int, int)                 from public, anon;
+revoke all on function public.{{P}}market_list(text, text, int, int, text, boolean)    from public, anon;
 revoke all on function public.{{P}}market_mine()                                     from public, anon;
 revoke all on function public.{{P}}admin_change_password(text, text)                 from public, anon;
 revoke all on function public.{{P}}admin_data(text)                                  from public, anon;
@@ -4188,7 +4198,7 @@ grant execute on function public.{{P}}list_card(int, text, int, int, text, int) 
 grant execute on function public.{{P}}cancel_listing(bigint)                            to authenticated;
 grant execute on function public.{{P}}buy_now(bigint)                                   to authenticated;
 grant execute on function public.{{P}}place_bid(bigint, int)                            to authenticated;
-grant execute on function public.{{P}}market_list(text, text, int, int)                 to authenticated;
+grant execute on function public.{{P}}market_list(text, text, int, int, text, boolean)    to authenticated;
 grant execute on function public.{{P}}market_mine()                                     to authenticated;
 grant execute on function public.{{P}}admin_change_password(text, text)                 to authenticated;
 grant execute on function public.{{P}}admin_data(text)                                  to authenticated;
