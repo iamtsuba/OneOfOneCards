@@ -305,7 +305,7 @@ create index if not exists pp_o1ocards_unique_wins_user_idx on public.pp_o1ocard
 create or replace function public.pp_o1ocards_log_unique_win()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
-  if new.series = 1 then   -- une série de 1 carte : c'est forcément la 1/1 (rareté Unique)
+  if new.series = 1 and public.pp_o1ocards_number_visible(new.type_id, new.base_rarity, 1) then   -- une série de 1 carte à numéro visible : la 1/1 (rareté Unique)
     insert into public.pp_o1ocards_unique_wins (user_id, type_id, base_rarity) values (new.owner_id, new.type_id, new.base_rarity);
   end if;
   return new;
@@ -771,13 +771,13 @@ returns boolean language sql stable set search_path = public as $$
 $$;
 
 -- Rareté AFFICHÉE de la carte n/m de la rareté de base p_base du type p_type. Priorité :
--- Unique (série 1) > Alpha (1/m) > Omega (m/m) > rareté de base. Alpha et Omega n'existent que pour les séries dont le numéro
--- est visible : sinon la carte 1/m ou m/m garde la rareté de base, comme les autres.
+-- Unique (série 1) > Alpha (1/m) > Omega (m/m) > rareté de base. Unique, Alpha et Omega n'existent que pour les séries dont le numéro
+-- est visible : sinon la carte 1/1, 1/m ou m/m garde la rareté de base, comme les autres (une rareté sans numéros visibles n'a jamais d'Unique).
 create or replace function public.pp_o1ocards_rarity_id(n int, m int, p_type int, p_base text)
 returns text language plpgsql stable set search_path = public as $$
 declare v text;
 begin
-  if m = 1 then
+  if m = 1 and public.pp_o1ocards_number_visible(p_type, p_base, 1) then
     select id into v from public.pp_o1ocards_rarities where kind = 'unique' limit 1;
   elsif n = 1 and public.pp_o1ocards_number_visible(p_type, p_base, m) then
     select id into v from public.pp_o1ocards_rarities where kind = 'alpha' limit 1;
@@ -857,13 +857,14 @@ begin
   --  Unique : la carte 1/1 de chaque rareté de base ; Alpha / Omega : la 1re / dernière carte de chaque série à numéro visible
   --  (série 2 à `numbered`) ; rareté « à seuil » : les cartes de SA rareté de base, soit 2..m-1 dans une série à numéro visible
   --  (1/m = Alpha et m/m = Omega), soit toutes (1..m) dans une série à numéro masqué.
-  g_lo := case when rar.kind = 'unique' then 1 when rar.kind in ('alpha', 'omega') then 2 else 2 end;
+  g_lo := case when rar.kind in ('alpha', 'omega') then 2 else 1 end;   -- une rareté ordinaire commence à la série 1 : la 1/1 d'une rareté à numéro masqué est une carte ordinaire
   with cf as materialized (
     select ty.id as type_id, c.rarity_id as base, c.smax, c.numbered
     from public.pp_o1ocards_types ty
     cross join lateral public.pp_o1ocards_type_config(ty.id) c
     where ty.category_id = p_category
       and (rar.kind in ('unique', 'alpha', 'omega') or c.rarity_id = p_rarity)
+      and (rar.kind <> 'unique' or c.numbered >= 1)   -- pas d'Unique sur une rareté sans numéro visible
   )
   select array_agg(q.type_id order by q.type_id, q.base, q.m), array_agg(q.base order by q.type_id, q.base, q.m),
          array_agg(q.m order by q.type_id, q.base, q.m), array_agg(q.avail order by q.type_id, q.base, q.m),
@@ -1333,11 +1334,13 @@ revoke all on function public.pp_o1ocards_seed_standard_booster() from public, a
 select public.pp_o1ocards_seed_standard_booster();
 
 -- Toutes les séries d'une catégorie qui ont encore des cartes : (type, rareté de base, série), cartes restantes et poids de tirage
+drop function if exists public.pp_o1ocards_series_pool(int, double precision);
 create or replace function public.pp_o1ocards_series_pool(p_cat int, p_e double precision)
-returns table (type_id int, base text, g int, remaining int, w double precision)
+returns table (type_id int, base text, g int, remaining int, w double precision, uniq boolean)
 language sql stable security definer set search_path = public as $$
   select ty.id, cf.rarity_id, g, (g - coalesce(t.taken, 0))::int,
-         (g - coalesce(t.taken, 0)) * power(g::double precision, p_e)
+         (g - coalesce(t.taken, 0)) * power(g::double precision, p_e),
+         (g = 1 and cf.numbered >= 1)   -- la 1/1 d'une rareté à numéro VISIBLE est une Unique ; sinon une carte ordinaire
   from public.pp_o1ocards_types ty
   cross join lateral public.pp_o1ocards_type_config(ty.id) cf
   cross join lateral generate_series(1, cf.smax) g
@@ -1357,12 +1360,12 @@ begin
   if p_btype is not null then
     with sp as materialized (
       select x.* from public.pp_o1ocards_series_pool(p_cat, p_e) x
-      where not (coalesce(p_seen -> (case when x.g = 1 then v_uid else x.base end), '[]'::jsonb) @> to_jsonb(x.type_id))
+      where not (coalesce(p_seen -> (case when x.uniq then v_uid else x.base end), '[]'::jsonb) @> to_jsonb(x.type_id))
     ),
     pool as (
-      select sp.base as opt, sum(sp.remaining)::bigint as rem from sp where sp.g > 1 group by sp.base
+      select sp.base as opt, sum(sp.remaining)::bigint as rem from sp where not sp.uniq group by sp.base
       union all
-      select v_uid, count(*)::bigint from sp where sp.g = 1 and v_uid is not null
+      select v_uid, count(*)::bigint from sp where sp.uniq and v_uid is not null
     ),
     wts as (
       select pool.opt, bs.weight as wt
@@ -1382,10 +1385,10 @@ begin
   with s as materialized (
     select sp.type_id, sp.base, sp.g, sp.w
     from public.pp_o1ocards_series_pool(p_cat, p_e) sp
-    where not (coalesce(p_seen -> (case when sp.g = 1 then v_uid else sp.base end), '[]'::jsonb) @> to_jsonb(sp.type_id))
+    where not (coalesce(p_seen -> (case when sp.uniq then v_uid else sp.base end), '[]'::jsonb) @> to_jsonb(sp.type_id))
       and case when p_btype is null then true
-               when v_opt = v_uid then sp.g = 1
-               else sp.base = v_opt and sp.g > 1 end
+               when v_opt = v_uid then sp.uniq
+               else sp.base = v_opt and not sp.uniq end
   ),
   t as (select sum(s.w) as tw, random() as rr from s)
   select z.type_id, z.base, z.g
@@ -1457,7 +1460,7 @@ begin
     if v_new then perform public.pp_o1ocards_auto_place_album(p_uid, tid, v_base, m, num); end if;   -- nouvelle carte : directement dans l'album
 
     got := got + 1;
-    v_key := coalesce(case when m = 1 then v_uid else v_base end, '');
+    v_key := coalesce(case when m = 1 and public.pp_o1ocards_number_visible(tid, v_base, 1) then v_uid else v_base end, '');
     v_seen := jsonb_set(v_seen, array[v_key], coalesce(v_seen -> v_key, '[]'::jsonb) || to_jsonb(tid), true);
     res := res || jsonb_build_array(jsonb_build_object(
       'type_id', tid, 'base_rarity', v_base, 'series', m, 'number', num, 'rarity_id', public.pp_o1ocards_rarity_id(num, m, tid, v_base), 'is_new', v_new));
@@ -1784,7 +1787,7 @@ begin
   ),
   cardrows as (
     select m.type_id, m.base_rarity, m.series, m.number, m.obtained_at, m.tpos, pi.hidden,
-           case when m.series = 1 then v_unique
+           case when m.series = 1 and not pi.hidden then v_unique
                 when not pi.hidden and m.number = 1 then v_alpha
                 when not pi.hidden and m.number = m.series then v_omega
                 else m.base_rarity end as rid,
@@ -1848,9 +1851,9 @@ begin
   select id into v_omega  from public.pp_o1ocards_rarities where kind = 'omega'  limit 1;
 
   -- Totaux par rareté AFFICHÉE. Chaque rareté de base d'un type a ses séries 1..sm ; avec kk = min(séries numérotées, sm) :
-  --   Unique : 1 (la série 1) ; Alpha et Omega : kk - 1 chacune (séries 2..kk, à numéro visible) ;
+  --   Unique : 1 (la série 1) SI son numéro est visible (kk >= 1) ; Alpha et Omega : kk - 1 chacune (séries 2..kk, à numéro visible) ;
   --   rareté de base : les cartes 2..m-1 des séries visibles (somme de m-2 pour m = 2..kk) + toutes les cartes des séries
-  --   masquées (somme de m pour m = max(kk+1, 2)..sm). La somme des raretés égale toujours le nombre de cartes.
+  --   masquées (somme de m pour m = kk+1..sm, la série 1 comprise quand aucune n'est visible). La somme des raretés égale toujours le nombre de cartes.
   with cf as materialized (
     select ty.id as type_id, c.rarity_id as base, c.smax as sm, least(c.numbered::bigint, c.smax)::int as kk
     from public.pp_o1ocards_types ty
@@ -1860,11 +1863,11 @@ begin
   totals as (
     select base as id,
            (case when kk >= 2 then ((kk - 2)::bigint * (kk - 1)) / 2 else 0 end
-            + case when sm >= greatest(kk + 1, 2)
-                   then (sm::bigint * (sm + 1)) / 2 - ((greatest(kk + 1, 2) - 1)::bigint * greatest(kk + 1, 2)) / 2
+            + case when sm >= kk + 1
+                   then (sm::bigint * (sm + 1)) / 2 - (kk::bigint * (kk + 1)) / 2
                    else 0 end)::bigint as n
     from cf
-    union all select v_unique, 1::bigint from cf where v_unique is not null
+    union all select v_unique, 1::bigint from cf where v_unique is not null and kk >= 1
     union all select v_alpha,  greatest(kk - 1, 0)::bigint from cf where v_alpha is not null
     union all select v_omega,  greatest(kk - 1, 0)::bigint from cf where v_omega is not null
   ),
@@ -1979,7 +1982,7 @@ begin
   ),
   parts as (
     select v_unique as id, rid as base, true as is_first, greatest(avail, 0)::bigint as remaining, 1::bigint as total, greatest(avail, 0)::double precision as w
-      from s where m = 1 and v_unique is not null
+      from s where m = 1 and vis and v_unique is not null
     union all
     select v_alpha, rid, false, (1 - a_taken)::bigint, 1::bigint, (1 - a_taken) * power(m::double precision, e)
       from s where m > 1 and vis and v_alpha is not null
@@ -1991,7 +1994,7 @@ begin
            (case when vis then greatest(avail - 2 + a_taken + o_taken, 0) else greatest(avail, 0) end)::bigint,
            (case when vis then m - 2 else m end)::bigint,
            (case when vis then greatest(avail - 2 + a_taken + o_taken, 0) else greatest(avail, 0) end) * power(m::double precision, e)
-      from s where m > 1
+      from s where m > 1 or not vis   -- la 1/1 d'une rareté à numéro masqué est une carte ordinaire
   ),
   -- repli : toutes les cartes restantes
   any_pool as (select id, sum(w) as w from parts group by id having sum(w) > 0),
@@ -2580,9 +2583,10 @@ begin
       -- numéro masqué de 2 cartes ou plus (dont toutes les cartes gardent la rareté de base)
       select ts.id as type_id, c.rarity_id
       from ts cross join lateral public.pp_o1ocards_type_config(ts.id) c
-      where ts.revealed and (c.smax >= 3 or (c.smax = 2 and c.numbered < 2))
+      where ts.revealed and (c.smax >= 3 or c.numbered < c.smax)
       union
-      select ts.id, r.id from ts join public.pp_o1ocards_rarities r on r.kind = 'unique' where ts.revealed
+      select ts.id, r.id from ts join public.pp_o1ocards_rarities r on r.kind = 'unique'
+      where ts.revealed and exists (select 1 from public.pp_o1ocards_type_config(ts.id) c where c.numbered >= 1)
       union
       -- Alpha et Omega n'existent que sur les séries à numéro visible (au moins une série visible de 2 cartes ou plus)
       select ts.id, r.id from ts join public.pp_o1ocards_rarities r on r.kind in ('alpha', 'omega')
@@ -2824,9 +2828,9 @@ $$;
 create or replace function public.pp_o1ocards_type_album_slots(p_type int)
 returns table (rid text)
 language sql stable security definer set search_path = public as $$
-  select c.rarity_id from public.pp_o1ocards_type_config(p_type) c where c.smax >= 3 or (c.smax = 2 and c.numbered < 2)
+  select c.rarity_id from public.pp_o1ocards_type_config(p_type) c where c.smax >= 3 or c.numbered < c.smax
   union
-  select r.id from public.pp_o1ocards_rarities r where r.kind = 'unique'
+  select r.id from public.pp_o1ocards_rarities r where r.kind = 'unique' and exists (select 1 from public.pp_o1ocards_type_config(p_type) c where c.numbered >= 1)
   union
   select r.id from public.pp_o1ocards_rarities r
   where r.kind in ('alpha', 'omega') and exists (select 1 from public.pp_o1ocards_type_config(p_type) c where least(c.numbered::bigint, c.smax) >= 2)
@@ -2853,7 +2857,7 @@ create or replace function public.pp_o1ocards_gold_pool(p_cat int, p_type int de
 returns table (type_id int, base text, g int, vis boolean, a_free int, o_free int, mid_free int, avail int)
 language sql stable security definer set search_path = public as $$
   select z.type_id, z.base, z.g, z.vis, z.a_free, z.o_free,
-         case when z.g = 1 then 0 when z.vis then greatest(z.avail - z.a_free - z.o_free, 0) else z.avail end,
+         case when z.g = 1 and z.vis then 0 when z.vis then greatest(z.avail - z.a_free - z.o_free, 0) else z.avail end,
          z.avail
   from (
     select ty.id as type_id, cf.rarity_id as base, g, (g <= cf.numbered) as vis, (g - coalesce(t.taken, 0))::int as avail,
@@ -2882,12 +2886,12 @@ begin
     from (
       select gp.*,
              (case p_mode when 'plain' then gp.mid_free when 'numbered' then gp.mid_free when 'anyplain' then gp.mid_free
-                          when 'alpha' then gp.a_free when 'omega' then gp.o_free when 'unique' then (case when gp.g = 1 then 1 else 0 end) else 0 end)
+                          when 'alpha' then gp.a_free when 'omega' then gp.o_free when 'unique' then (case when gp.g = 1 and gp.vis then 1 else 0 end) else 0 end)
              * power(gp.g::double precision, p_e) as w
       from public.pp_o1ocards_gold_pool(p_cat, case when p_mode = 'numbered' then p_type end) gp
-      where case p_mode when 'plain' then gp.base = p_rarity and gp.g > 1
+      where case p_mode when 'plain' then gp.base = p_rarity and (gp.g > 1 or not gp.vis)
                         when 'numbered' then gp.vis and gp.g > 2
-                        when 'anyplain' then gp.g > 1
+                        when 'anyplain' then (gp.g > 1 or not gp.vis)
                         else true end
     ) z where z.w > 0
   ) s, (select random() as rr) q
@@ -3042,6 +3046,14 @@ revoke all on function public.pp_o1ocards_ack_gold_rewards() from public, anon;
 grant execute on function public.pp_o1ocards_open_gold_reward(bigint) to authenticated;
 grant execute on function public.pp_o1ocards_ack_gold_rewards() to authenticated;
 select public.pp_o1ocards_gold_rewards_backfill();
+
+-- ---------- Mise à jour des albums : une carte 1/1 à numéro masqué n'est plus « Unique » ----------
+-- Une carte 1/1 dont la rareté n'a pas de numéro visible est maintenant une carte ORDINAIRE de sa rareté. Un choix d'album qui ne correspond plus à la rareté affichée de sa
+-- carte est retiré, puis ces cartes prennent leur place d'album (si elle est libre). Sans effet quand tout est déjà cohérent.
+delete from public.pp_o1ocards_album_picks p where public.pp_o1ocards_rarity_id(p.number, p.series, p.type_id, p.base_rarity) <> p.rarity_id;
+select public.pp_o1ocards_auto_place_album(c.owner_id, c.type_id, c.base_rarity, c.series, c.number)
+from public.pp_o1ocards_cards c
+where c.series = 1 and c.owner_id is not null and not public.pp_o1ocards_number_visible(c.type_id, c.base_rarity, 1);
 
 -- ---------- Lien d'invitation : devenir ami en ouvrant un lien ----------
 -- Chaque joueur a UN code d'invitation (20 caractères hexadécimaux au hasard). Celui qui ouvre le lien, une fois connecté, devient ami tout de suite avec son propriétaire

@@ -37,7 +37,7 @@ insert into public.{{P}}type_rarities (type_id, rarity_id, max_series, numbered_
 
 \echo '--- les emplacements d''une carte : mêmes que ceux de l''album'
 select pg_temp.expect('carte X : 7 emplacements (4 raretés ordinaires, Unique, Alpha, Omega)', (select count(*) from public.{{P}}type_album_slots(:x)) = 7);
-select pg_temp.expect('carte Y (numéros masqués, une seule rareté) : 2 emplacements (Commune et Unique)', (select array_agg(rid order by rid) from public.{{P}}type_album_slots(:y)) = array['common', 'unique']);
+select pg_temp.expect('carte Y (numéros masqués, une seule rareté) : 1 seul emplacement (Commune) : sans numéro visible, pas d''Unique, d''Alpha ni d''Omega', (select array_agg(rid order by rid) from public.{{P}}type_album_slots(:y)) = array['common']);
 select pg_temp.expect('mêmes emplacements que album_view pour X, Z et Y',
   (select array_agg(rarity_id order by rarity_id) from public.{{P}}album_view(:cat) where type_id = :x) = (select array_agg(rid order by rid) from public.{{P}}type_album_slots(:x))
   and (select array_agg(rarity_id order by rarity_id) from public.{{P}}album_view(:cat) where type_id = :z) = (select array_agg(rid order by rid) from public.{{P}}type_album_slots(:z))
@@ -65,9 +65,9 @@ select pg_temp.expect('vider puis remplir un emplacement ne donne pas un second 
 \echo '--- carte Y par placement automatique (comme un booster ou une offre)'
 insert into public.{{P}}cards (type_id, base_rarity, series, number, owner_id) values (:y, 'common', 4, 2, :A), (:y, 'common', 1, 1, :A);
 select public.{{P}}auto_place_album(:A, :y, 'common', 4, 2);
-select pg_temp.expect('Commune placée, Unique manquante : pas encore de récompense pour Y', (select count(*) from public.{{P}}gold_rewards where type_id = :y) = 0);
+select pg_temp.expect('Commune placée : booster Gold pour la carte Y (son seul emplacement, placement automatique)', (select count(*) from public.{{P}}gold_rewards where type_id = :y) = 1);
 select public.{{P}}auto_place_album(:A, :y, 'common', 1, 1);
-select pg_temp.expect('Unique placée : booster Gold pour la carte Y (placement automatique)', (select count(*) from public.{{P}}gold_rewards where type_id = :y) = 1);
+select pg_temp.expect('la 1/1 d''une rareté à numéro masqué est une carte Commune ordinaire : elle ne donne pas de second booster Gold (même emplacement)', (select count(*) from public.{{P}}gold_rewards where type_id = :y) = 1 and public.{{P}}rarity_id(1, 1, :y, 'common') = 'common');
 select pg_temp.expect('deux boosters Gold à ouvrir dans le statut', jsonb_array_length(public.{{P}}status() -> 'gold_rewards') = 2);
 select pg_temp.expect('un autre joueur n''a rien (B n''a aucune récompense)', (select count(*) from public.{{P}}gold_rewards where user_id = :B) = 0);
 
@@ -131,7 +131,7 @@ create temp table opened2 as select public.{{P}}open_gold_reward(:rid_m) as j;
 select pg_temp.expect('petit stock : 5 cartes quand même (3 Rare, puis le repli), sans erreur', (select jsonb_array_length(j -> 'cards') = 5 from opened2));
 select pg_temp.expect('cartes 1 à 3 : des Rare ; carte 4 : pas de Super Rare dans la catégorie, une carte ordinaire à la place', (select count(*) = 3 from opened2, jsonb_array_elements(j -> 'cards') with ordinality t(c, ord) where ord <= 3 and c ->> 'rarity_id' = 'rare')
   and (select c ->> 'rarity_id' from opened2, jsonb_array_elements(j -> 'cards') with ordinality t(c, ord) where ord = 4) <> 'super');
-select pg_temp.expect('carte 5 : seule possibilité restante, la Unique (1/1 de la catégorie)', (select (c ->> 'rarity_id') = 'unique' from opened2, jsonb_array_elements(j -> 'cards') with ordinality t(c, ord) where ord = 5));
+select pg_temp.expect('carte 5 : une carte ordinaire (numéros masqués : aucune Unique, Alpha ni Omega n''existe dans cette catégorie)', (select (c ->> 'rarity_id') in ('common', 'rare') from opened2, jsonb_array_elements(j -> 'cards') with ordinality t(c, ord) where ord = 5) and not exists (select 1 from opened2, jsonb_array_elements(j -> 'cards') c where c ->> 'rarity_id' in ('unique', 'alpha', 'omega')));
 
 \echo '--- plus aucune carte à tirer : la récompense reste à ouvrir'
 insert into public.{{P}}categories (name, position, series_count, color, color2, text_color, enabled) values ('Gold Vide', 3, 1, '#fff', '#ccc', '#000', false) returning id as cat3 \gset

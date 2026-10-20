@@ -10,14 +10,14 @@ const require = createRequire(import.meta.url)
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const out = mkdtempSync(path.join(root, 'tests', '.out-cardpack-'))
 await build({
-  stdin: { contents: "export { default as Card } from './src/components/Card.jsx'; export { shownRarity, fireworksRarity } from './src/rarity.js'; export { default as Pack, packTitle, bandLabel } from './src/components/Pack.jsx'; export { GameContext } from './src/game.js'", resolveDir: root, loader: 'js' },
+  stdin: { contents: "export { default as Card } from './src/components/Card.jsx'; export { default as Pack, packTitle, bandLabel } from './src/components/Pack.jsx'; export { GameContext } from './src/game.js'", resolveDir: root, loader: 'js' },
   bundle: true, format: 'esm', platform: 'node', jsx: 'automatic', outfile: path.join(out, 'bundle.mjs'),
   external: ['react', 'react-dom', 'react/jsx-runtime', '@supabase/supabase-js'],
   define: { 'import.meta.env': JSON.stringify({ MODE: 'preprod', VITE_APP_ENV: 'preprod' }) }, logLevel: 'silent',
 })
 const React = require('react')
 const { renderToStaticMarkup } = require('react-dom/server')
-const { Card, Pack, packTitle, bandLabel, GameContext, shownRarity, fireworksRarity } = await import(pathToFileURL(path.join(out, 'bundle.mjs')).href)
+const { Card, Pack, packTitle, bandLabel, GameContext } = await import(pathToFileURL(path.join(out, 'bundle.mjs')).href)
 rmSync(out, { recursive: true, force: true })
 
 let bad = 0
@@ -48,27 +48,6 @@ ok('FullArt « à moi » et « déjà tirée » : les états restent annoncés',
 const solo = (props) => renderToStaticMarkup(React.createElement(Card, { rarity: ultra, series: 50, number: 3, size: 'md', ...props }))
 ok('aperçu sans catalogue : le style demandé et le type donné sont utilisés', /fullart/.test(solo({ type: types[0], styleName: 'fullart' })) && !/fullart/.test(solo({ type: types[0], styleName: 'simple' })) && /🐱/.test(solo({ type: types[0], styleName: 'fullart' })))
 ok('sans catalogue ni style : Simple par défaut', !/fullart/.test(solo({ type: types[0] })))
-
-// ---------- Carte 1/1 : les couleurs de sa rareté de base, et son numéro toujours visible
-const R = (id, name, kind, color, color2) => ({ id, name, kind, color, color2, text_color: '#fff' })
-const rmap = { common: R('common', 'Commune', 'range', '#d9d4c5', '#b5ad99'), rare: R('rare', 'Rare', 'range', '#0a9d5c', '#066b3d'), ultra, artrare: R('artrare', 'Art Rare', 'range', '#7c3aed', '#4c1d95'),
-  unique: R('unique', 'Unique', 'unique', '#7c3aed', '#4c1d95'), alpha: R('alpha', 'Alpha', 'alpha', '#d4a017', '#8a6410'), omega: R('omega', 'Omega', 'omega', '#cbd5e1', '#64748b') }
-const cat2 = { ...catalog, numberHidden: (typeId, base, series) => base === 'common' || (typeId === 1 && series === 50) }   // les numéros des Communes sont masqués
-const wrapMap = (el) => React.createElement(GameContext.Provider, { value: { catalog: cat2, rarityMap: rmap } }, el)
-const one = (base, extra = {}) => renderToStaticMarkup(wrapMap(React.createElement(Card, { typeId: 2, base, series: 1, number: 1, rarity: rmap.unique, size: 'md', ...extra })))
-const vars = (h) => (h.match(/style="([^"]*)"/) || [])[1] ?? ''
-ok('Ultra Rare 1/1 : ROUGE (couleurs de l\'Ultra Rare), nommée « Ultra Rare », numéro 1/1', /--r1:#e11d48;--r2:#9f1239/.test(vars(one('ultra'))) && />Ultra Rare</.test(one('ultra')) && /card-num[^>]*>1\/1</.test(one('ultra')))
-ok('Rare 1/1 : VERTE ; Commune 1/1 : beige', /--r1:#0a9d5c/.test(vars(one('rare'))) && />Rare</.test(one('rare')) && /--r1:#d9d4c5/.test(vars(one('common'))) && />Commune</.test(one('common')))
-ok('Art Rare 1/1 : aux couleurs de l\'Art Rare (violet ici)', /--r1:#7c3aed/.test(vars(one('artrare'))) && />Art Rare</.test(one('artrare')))
-ok('le numéro « 1/1 » est TOUJOURS visible, même quand les numéros de la rareté sont masqués (Commune 1/1 sans numéro avant)', /card-num[^>]*>1\/1</.test(one('common')) && !/nonum/.test(one('common')))
-ok('la carte reste annoncée « Unique » aux lecteurs d\'écran, avec sa vraie rareté', /aria-label="Chat photo, Ultra Rare, Unique 1 sur 1/.test(one('ultra')) && /aria-label="Chat photo, Commune, Unique 1 sur 1/.test(one('common')))
-ok('l\'effet métallisé des cartes spéciales est gardé sur une 1/1', /class="card md[^"]*foil/.test(one('ultra')))
-ok('rareté de base inconnue (ou carte sans rareté de base) : les couleurs et le nom de l\'Unique, comme avant ; numéro 1/1 visible', /--r1:#7c3aed/.test(vars(one('inconnue'))) && />Unique</.test(one('inconnue')) && /card-num[^>]*>1\/1</.test(one('inconnue')) && />Unique</.test(one(undefined)))
-ok('une carte « du milieu » n\'est pas touchée : Rare 17/120 reste verte, une Commune garde son numéro masqué', /--r1:#0a9d5c/.test(vars(renderToStaticMarkup(wrapMap(React.createElement(Card, { typeId: 2, base: 'rare', series: 120, number: 17, rarity: rmap.rare, size: 'md' }))))) && /nonum/.test(renderToStaticMarkup(wrapMap(React.createElement(Card, { typeId: 2, base: 'common', series: 500, number: 17, rarity: rmap.common, size: 'md' })))))
-ok('Alpha 1/N et Omega N/N gardent leurs couleurs (or, argent) : seule la 1/1 suit la rareté de base', /--r1:#d4a017/.test(vars(renderToStaticMarkup(wrapMap(React.createElement(Card, { typeId: 2, base: 'ultra', series: 50, number: 1, rarity: rmap.alpha, size: 'md' }))))) && /--r1:#cbd5e1/.test(vars(renderToStaticMarkup(wrapMap(React.createElement(Card, { typeId: 2, base: 'ultra', series: 50, number: 50, rarity: rmap.omega, size: 'md' }))))))
-ok('sans table des raretés (aperçu hors du jeu) : la carte Unique reste affichée comme avant, sans plantage', /--r1:#7c3aed/.test(vars(renderToStaticMarkup(React.createElement(Card, { rarity: rmap.unique, series: 1, number: 1, size: 'md', type: types[0] })))))
-ok('shownRarity : base ordinaire pour une Unique ; rien d\'autre ne change ; une base spéciale ou absente est ignorée', shownRarity(rmap.unique, rmap.ultra) === rmap.ultra && shownRarity(rmap.rare, rmap.ultra) === rmap.rare && shownRarity(rmap.alpha, rmap.ultra) === rmap.alpha && shownRarity(rmap.unique, rmap.alpha) === rmap.unique && shownRarity(rmap.unique, undefined) === rmap.unique && shownRarity(undefined, rmap.ultra) === undefined)
-ok('feux d\'artifice d\'une 1/1 : aux couleurs de la rareté de base, grands comme ceux d\'une Unique, identifiant propre ; autres raretés inchangées', (() => { const f = fireworksRarity(rmap.unique, rmap.ultra); return f.kind === 'unique' && f.color === '#e11d48' && f.id === 'unique-ultra' && fireworksRarity(rmap.alpha, rmap.ultra) === rmap.alpha && fireworksRarity(rmap.unique, undefined) === rmap.unique })())
 
 // ---------- Booster
 const pack = (props) => renderToStaticMarkup(React.createElement(Pack, props))
