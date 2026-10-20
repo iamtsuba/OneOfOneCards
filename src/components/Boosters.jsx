@@ -74,7 +74,7 @@ export function PackShelf({ packs, selected, category, disabled, onSelect }) {
       {packs.map((p) => (
         <button key={p.key} type="button" className={`shelf-pack${p.key === selected ? ' on' : ''}`} aria-pressed={p.key === selected} disabled={disabled}
           aria-label={`Booster ${p.name}, ${p.count} en stock`} onClick={() => onSelect(p.key)}>
-          <Pack dim={p.count === 0 || !category} category={category} label={p.name} glow={p.glow} color={p.color} />
+          <Pack dim={p.count === 0 || (!category && !p.golden)} golden={!!p.golden} category={category} label={p.name} glow={p.glow} color={p.color} />
           <span className="shelf-count" aria-hidden="true">×{fmt(p.count)}</span>
         </button>
       ))}
@@ -161,15 +161,23 @@ export default function Boosters({ goCollection }) {
   const total = boosters + bonus
   const category = catalog.categoryMap[status?.active_category_id]
   const nextCategory = status?.next_category
-  // Étagère : le booster du stock gratuit + jusqu'à 2 autres boosters que le joueur a en stock (3 au plus)
-  const [pick, setPick] = useState(null)   // clé du paquet choisi : 'main' ou 't<id>' ; null = choix automatique
-  const shelfTypes = (status?.booster_types ?? []).filter((b) => b.quantity > 0).slice(0, SHELF_MAX - 1)
-  const shelfPacks = [{ key: 'main', name: status?.standard_booster?.name, glow: status?.standard_booster?.glow, color: status?.standard_booster?.color, count: total }, ...shelfTypes.map((b) => ({ key: `t${b.id}`, name: b.name, glow: b.glow, color: b.color, count: b.quantity }))]
-  const auto = total > 0 || shelfTypes.length === 0 ? 'main' : `t${shelfTypes[0].id}`
+  // Étagère : le booster du stock gratuit, puis le booster Gold gagné (juste à côté, s'il y en a un à ouvrir), puis les autres boosters que le joueur a en stock (3 paquets au plus)
+  const goldRewards = status?.gold_rewards ?? []
+  const hasGold = goldRewards.length > 0
+  const [pick, setPick] = useState(null)   // clé du paquet choisi : 'main', 'gold' ou 't<id>' ; null = choix automatique
+  const shelfTypes = (status?.booster_types ?? []).filter((b) => b.quantity > 0).slice(0, SHELF_MAX - 1 - (hasGold ? 1 : 0))
+  const shelfPacks = [{ key: 'main', name: status?.standard_booster?.name, glow: status?.standard_booster?.glow, color: status?.standard_booster?.color, count: total },
+    ...(hasGold ? [{ key: 'gold', name: status?.reward_booster?.name ?? 'Gold', glow: status?.reward_booster?.glow, golden: true, count: goldRewards.length }] : []),
+    ...shelfTypes.map((b) => ({ key: `t${b.id}`, name: b.name, glow: b.glow, color: b.color, count: b.quantity }))]
+  const auto = total > 0 ? 'main' : hasGold ? 'gold' : shelfTypes.length === 0 ? 'main' : `t${shelfTypes[0].id}`
   const selectedKey = shelfPacks.some((p) => p.key === pick) ? pick : auto
-  const selType = selectedKey === 'main' ? null : shelfTypes.find((b) => `t${b.id}` === selectedKey) ?? null
+  const selGold = selectedKey === 'gold' && hasGold
+  const selType = selectedKey === 'main' || selGold ? null : shelfTypes.find((b) => `t${b.id}` === selectedKey) ?? null
+  const nextGold = goldRewards[0]   // la plus ancienne récompense Gold à ouvrir
+  const goldCard = catalog?.typeMap?.[nextGold?.type_id]
+  const goldName = status?.reward_booster?.name ?? 'Gold'
   const canOpen = status && total > 0 && !overlay && !!category
-  const canOpenSel = selType ? !overlay && !!category && selType.quantity > 0 : canOpen
+  const canOpenSel = selGold ? !overlay && !!goldCard : selType ? !overlay && !!category && selType.quantity > 0 : canOpen
   const [consentOpen, setConsentOpen] = useState(false)
   const [termsOpen, setTermsOpen] = useState(false)
   const [notice, setNotice] = useState('')
@@ -199,7 +207,6 @@ export default function Boosters({ goCollection }) {
 
   const goldenPacks = status?.golden_packs ?? 0
 
-  const goldRewards = status?.gold_rewards ?? []
   const [oddsFor, setOddsFor] = useState(null)
   const coinsFree = Math.max(0, (status?.coins ?? 0) - (status?.coins_locked ?? 0))
 
@@ -270,10 +277,14 @@ export default function Boosters({ goCollection }) {
           </button>
         )}
 
-        {category && <p className="pack-name">Booster {selType ? `${selType.name} ` : boosterName ? `${boosterName} ` : ''}« {category.name} »</p>}
+        {selGold ? (
+          <p className="pack-name">Booster {goldName} « {catalog?.categoryMap?.[goldCard?.category_id]?.name ?? category?.name} »</p>
+        ) : category && <p className="pack-name">Booster {selType ? `${selType.name} ` : boosterName ? `${boosterName} ` : ''}« {category.name} »</p>}
         <p className="stock">
           {status ? (
-            selType ? (
+            selGold ? (
+              <><strong>{fmt(goldRewards.length)}</strong> {goldRewards.length > 1 ? `boosters ${goldName} prêts` : `booster ${goldName} prêt`}<span className="muted stock-bonus"> · gagné avec {goldCard?.name ?? 'une carte complétée'}{goldRewards.length > 1 ? ' (puis les suivants)' : ''}</span></>
+            ) : selType ? (
               <><strong>{fmt(selType.quantity)}</strong> {selType.quantity > 1 ? 'boosters prêts' : 'booster prêt'}<span className="muted stock-bonus"> · {selType.cards} carte{selType.cards > 1 ? 's' : ''} <InfoButton onClick={() => setOddsFor(selType)} label={`Chances du booster ${selType.name}`} /></span></>
             ) : total > 0 ? (
               <>
@@ -288,13 +299,12 @@ export default function Boosters({ goCollection }) {
           )}
         </p>
 
-        <button className="btn accent big" onClick={() => (selType ? open(false, 'type', selType.id) : open())} disabled={!canOpenSel}>
-          Ouvrir un booster{selType ? ` ${selType.name}` : boosterName ? ` ${boosterName}` : ''}
+        <button className="btn accent big" onClick={() => (selGold ? open(false, 'gold', nextGold.id) : selType ? open(false, 'type', selType.id) : open())} disabled={!canOpenSel}>
+          Ouvrir un booster{selGold ? ` ${goldName}` : selType ? ` ${selType.name}` : boosterName ? ` ${boosterName}` : ''}
         </button>
 
         <ExtraBoosters category={category} items={(status?.booster_types ?? []).filter((b) => !shelfTypes.some((s) => s.id === b.id))} coins={coinsFree} disabled={!!overlay} onOpen={(it) => open(false, 'type', it.id)} onBuy={buy} onInfo={setOddsFor} />
         {oddsFor && category && <BoosterOddsSheet category={category} boosterType={oddsFor} rarityMap={rarityMap} onClose={() => setOddsFor(null)} />}
-        <GoldRewardList rewards={goldRewards} typeMap={catalog?.typeMap} name={status?.reward_booster?.name} disabled={!!overlay} onOpen={(id) => open(false, 'gold', id)} />
         {goldenPacks > 0 && (
           <div className="golden-reward">
             <strong>{goldenPacks > 1 ? `${goldenPacks} packs dorés à ouvrir` : 'Un pack doré à ouvrir'}</strong>

@@ -11,6 +11,7 @@ const SORTS = [
   ['series', 'Par série'],
   ['rarity', 'Par rareté'],
   ['recent', 'Plus récentes'],
+  ['dups', 'Plus de doublons'],
 ]
 const PAGE = 60
 
@@ -535,7 +536,8 @@ export function StackModal({ stack, catalog, rarityMap, onClose, onChanged, onLi
   )
 }
 
-function MyCards({ catId, catTypes, rarities, rarityMap, stats, version, onSelect, onStack }) {
+// « Mes cartes » : liste filtrable et triable ; tri « Plus de doublons » = les cartes que j'ai en plusieurs exemplaires d'abord (un badge indique le nombre d'exemplaires du même emplacement)
+export function MyCards({ catId, catTypes, rarities, rarityMap, stats, version, onSelect, onStack }) {
   const [rarity, setRarity] = useState(null)
   const [type, setType] = useState('')
   const [sort, setSort] = useState('series')
@@ -631,7 +633,7 @@ function MyCards({ catId, catTypes, rarities, rarityMap, stats, version, onSelec
                 rarity={rarityMap[c.rarity_id]}
                 listed={!c.is_stack && !!c.listing_id}
                 inAlbum={!c.is_stack && !!c.in_album}
-                count={c.is_stack ? c.stack_qty : 0}
+                count={c.is_stack ? c.stack_qty : sort === 'dups' ? (c.dups ?? 0) + 1 : 0}
                 size="sm"
                 onClick={() => (c.is_stack
                   ? onStack({ typeId: c.card_type, base: c.card_base, rarityId: c.rarity_id, series: c.card_series, number: c.card_number })

@@ -1850,6 +1850,7 @@ end $$;
 -- stack_free = celles qu'on peut vendre (ni dans l'album ni en vente). La carte portée par une pile est la plus grande série.
 -- total = nombre de tuiles (pagination), cards_total = nombre de cartes (somme des quantités).
 drop function if exists public.pp_o1ocards_list_collection(int, int, text, text, int, int);
+drop function if exists public.pp_o1ocards_list_collection(int, int, text, text, int, int);
 create or replace function public.pp_o1ocards_list_collection(
   p_category int  default null,
   p_type     int  default null,
@@ -1872,7 +1873,8 @@ returns table (
   stack_free   int,
   in_album     boolean,
   total        bigint,
-  cards_total  bigint
+  cards_total  bigint,
+  dups         int
 )
 language plpgsql security definer set search_path = public as $$
 declare uid uuid := auth.uid(); v_unique text; v_alpha text; v_omega text;
@@ -1894,7 +1896,7 @@ begin
     select d.type_id, d.base_rarity, d.series, not public.pp_o1ocards_number_visible(d.type_id, d.base_rarity, d.series) as hidden
     from (select distinct m.type_id, m.base_rarity, m.series from mine m) d
   ),
-  cardrows as (
+  cr0 as (
     select m.type_id, m.base_rarity, m.series, m.number, m.obtained_at, m.tpos, pi.hidden,
            case when m.series = 1 and not pi.hidden then v_unique
                 when not pi.hidden and m.number = 1 then v_alpha
@@ -1906,9 +1908,12 @@ begin
     left join public.pp_o1ocards_album_picks a on a.user_id = uid and a.type_id = m.type_id and a.base_rarity = m.base_rarity and a.series = m.series and a.number = m.number
     left join public.pp_o1ocards_listings l on l.type_id = m.type_id and l.base_rarity = m.base_rarity and l.series = m.series and l.number = m.number and l.status = 'active'
   ),
+  cardrows as (   -- doublons : nombre d'exemplaires du même emplacement (même type, même rareté affichée) moins un
+    select z.*, (count(*) over (partition by z.type_id, z.rid) - 1)::int as dups from cr0 z
+  ),
   tiles as (
     select r.type_id, r.base_rarity, r.series, r.number, r.obtained_at, r.tpos, r.rid, r.lid, r.lkind, false as is_stack,
-           1 as qty, case when r.in_album or r.lid is not null then 0 else 1 end as free, r.in_album
+           1 as qty, case when r.in_album or r.lid is not null then 0 else 1 end as free, r.in_album, r.dups
     from cardrows r
     where not r.hidden and (p_rarity is null or r.rid = p_rarity)
     union all
@@ -1917,16 +1922,17 @@ begin
            (array_agg(r.series order by r.series desc, r.number desc, r.base_rarity))[1],
            (array_agg(r.number order by r.series desc, r.number desc, r.base_rarity))[1],
            max(r.obtained_at), min(r.tpos), r.rid, null::bigint, null::text, true,
-           count(*)::int, (count(*) filter (where not r.in_album and r.lid is null))::int, bool_or(r.in_album)
+           count(*)::int, (count(*) filter (where not r.in_album and r.lid is null))::int, bool_or(r.in_album), (count(*) - 1)::int
     from cardrows r
     where r.hidden and (p_rarity is null or r.rid = p_rarity)
     group by r.type_id, r.rid
   )
   select t.type_id, t.base_rarity, t.series, t.number, t.rid, t.obtained_at, t.lid, t.lkind, t.is_stack, t.qty, t.free, t.in_album,
-         count(*) over (), sum(t.qty) over ()
+         count(*) over (), sum(t.qty) over (), t.dups
   from tiles t
   left join public.pp_o1ocards_rarities r on r.id = t.rid
   order by
+    case when p_sort = 'dups' then t.dups end desc nulls last,   -- le plus de doublons d'abord
     case when p_sort = 'rarity' then r.sort_order end asc nulls last,
     case when p_sort = 'recent' then t.obtained_at end desc,
     t.tpos, t.type_id, t.series asc, t.number asc, t.base_rarity
