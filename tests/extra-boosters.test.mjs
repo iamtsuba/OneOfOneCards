@@ -49,6 +49,7 @@ ok('une ouverture est en cours : tous les boutons Ouvrir et Acheter sont désact
 const tile = (h, name) => h.split('<li ').slice(1).find((x) => x.includes(`<strong>${name}</strong>`)) ?? ''
 const band = (h, name) => (tile(h, name).match(/<text class="pack-band"[^>]*>([^<]*)<\/text>/) || [])[1]
 ok('chaque booster est un PAQUET : son nom sur la bande (comme le booster principal)', ['Silver', 'Légende', 'Bronze', 'Mini'].every((n) => band(html, n) === n))
+ok('la bande de chaque paquet prend la couleur réglée sur son booster (Silver #c0c0c0, Légende #7c3aed)', /--pk-band:#c0c0c0/.test(tile(withCat, 'Silver')) && /--pk-band:#7c3aed/.test(tile(withCat, 'Légende')))
 ok('le halo de chaque booster entoure son paquet (Silver argenté, Légende arc-en-ciel) ; pas de halo sans réglage', /has-glow glow-silver/.test(tile(html, 'Silver')) && /has-glow glow-rainbow/.test(tile(html, 'Légende')) && !/glow/.test(tile(html, 'Bronze')) && !/glow/.test(tile(html, 'Mini')))
 ok('le stock en pastille sur le paquet (×2, ×1) seulement quand il y en a', /shelf-count[^>]*>×2</.test(tile(html, 'Silver')) && /shelf-count[^>]*>×1</.test(tile(html, 'Légende')) && !/shelf-count/.test(tile(html, 'Bronze')) && !/shelf-count/.test(tile(html, 'Mini')))
 ok('les boutons sont DESSOUS le paquet : le paquet vient avant le nom, le nom avant les boutons (Acheter, Ouvrir, « i »)', (() => { const t = tile(html, 'Silver'); return t.indexOf('pack-wrap') < t.indexOf('<strong>Silver') && t.indexOf('<strong>Silver') < t.indexOf('extra-actions') && t.indexOf('extra-actions') < t.indexOf('Acheter') })())

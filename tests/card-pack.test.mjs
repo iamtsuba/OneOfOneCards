@@ -10,14 +10,14 @@ const require = createRequire(import.meta.url)
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const out = mkdtempSync(path.join(root, 'tests', '.out-cardpack-'))
 await build({
-  stdin: { contents: "export { default as Card } from './src/components/Card.jsx'; export { default as Pack, packTitle, bandLabel } from './src/components/Pack.jsx'; export { GameContext } from './src/game.js'", resolveDir: root, loader: 'js' },
+  stdin: { contents: "export { default as Card } from './src/components/Card.jsx'; export { default as Pack, packTitle, bandLabel, bandColors } from './src/components/Pack.jsx'; export { GameContext } from './src/game.js'", resolveDir: root, loader: 'js' },
   bundle: true, format: 'esm', platform: 'node', jsx: 'automatic', outfile: path.join(out, 'bundle.mjs'),
   external: ['react', 'react-dom', 'react/jsx-runtime', '@supabase/supabase-js'],
   define: { 'import.meta.env': JSON.stringify({ MODE: 'preprod', VITE_APP_ENV: 'preprod' }) }, logLevel: 'silent',
 })
 const React = require('react')
 const { renderToStaticMarkup } = require('react-dom/server')
-const { Card, Pack, packTitle, bandLabel, GameContext } = await import(pathToFileURL(path.join(out, 'bundle.mjs')).href)
+const { Card, Pack, packTitle, bandLabel, bandColors, GameContext } = await import(pathToFileURL(path.join(out, 'bundle.mjs')).href)
 rmSync(out, { recursive: true, force: true })
 
 let bad = 0
@@ -99,5 +99,14 @@ ok('halo : décoratif (le paquet reste masqué aux lecteurs d\'écran)', /aria-h
   const css = (await import('node:fs')).readFileSync(path.join(root, 'src/styles.css'), 'utf8')
   ok('CSS : une couleur pour chaque halo, l\'animation du halo, l\'arc-en-ciel animé et le respect de « réduire les animations »', ['gold', 'silver', 'red', 'blue', 'green', 'purple'].every((g) => new RegExp(`\\.glow-${g} \\{ --glow: #`).test(css)) && /@keyframes packhalo/.test(css) && /@keyframes packrainbow/.test(css) && /prefers-reduced-motion: reduce\) \{ \.pack-wrap\.has-glow svg/.test(css))
 }
+// ---- couleur de la bande du bas = couleur réglée sur le booster
+const bandVar = (props) => ((pack({ category: cat, ...props }).match(/class="pack-wrap[^"]*" style="([^"]*)"/) || [])[1] ?? '')
+ok('couleur du booster : la bande du bas la prend (violet, rouge…)', /--pk-band:#7c3aed/.test(bandVar({ color: '#7c3aed' })) && /--pk-band:#e8452e/.test(bandVar({ color: '#e8452e' })))
+ok('texte de la bande lisible : blanc sur une couleur foncée, foncé sur une couleur claire (jaune, argent)', /--pk-bandtext:#ffffff/.test(bandVar({ color: '#7c3aed' })) && /--pk-bandtext:#14173f/.test(bandVar({ color: '#fde68a' })) && /--pk-bandtext:#14173f/.test(bandVar({ color: '#c0c0c0' })) && /--pk-bandtext:#ffffff/.test(bandVar({ color: '#111111' })))
+ok('seule la bande change : le reste du paquet garde les couleurs de la catégorie', /--pk-a:#[0-9a-f]{3,6}/i.test(bandVar({ color: '#7c3aed' })) && /--pk-crimp:/.test(bandVar({ color: '#7c3aed' })) && !/--pk-a:#7c3aed/.test(bandVar({ color: '#7c3aed' })))
+ok('sans couleur, ou couleur invalide (ancien serveur) : la bande garde la couleur de la catégorie, sans plantage', ['', null, undefined, 'rouge', '#fff', '#12345', '#gggggg', 'red', 123, '#7c3aed '].every((c) => !/--pk-band:#7c3aed|--pk-band:rouge|--pk-band:red|--pk-band:#fff;/.test(bandVar({ color: c })) && /--pk-band:color-mix/.test(bandVar({ color: c }))))
+ok('bandColors : couleur valide (majuscules ou minuscules) -> variables ; sinon rien', bandColors('#7C3AED')['--pk-band'] === '#7C3AED' && bandColors('#7c3aed')['--pk-bandtext'] === '#ffffff' && bandColors('#fff') === null && bandColors(null) === null && bandColors(undefined) === null && bandColors('#12345g') === null)
+ok('le booster doré garde sa palette dorée (la couleur du booster ne s\'applique pas)', !/style=/.test((pack({ category: cat, golden: true, color: '#7c3aed' }).match(/class="pack-wrap[^"]*"[^>]*>/) || [''])[0]))
+ok('sans catégorie (aperçu), la couleur du booster s\'applique quand même à la bande', /--pk-band:#7c3aed/.test((pack({ color: '#7c3aed' }).match(/style="([^"]*)"/) || [])[1] ?? '') )
 console.log(bad ? `\n${bad} ÉCHEC(S)` : '\nCarte et booster : tous les contrôles sont passés.')
 process.exit(bad ? 1 : 0)

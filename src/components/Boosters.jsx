@@ -65,7 +65,7 @@ export function PackShelf({ packs, selected, category, disabled, onSelect }) {
       {packs.map((p) => (
         <button key={p.key} type="button" className={`shelf-pack${p.key === selected ? ' on' : ''}`} aria-pressed={p.key === selected} disabled={disabled}
           aria-label={`Booster ${p.name}, ${p.count} en stock`} onClick={() => onSelect(p.key)}>
-          <Pack dim={p.count === 0 || !category} category={category} label={p.name} glow={p.glow} />
+          <Pack dim={p.count === 0 || !category} category={category} label={p.name} glow={p.glow} color={p.color} />
           <span className="shelf-count" aria-hidden="true">×{fmt(p.count)}</span>
         </button>
       ))}
@@ -84,7 +84,7 @@ export function ExtraBoosters({ items, coins, disabled, onOpen, onBuy, onInfo, c
         {items.map((it) => (
           <li key={it.id} style={{ '--bt': it.color }}>
             <span className="extra-pack-art">
-              <Pack category={category} label={it.name} glow={it.glow} />
+              <Pack category={category} label={it.name} glow={it.glow} color={it.color} />
               {it.quantity > 0 && <span className="shelf-count" aria-hidden="true">×{fmt(it.quantity)}</span>}
             </span>
             <span className="extra-text">
@@ -155,7 +155,7 @@ export default function Boosters({ goCollection }) {
   // Étagère : le booster du stock gratuit + jusqu'à 2 autres boosters que le joueur a en stock (3 au plus)
   const [pick, setPick] = useState(null)   // clé du paquet choisi : 'main' ou 't<id>' ; null = choix automatique
   const shelfTypes = (status?.booster_types ?? []).filter((b) => b.quantity > 0).slice(0, SHELF_MAX - 1)
-  const shelfPacks = [{ key: 'main', name: status?.standard_booster?.name, glow: status?.standard_booster?.glow, count: total }, ...shelfTypes.map((b) => ({ key: `t${b.id}`, name: b.name, glow: b.glow, count: b.quantity }))]
+  const shelfPacks = [{ key: 'main', name: status?.standard_booster?.name, glow: status?.standard_booster?.glow, color: status?.standard_booster?.color, count: total }, ...shelfTypes.map((b) => ({ key: `t${b.id}`, name: b.name, glow: b.glow, color: b.color, count: b.quantity }))]
   const auto = total > 0 || shelfTypes.length === 0 ? 'main' : `t${shelfTypes[0].id}`
   const selectedKey = shelfPacks.some((p) => p.key === pick) ? pick : auto
   const selType = selectedKey === 'main' ? null : shelfTypes.find((b) => `t${b.id}` === selectedKey) ?? null
@@ -219,7 +219,7 @@ export default function Boosters({ goCollection }) {
     setError('')
     // nom du booster pendant l'ouverture : celui du module Boosters (Gold, type choisi, booster des abonnés pour un abonné)
     const shakeBooster = isGold ? status?.reward_booster : isType ? typeInfo : isPack ? null : status?.standard_booster
-    setOverlay({ phase: 'shake', categoryId: (goldCategory ?? category).id, golden: isPack, gold: isGold, label: shakeBooster?.name, glow: shakeBooster?.glow })
+    setOverlay({ phase: 'shake', categoryId: (goldCategory ?? category).id, golden: isPack, gold: isGold, label: shakeBooster?.name, glow: shakeBooster?.glow, color: shakeBooster?.color })
     const t0 = Date.now()
     try {
       const res = isType ? await api.openBoosterType(rewardId) : isGold ? await api.openGoldReward(rewardId) : isPack ? await api.openGoldenPack() : await api.openBooster()
@@ -257,7 +257,7 @@ export default function Boosters({ goCollection }) {
           <PackShelf packs={shelfPacks} selected={selectedKey} category={category} disabled={!!overlay} onSelect={setPick} />
         ) : (
           <button className="pack-button" onClick={() => open()} disabled={!canOpen} aria-label={boosterName ? `Ouvrir un booster ${boosterName}` : 'Ouvrir un booster'}>
-            <Pack dim={total === 0 || !category} category={category} label={status?.standard_booster?.name} glow={status?.standard_booster?.glow} />
+            <Pack dim={total === 0 || !category} category={category} label={status?.standard_booster?.name} glow={status?.standard_booster?.glow} color={status?.standard_booster?.color} />
           </button>
         )}
 
@@ -391,7 +391,7 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
   if (overlay.phase === 'shake' || overlay.phase === 'tear') {
     return (
       <div className="overlay" role="dialog" aria-modal="true" aria-label="Ouverture du booster">
-        <Pack phase={overlay.phase} golden={overlay.golden} category={catalog?.categoryMap?.[overlay.categoryId]} label={overlay.label} glow={overlay.glow} />
+        <Pack phase={overlay.phase} golden={overlay.golden} category={catalog?.categoryMap?.[overlay.categoryId]} label={overlay.label} glow={overlay.glow} color={overlay.color} />
         <p className="overlay-hint">{overlay.gold ? `Ton booster ${overlay.label ?? 'Gold'} !` : overlay.golden ? 'Un booster doré !' : overlay.label ? `Ton booster ${overlay.label} !` : 'Ouverture…'}</p>
       </div>
     )

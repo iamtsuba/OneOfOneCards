@@ -13,9 +13,19 @@ function crimp(y0, y1, w, teeth) {
   return d
 }
 
-// Variables de couleur du booster, tirées de la catégorie (le booster doré garde sa propre palette)
-function packColors(category) {
-  if (!category) return undefined
+// Couleur de la bande du bas : celle réglée sur le booster (onglet Boosters de l'admin), avec un texte blanc ou foncé selon sa luminosité pour rester lisible.
+// Une couleur absente ou invalide laisse la couleur de la catégorie.
+export function bandColors(color) {
+  if (typeof color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(color)) return null
+  const ch = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
+  const lum = 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
+  return { '--pk-band': color, '--pk-bandtext': lum > 0.45 ? '#14173f' : '#ffffff' }
+}
+
+// Variables de couleur du booster, tirées de la catégorie (le booster doré garde sa propre palette) ; color = couleur de la bande réglée sur le booster
+function packColors(category, color) {
+  if (!category && !bandColors(color)) return undefined
+  if (!category) return bandColors(color)
   return {
     '--pk-a': category.color,
     '--pk-b': category.color2,
@@ -23,6 +33,7 @@ function packColors(category) {
     '--pk-crimp': category.color2,
     '--pk-text': category.text_color,
     '--pk-bandtext': '#ffffff',
+    ...bandColors(color),
   }
 }
 
@@ -47,7 +58,7 @@ const GLOW_IDS = ['gold', 'silver', 'red', 'blue', 'green', 'purple', 'rainbow']
 
 const STAR = 'M12 2.2l2.9 6.5 7.1.7-5.3 4.8 1.5 7-6.2-3.7-6.2 3.7 1.5-7L2 9.4l7.1-.7z'
 
-export default function Pack({ phase = 'idle', dim = false, golden = false, category = null, label = null, glow = 'none' }) {
+export default function Pack({ phase = 'idle', dim = false, golden = false, category = null, label = null, glow = 'none', color = null }) {
   const top = crimp(4, 20, 220, 30) + 'L230 34 L10 34 Z'
   const bottom = crimp(356, 340, 220, 30) + 'L230 326 L10 326 Z'
   const title = packTitle(golden ? 'Booster doré' : category?.name)
@@ -68,7 +79,7 @@ export default function Pack({ phase = 'idle', dim = false, golden = false, cate
     return undefined
   }, [title.text, title.size])
   return (
-    <div className={`pack-wrap ${phase} ${dim ? 'dim' : ''} ${golden ? 'golden' : ''}${halo ? ` has-glow glow-${halo}` : ''}`} style={golden ? undefined : packColors(category)} aria-hidden="true">
+    <div className={`pack-wrap ${phase} ${dim ? 'dim' : ''} ${golden ? 'golden' : ''}${halo ? ` has-glow glow-${halo}` : ''}`} style={golden ? undefined : packColors(category, color)} aria-hidden="true">
       <svg viewBox="0 0 240 360" role="img">
         <defs>
           <linearGradient id={`pk-body-${uid}`} x1="0" y1="0" x2="1" y2="1">

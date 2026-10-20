@@ -50,7 +50,7 @@ const art = { id: 22, name: 'Art Rare assuré', cards: 5, color: '#f59e0b', glow
 const legende = { id: 23, name: 'Légende', cards: 3, color: '#111111', glow: 'rainbow', price: 80, quantity: 4 }
 const forSale = { id: 24, name: 'Bronze', cards: 2, color: '#b45309', glow: 'none', price: 20, quantity: 0 }
 const base = { id: 'u1', username: 'Tsuba', boosters: 10, bonus_boosters: 0, coins: 500, coins_locked: 0, golden_packs: 0, gold_rewards: [], unseen_rewards: [], max_boosters: 10, regen_minutes: 10, regen_amount: 10,
-  active_category_id: 5, next_refill_at: null, cards_taken: 10, total_cards: 100, cgv_version: 3, shop_enabled: false, booster_types: [], standard_booster: { id: 1, name: 'Standard', glow: 'none' }, server_now: new Date().toISOString(),
+  active_category_id: 5, next_refill_at: null, cards_taken: 10, total_cards: 100, cgv_version: 3, shop_enabled: false, booster_types: [], standard_booster: { id: 1, name: 'Standard', glow: 'none', color: '#e8452e' }, server_now: new Date().toISOString(),
   subscription: { enabled: false, active: false } }
 const catalog = { categoryMap: { 5: { id: 5, name: 'Chattrapez les tous !', color: '#f59e0b', color2: '#c2410c', text_color: '#fff', image: '🐱' } }, typeMap: {}, types: [], rarities: [], cardRef: () => '', numberHidden: () => false }
 
@@ -79,12 +79,14 @@ ok('étagère : 3 boosters au plus', SHELF_MAX === 3)
 ok('étagère : avec 0 ou 1 paquet, rien (la page garde son grand paquet)', sp({ packs: [] }) === '' && sp({ packs: [{ key: 'main', name: 'Standard', glow: 'none', count: 3 }] }) === '')
 const three = sp({ packs: [{ key: 'main', name: 'Standard', glow: 'none', count: 10 }, { key: 't21', name: 'Silver', glow: 'silver', count: 2 }, { key: 't22', name: 'Art Rare assuré', glow: 'purple', count: 1 }] })
 ok('étagère : 3 paquets, chacun avec son nom sur la bande, son halo, son stock (×10, ×2, ×1) et un libellé lisible aux lecteurs d\'écran', (three.match(/class="shelf-pack/g) || []).length === 3 && /Silver<\/text>/.test(three) && /Art Rare assuré<\/text>/.test(three) && /glow-silver/.test(three) && /glow-purple/.test(three) && /×10/.test(three) && /×2/.test(three) && /×1/.test(three) && /aria-label="Booster Silver, 2 en stock"/.test(three))
+ok('étagère : la bande de chaque paquet prend la couleur de SON booster (Standard rouge, Silver argenté, Art Rare assuré orange)', (() => { const h = sp({ packs: [{ key: 'main', name: 'Standard', glow: 'none', color: '#e8452e', count: 10 }, { key: 't21', name: 'Silver', glow: 'silver', color: '#c0c0c0', count: 2 }, { key: 't22', name: 'Art Rare assuré', glow: 'purple', color: '#f59e0b', count: 1 }] }); return ['#e8452e', '#c0c0c0', '#f59e0b'].every((c) => h.includes(`--pk-band:${c}`)) })())
 ok('étagère : le paquet choisi est marqué (aria-pressed) et seul lui', /class="shelf-pack on" aria-pressed="true"/.test(three) && (three.match(/aria-pressed="true"/g) || []).length === 1)
 ok('étagère : un paquet vide est éteint (sans halo), les boutons sont désactivés quand une ouverture est en cours', !/glow-gold/.test(sp({ packs: [{ key: 'main', name: 'Standard', glow: 'gold', count: 0 }, { key: 't21', name: 'Silver', glow: 'none', count: 2 }] })) && /dim/.test(sp({ packs: [{ key: 'main', name: 'Standard', glow: 'none', count: 0 }, { key: 't21', name: 'Silver', glow: 'none', count: 2 }] })) && (sp({ packs: [{ key: 'main', name: 'S', glow: 'none', count: 1 }, { key: 't1', name: 'T', glow: 'none', count: 1 }], disabled: true }).match(/disabled=""/g) || []).length === 2)
 
 // ---------- la page ----------
 {
   const m = await mountPage(base)
+  ok('la bande du grand paquet prend la couleur du booster du stock gratuit', /--pk-band:\s*#e8452e/.test(m.host.querySelector('.pack-button .pack-wrap')?.getAttribute('style') ?? ''))
   ok('un seul booster (rien d\'autre en stock) : le grand paquet comme avant, pas d\'étagère, bouton « Ouvrir un booster »', !m.host.querySelector('.pack-shelf') && !!m.host.querySelector('.pack-button') && !!btn(m.host, /^Ouvrir un booster$/) && /10 boosters prêts/.test(text(m.host)))
   await m.unmount()
 }
