@@ -927,3 +927,13 @@ html.subscriber { --bg: #fbf1d3; }
 .reveal-card.art-landed { animation: cardin .35s cubic-bezier(.2, .8, .2, 1), artpop 1s ease-out; }
 @keyframes artpop { 0% { filter: brightness(2.4) drop-shadow(0 0 46px #ffcf3a); } 100% { filter: brightness(1) drop-shadow(0 0 0 transparent); } }
 @media (prefers-reduced-motion: reduce) { .art-intro { display: none; } .reveal-card.art-landed { animation: none; } }
+
+/* Autres boosters : de vrais paquets (nom, halo, stock) avec leurs boutons dessous */
+.extra-packs { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 22px 16px; justify-items: center; }
+.extra-packs > li { display: grid; justify-items: center; align-content: start; gap: 8px; width: 100%; max-width: 190px; padding: 0; border: 0; border-left: 0; border-radius: 0; background: none; text-align: center; }
+.extra-pack-art { position: relative; display: block; width: 100%; }
+.extra-pack-art .pack-wrap { width: 100%; }
+.extra-packs .extra-text { flex: none; display: grid; justify-items: center; gap: 2px; text-align: center; }
+.extra-packs .extra-actions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; width: 100%; }
+.extra-packs .extra-actions .btn { width: 100%; justify-content: center; }
+.extra-packs .extra-actions .info-btn { align-self: center; }

@@ -73,16 +73,20 @@ export function PackShelf({ packs, selected, category, disabled, onSelect }) {
   )
 }
 
-// Autres types de boosters (Silver, Gold, Légende…) : en stock et/ou en vente contre des pièces ; « i » ouvre leurs chances
-export function ExtraBoosters({ items, coins, disabled, onOpen, onBuy, onInfo }) {
+// Autres types de boosters (Silver, Gold, Légende…) : en stock et/ou en vente contre des pièces. Chacun est un PAQUET comme le booster principal (son nom sur la bande, son halo,
+// son stock en pastille) avec ses boutons dessous (Ouvrir, Acheter) ; « i » ouvre leurs chances. category = la catégorie en cours (titre du paquet).
+export function ExtraBoosters({ items, coins, disabled, onOpen, onBuy, onInfo, category = null }) {
   if (!items || items.length === 0) return null
   return (
     <section className="extra-boosters" aria-label="Autres boosters">
       <h3>Autres boosters</h3>
-      <ul className="extra-list">
+      <ul className="extra-packs">
         {items.map((it) => (
           <li key={it.id} style={{ '--bt': it.color }}>
-            <i className="extra-dot" aria-hidden="true" />
+            <span className="extra-pack-art">
+              <Pack category={category} label={it.name} glow={it.glow} />
+              {it.quantity > 0 && <span className="shelf-count" aria-hidden="true">×{fmt(it.quantity)}</span>}
+            </span>
             <span className="extra-text">
               <strong>{it.name}</strong>
               <small>{it.cards} carte{it.cards > 1 ? 's' : ''}{it.quantity > 0 ? ` · ${fmt(it.quantity)} en stock` : ''}</small>
@@ -279,7 +283,7 @@ export default function Boosters({ goCollection }) {
           Ouvrir un booster{selType ? ` ${selType.name}` : boosterName ? ` ${boosterName}` : ''}
         </button>
 
-        <ExtraBoosters items={(status?.booster_types ?? []).filter((b) => !shelfTypes.some((s) => s.id === b.id))} coins={coinsFree} disabled={!!overlay} onOpen={(it) => open(false, 'type', it.id)} onBuy={buy} onInfo={setOddsFor} />
+        <ExtraBoosters category={category} items={(status?.booster_types ?? []).filter((b) => !shelfTypes.some((s) => s.id === b.id))} coins={coinsFree} disabled={!!overlay} onOpen={(it) => open(false, 'type', it.id)} onBuy={buy} onInfo={setOddsFor} />
         {oddsFor && category && <BoosterOddsSheet category={category} boosterType={oddsFor} rarityMap={rarityMap} onClose={() => setOddsFor(null)} />}
         <GoldRewardList rewards={goldRewards} typeMap={catalog?.typeMap} name={status?.reward_booster?.name} disabled={!!overlay} onOpen={(id) => open(false, 'gold', id)} />
         {goldenPacks > 0 && (
