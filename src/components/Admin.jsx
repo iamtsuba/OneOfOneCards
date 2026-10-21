@@ -27,8 +27,8 @@ export function useWide() {
 }
 
 const TABS = [
-  ['categories', 'Catégories'],
-  ['types', 'Types'],
+  ['categories', 'Collections'],
+  ['types', 'Cartes'],
   ['boosters', 'Boosters'],
   ['config', 'Réglages'],
   ['rarities', 'Raretés'],
@@ -227,34 +227,34 @@ const Color = ({ label, value, onChange }) => (
   </label>
 )
 
-// ---------- Catégories ----------
+// ---------- Collections ----------
 export function CategoriesTab({ data, run, busy, wide = false }) {
   if (wide) return <CategoriesWide data={data} run={run} busy={busy} />
   const nextPos = Math.max(0, ...data.categories.map((c) => c.position)) + 1
   return (
     <div className="admin-list">
       <p className="muted">
-        Une seule catégorie est ouvrable à la fois : la première (par position) qui est activée et pas terminée. Quand toutes ses cartes sont tirées,
-        la suivante s’ouvre. Les raretés et leur nombre de séries ne se règlent plus par catégorie : elles se règlent par type (onglet « Types »).
+        Toutes les collections activées et pas terminées sont ouvertes EN MÊME TEMPS : le joueur choisit celle dans laquelle il ouvre ses boosters. Une collection se termine
+        toute seule quand toutes ses cartes sont tirées ; désactive-en une pour la préparer sans l’ouvrir. Les raretés et leur nombre de séries ne se règlent plus par collection : elles se règlent par carte (onglet « Cartes »).
       </p>
       {data.categories.map((c) => (
         <CategoryForm key={c.id} cat={c} run={run} busy={busy} typeCount={data.types.filter((t) => t.category_id === c.id).length} />
       ))}
-      <h3>Nouvelle catégorie</h3>
+      <h3>Nouvelle collection</h3>
       <CategoryForm key={`new-${data.categories.length}`} cat={null} nextPos={nextPos} run={run} busy={busy} />
     </div>
   )
 }
 
-// Catégories sur PC : à gauche la liste, à droite la fiche de la catégorie choisie
+// Collections sur PC : à gauche la liste, à droite la fiche de la collection choisie
 function CategoriesWide({ data, run, busy }) {
   const [sel, setSel] = useState(data.categories[0]?.id ?? 'new')
   const cat = typeof sel === 'number' ? data.categories.find((c) => c.id === sel) ?? null : null
   const nextPos = Math.max(0, ...data.categories.map((c) => c.position)) + 1
   return (
     <div className="admin-md cats-wide">
-      <aside className="md-list" aria-label="Catégories">
-        <button type="button" className={`btn ${!cat ? '' : 'ghost'}`} onClick={() => setSel('new')}>+ Nouvelle catégorie</button>
+      <aside className="md-list" aria-label="Collections">
+        <button type="button" className={`btn ${!cat ? '' : 'ghost'}`} onClick={() => setSel('new')}>+ Nouvelle collection</button>
         <ul className="md-items">
           {data.categories.map((c) => {
             const pct = c.total ? (c.taken / c.total) * 100 : 0
@@ -272,8 +272,8 @@ function CategoriesWide({ data, run, busy }) {
           })}
         </ul>
         <p className="fine">
-          Une seule catégorie est ouvrable à la fois : la première (par position) qui est activée et pas terminée. Quand toutes ses cartes sont tirées, la suivante s’ouvre.
-          Les raretés et leur nombre de séries se règlent par type (écran « Types »).
+          Toutes les collections activées et pas terminées sont ouvertes en même temps : le joueur choisit celle dans laquelle il ouvre ses boosters. Une collection se termine toute seule quand toutes ses cartes sont tirées.
+          Les raretés et leur nombre de séries se règlent par carte (écran « Cartes »).
         </p>
       </aside>
       <section className="md-detail">
@@ -285,19 +285,19 @@ function CategoriesWide({ data, run, busy }) {
   )
 }
 
-// Préproduction uniquement : copie la catégorie (types, images, raretés) vers la production. La fonction serveur n'existe qu'en préproduction.
+// Préproduction uniquement : copie la collection (types, images, raretés) vers la production. La fonction serveur n'existe qu'en préproduction.
 function CopyToProd({ cat, typeCount, run, busy }) {
   const [prodPw, setProdPw] = useState('')
   const [createMissing, setCreateMissing] = useState(false)
   const s = (n, one = '', many = 's') => (n > 1 ? many : one)
   const copy = () => {
-    if (!window.confirm(`Copier « ${cat.name} » (${typeCount} type${s(typeCount)}) vers la PRODUCTION ?`)) return
+    if (!window.confirm(`Copier « ${cat.name} » (${typeCount} carte${s(typeCount)}) vers la PRODUCTION ?`)) return
     run(
       (pw) => api.adminCopyCategoryToProd(pw, cat.id, prodPw, createMissing),
       (res) => {
         setProdPw('')
         const made = res.created_rarities?.length ? ` Raretés créées en production : ${res.created_rarities.join(', ')}.` : ''
-        return `« ${res.name} » copiée en production : ${res.types} type${s(res.types)}, ${res.rarities} réglage${s(res.rarities)} de raretés.${made} Elle y est désactivée : active-la dans la console de la production.`
+        return `« ${res.name} » copiée en production : ${res.types} carte${s(res.types)}, ${res.rarities} réglage${s(res.rarities)} de raretés.${made} Elle y est désactivée : active-la dans la console de la production.`
       },
     )
   }
@@ -305,9 +305,9 @@ function CopyToProd({ cat, typeCount, run, busy }) {
     <section className="copy-prod" aria-label="Copie vers la production">
       <h4>Copier vers la production</h4>
       <p className="fine">
-        Crée dans la <strong>production</strong> une copie de cette catégorie : nom, couleurs, image du booster, ses {typeCount} type{s(typeCount)} (images, secret) et les
-        raretés de chaque type (séries, numérotées, style). Les cartes, les joueurs et les annonces ne sont pas copiés. La copie arrive <strong>désactivée</strong>, à la fin
-        de la liste : tu l’actives ensuite dans la console de la production. Refusée si une catégorie du même nom y existe déjà.
+        Crée dans la <strong>production</strong> une copie de cette collection : nom, couleurs, image du booster, ses {typeCount} type{s(typeCount)} (images, secret) et les
+        raretés de chaque carte (séries, numérotées, style). Les cartes, les joueurs et les annonces ne sont pas copiés. La copie arrive <strong>désactivée</strong>, à la fin
+        de la liste : tu l’actives ensuite dans la console de la production. Refusée si une collection du même nom y existe déjà.
       </p>
       <label>
         Mot de passe administrateur de la production
@@ -338,7 +338,7 @@ function CategoryForm({ cat, nextPos, run, busy, typeCount = 0 }) {
     <div className="admin-card" style={{ '--cat1': f.color, '--cat2': f.color2 }}>
       <div className="admin-card-head">
         <i className="cat-dot" />
-        <strong>{cat ? cat.name : 'Nouvelle catégorie'}</strong>
+        <strong>{cat ? cat.name : 'Nouvelle collection'}</strong>
         {cat && <span className={`badge ${cat.closed ? 'done' : ''}`}>{cat.closed ? 'Terminée' : cat.enabled ? 'Active' : 'Désactivée'}</span>}
       </div>
       {cat && <p className="fine">{fmt(cat.taken)} cartes tirées sur {fmt(cat.total)} ({pct.toFixed(pct < 1 ? 3 : 1)} %)</p>}
@@ -357,22 +357,22 @@ function CategoryForm({ cat, nextPos, run, busy, typeCount = 0 }) {
       </div>
       <div className="cat-side">
       <ImageField label="Image du booster (emoji ou adresse https://), au centre ; « 1/1 » si vide" value={f.image} onChange={set('image')} />
-      <p className="fine">Aperçu du booster : le nom de la catégorie en haut, son image au centre.</p>
-      <div className="admin-pack-preview"><Pack category={{ name: f.name || 'Catégorie', color: f.color, color2: f.color2, text_color: f.text_color, image: f.image }} /></div>
+      <p className="fine">Aperçu du booster : le nom de la collection en haut, son image au centre.</p>
+      <div className="admin-pack-preview"><Pack category={{ name: f.name || 'Collection', color: f.color, color2: f.color2, text_color: f.text_color, image: f.image }} /></div>
       </div>
       </div>
 
       <div className="row">
-        <button className="btn" disabled={busy || !f.name.trim()} onClick={() => run((pw) => api.adminSaveCategory(pw, { id: cat?.id, ...f }), cat ? 'Catégorie enregistrée.' : 'Catégorie créée.')}>
+        <button className="btn" disabled={busy || !f.name.trim()} onClick={() => run((pw) => api.adminSaveCategory(pw, { id: cat?.id, ...f }), cat ? 'Collection enregistrée.' : 'Collection créée.')}>
           {cat ? 'Enregistrer' : 'Créer'}
         </button>
         {cat && (
-          <button className="btn ghost" disabled={busy} onClick={() => run((pw) => api.adminSetCategoryClosed(pw, cat.id, !cat.closed), cat.closed ? 'Catégorie rouverte.' : 'Catégorie terminée : la suivante s’ouvre.')}>
+          <button className="btn ghost" disabled={busy} onClick={() => run((pw) => api.adminSetCategoryClosed(pw, cat.id, !cat.closed), cat.closed ? 'Collection rouverte.' : 'Collection terminée : elle n’est plus ouverte aux joueurs.')}>
             {cat.closed ? 'Rouvrir' : 'Terminer maintenant'}
           </button>
         )}
         {cat && !started && (
-          <button className="btn ghost danger" disabled={busy} onClick={() => window.confirm(`Supprimer « ${cat.name} » et ses types ?`) && run((pw) => api.adminDeleteCategory(pw, cat.id), 'Catégorie supprimée.')}>
+          <button className="btn ghost danger" disabled={busy} onClick={() => window.confirm(`Supprimer « ${cat.name} » et ses cartes ?`) && run((pw) => api.adminDeleteCategory(pw, cat.id), 'Collection supprimée.')}>
             Supprimer
           </button>
         )}
@@ -384,7 +384,7 @@ function CategoryForm({ cat, nextPos, run, busy, typeCount = 0 }) {
         <div className="danger-zone">
           <p className="fine">
             Zone dangereuse : <strong>{cat.taken}</strong> carte{cat.taken > 1 ? 's' : ''} déjà tirée{cat.taken > 1 ? 's' : ''} dans cette
-            catégorie. La supprimer retire aussi ces cartes aux joueurs qui les possèdent, ainsi que ses types, annonces, enchères (les
+            collection. La supprimer retire aussi ces cartes aux joueurs qui les possèdent, ainsi que ses cartes, annonces, enchères (les
             enchérisseurs en tête sont remboursés), offres, notifications et favoris liés. Irréversible.
           </p>
           <label>
@@ -394,9 +394,9 @@ function CategoryForm({ cat, nextPos, run, busy, typeCount = 0 }) {
           <button
             className="btn ghost danger"
             disabled={busy || confirmDelete !== cat.name}
-            onClick={() => run((pw) => api.adminForceDeleteCategory(pw, cat.id, confirmDelete), 'Catégorie et tout son contenu supprimés.')}
+            onClick={() => run((pw) => api.adminForceDeleteCategory(pw, cat.id, confirmDelete), 'Collection et tout son contenu supprimés.')}
           >
-            Supprimer la catégorie et tout son contenu
+            Supprimer la collection et tout son contenu
           </button>
         </div>
       )}
@@ -412,18 +412,18 @@ export function TypesTab({ data, run, busy, initialCollapsed = [], wide = false,
   const types = data.types.filter((t) => t.category_id === catId)
   const nextPos = Math.max(0, ...types.map((t) => t.position)) + 1
   if (wide) return <TypesWide data={data} run={run} busy={busy} initialSelection={initialSelection} />
-  if (!data.categories.length) return <p className="muted">Crée d’abord une catégorie.</p>
+  if (!data.categories.length) return <p className="muted">Crée d’abord une collection.</p>
   return (
     <div className="admin-list">
       <label>
-        Catégorie
+        Collection
         <select value={catId ?? ''} onChange={(e) => setCatId(Number(e.target.value))}>
           {data.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       </label>
       <p className="muted">
         L’image est un emoji, une adresse https:// ou une image téléversée (réduite à 256 px). Les raretés, le nombre de séries et les numéros visibles
-        se règlent <strong>par type</strong> (bloc « Raretés de ce type » de chaque fiche). Attention aux droits des images que tu utilises.
+        se règlent <strong>par carte</strong> (bloc « Raretés de cette carte » de chaque fiche). Attention aux droits des images que tu utilises.
       </p>
       {types.length > 1 && (
         <div className="row">
@@ -434,9 +434,9 @@ export function TypesTab({ data, run, busy, initialCollapsed = [], wide = false,
       {types.map((t) => (
         <TypeForm key={t.id} type={t} categoryId={catId} data={data} run={run} busy={busy} collapsed={collapsed.has(t.id)} onToggle={() => toggle(t.id)} />
       ))}
-      <h3>Nouveau type</h3>
+      <h3>Nouvelle carte</h3>
       <TypeForm key={`new-${catId}-${types.length}`} type={null} categoryId={catId} nextPos={nextPos} run={run} busy={busy} />
-      <h3>Importer des types</h3>
+      <h3>Importer des cartes</h3>
       <ImportPanel key={`import-${catId}-${types.length}`} categoryId={catId} types={types} data={data} run={run} busy={busy} />
     </div>
   )
@@ -491,7 +491,7 @@ function TypeForm({ type, categoryId, nextPos, data, run, busy, collapsed = fals
           </button>
         )}
         <span className="admin-type-art"><TypeArt type={{ image: f.image }} /></span>
-        <strong>{type ? type.name : 'Nouveau type'}</strong>
+        <strong>{type ? type.name : 'Nouvelle carte'}</strong>
         {type && type.taken > 0 && <span className="badge">{fmt(type.taken)} tirées</span>}
         {type?.series_count && <span className="badge">{fmt(type.series_count)} séries</span>}
         {type?.secret && <span className="badge">secret</span>}
@@ -504,11 +504,11 @@ function TypeForm({ type, categoryId, nextPos, data, run, busy, collapsed = fals
       </div>
       <ImageField label="Image (emoji ou adresse https://)" value={f.image} onChange={(v) => setF((cur) => ({ ...cur, image: v }))} />
       <div className="row">
-        <button className="btn" disabled={busy || !f.name.trim()} onClick={() => run((pw) => api.adminSaveType(pw, { id: type?.id, category_id: categoryId, ...f }), type ? 'Type enregistré.' : 'Type créé.')}>
+        <button className="btn" disabled={busy || !f.name.trim()} onClick={() => run((pw) => api.adminSaveType(pw, { id: type?.id, category_id: categoryId, ...f }), type ? 'Carte enregistrée.' : 'Carte créée.')}>
           {type ? 'Enregistrer' : 'Créer'}
         </button>
         {type && type.taken === 0 && (
-          <button className="btn ghost danger" disabled={busy} onClick={() => window.confirm(`Supprimer « ${type.name} » ?`) && run((pw) => api.adminDeleteType(pw, type.id), 'Type supprimé.')}>
+          <button className="btn ghost danger" disabled={busy} onClick={() => window.confirm(`Supprimer « ${type.name} » ?`) && run((pw) => api.adminDeleteType(pw, type.id), 'Carte supprimée.')}>
             Supprimer
           </button>
         )}
@@ -521,8 +521,8 @@ function TypeForm({ type, categoryId, nextPos, data, run, busy, collapsed = fals
 }
 
 // ---------- Raretés d'un type : état partagé par l'éditeur étroit (mobile) et l'éditeur large (PC) ----------
-// CHAQUE rareté a ses propres séries, de 1/1 à N/N ; 0 série = la rareté n'existe pas pour ce type ; numéros visibles ; style de carte ;
-// type secret. type peut être null (type en cours de création : categoryId donne alors la catégorie).
+// CHAQUE rareté a ses propres séries, de 1/1 à N/N ; 0 série = la rareté n'existe pas pour cette carte ; numéros visibles ; style de carte ;
+// type secret. type peut être null (type en cours de création : categoryId donne alors la collection).
 function useRarityEditor(type, data, categoryId) {
   const rarityList = data.rarities.filter((r) => r.kind === 'range').sort((a, b) => a.sort_order - b.sort_order)
   const nameOf = (id) => data.rarities.find((r) => r.id === id)?.name ?? id
@@ -550,7 +550,7 @@ function useRarityEditor(type, data, categoryId) {
   const shown = custom ? (problem ? [] : rows.map(toNum)) : defaults
   const describe = (r) => {
     const smax = r.max_series
-    if (smax < 1) return 'absente de ce type (0 série)'
+    if (smax < 1) return 'absente de cette carte (0 série)'
     const k = Math.min(r.numbered_series, smax)
     const cards = `cartes de 1/1 à ${fmt(smax)}/${fmt(smax)} (${fmt(cardCount(smax))} cartes)`
     const fa = r.card_style === 'fullart' ? ' — style FullArt' : ''
@@ -569,17 +569,17 @@ function useRarityEditor(type, data, categoryId) {
 function TypeRaritiesEditor({ type, data, run, busy }) {
   const ed = useRarityEditor(type, data)
   const { custom, rows, secret, setSecret, setRow, problem, shown, describe, sampleRarity, nameOf } = ed
-  const save = () => run((pw) => api.adminSaveTypeRarities(pw, type.id, ed.toSend, secret), 'Raretés du type enregistrées.')
+  const save = () => run((pw) => api.adminSaveTypeRarities(pw, type.id, ed.toSend, secret), 'Raretés de la carte enregistrées.')
 
   return (
     <details className="type-rarities">
       <summary>
-        Raretés de ce type
-        <span className="muted"> — {custom ? 'propres à ce type' : 'réglages par défaut (onglet Raretés)'}</span>
+        Raretés de cette carte
+        <span className="muted"> — {custom ? 'propres à cette carte' : 'réglages par défaut (onglet Raretés)'}</span>
       </summary>
       <label className="check inline">
         <input type="checkbox" checked={secret} onChange={(e) => setSecret(e.target.checked)} />
-        <span>Type secret : apparaît dans l’album comme une carte mystère tant qu’aucune carte n’est possédée, numéroté au-delà de la checklist (ex. 4/3)</span>
+        <span>Carte secrète : apparaît dans l’album comme une carte mystère tant qu’aucune carte n’est possédée, numéroté au-delà de la checklist (ex. 4/3)</span>
       </label>
 
       {custom && (
@@ -587,9 +587,9 @@ function TypeRaritiesEditor({ type, data, run, busy }) {
           <p className="fine">
             Chaque rareté a ses propres séries, de 1/1 à N/N (N = « séries max. »). Exemple : Ultra Rare, 50 séries, 5 numérotées → cartes de 1/1 à
             50/50, et seules les séries 1 à 5 (1/1 à 5/5) ont leur numéro visible ; les autres sont numérotées en interne mais le numéro est masqué sur
-            la carte. 0 série numérotée = rareté non numérotée. <strong>0 série max. = la rareté n’existe pas pour ce type</strong> (une carte peut n’exister
+            la carte. 0 série numérotée = rareté non numérotée. <strong>0 série max. = la rareté n’existe pas pour cette carte</strong> (une carte peut n’exister
             que dans une seule rareté). Les raretés sont indépendantes : une même série peut exister dans plusieurs raretés (ce sont des cartes différentes).
-            <strong> Style de carte</strong> : Simple (image dans un cadre) ou FullArt (l’image du type couvre toute la carte), au choix pour chaque rareté.
+            <strong> Style de carte</strong> : Simple (image dans un cadre) ou FullArt (l’image couvre toute la carte), au choix pour chaque rareté.
           </p>
           <div className="type-rarity-rows">
             {rows.map((r, i) => (
@@ -612,7 +612,7 @@ function TypeRaritiesEditor({ type, data, run, busy }) {
         </>
       )}
 
-      {!custom && <p className="fine">Ce type utilise les réglages par défaut de l’onglet « Raretés » (numéros toujours visibles). Réglages actuels :</p>}
+      {!custom && <p className="fine">Cette carte utilise les réglages par défaut de l’onglet « Raretés » (numéros toujours visibles). Réglages actuels :</p>}
       {shown.length > 0 && (
         <ul className="type-rarity-bands">
           {shown.map((b) => (
@@ -622,7 +622,7 @@ function TypeRaritiesEditor({ type, data, run, busy }) {
           ))}
         </ul>
       )}
-      {!custom && <div className="row"><button type="button" className="btn ghost" onClick={ed.customize}>Personnaliser les raretés de ce type</button></div>}
+      {!custom && <div className="row"><button type="button" className="btn ghost" onClick={ed.customize}>Personnaliser les raretés de cette carte</button></div>}
       {!custom && <p className="fine">Style de carte : Simple pour toutes les raretés. Personnalise les raretés pour choisir FullArt rareté par rareté.</p>}
       {sampleRarity && (
         <div className="style-previews" aria-label="Aperçu des deux styles de carte">
@@ -634,7 +634,7 @@ function TypeRaritiesEditor({ type, data, run, busy }) {
           ))}
         </div>
       )}
-      {type.taken > 0 && custom && <p className="fine">Des cartes de ce type ont déjà été tirées : retirer une rareté (0 série) ou réduire ses séries sous une carte existante est refusé.</p>}
+      {type.taken > 0 && custom && <p className="fine">Des exemplaires de cette carte ont déjà été tirés : retirer une rareté (0 série) ou réduire ses séries sous une carte existante est refusé.</p>}
 
       <div className="row">
         <button className="btn" disabled={busy || !!problem} onClick={save}>Enregistrer les raretés</button>
@@ -716,7 +716,7 @@ function RaritiesTable({ ed, previewType }) {
   )
 }
 
-// Appliquer les raretés de ce type à d'autres types de la catégorie (réglage identique pour beaucoup de types)
+// Appliquer les raretés de cette carte à d'autres types de la collection (réglage identique pour beaucoup de types)
 function CopyRarities({ ed, others, run, busy }) {
   const [open, setOpen] = useState(false)
   const [picked, setPicked] = useState(() => new Set())
@@ -734,14 +734,14 @@ function CopyRarities({ ed, others, run, busy }) {
         }
         return { done, failed }
       },
-      (res) => `Raretés appliquées à ${res.done} type${res.done > 1 ? 's' : ''}${res.failed.length ? `. Refusé pour : ${res.failed.join(' ; ')}` : '.'}`,
+      (res) => `Raretés appliquées à ${res.done} carte${res.done > 1 ? 's' : ''}${res.failed.length ? `. Refusé pour : ${res.failed.join(' ; ')}` : '.'}`,
     )
   return (
     <details className="rar-copy" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary>Appliquer ces raretés à d’autres types…</summary>
+      <summary>Appliquer ces raretés à d’autres cartes…</summary>
       <p className="fine">
-        Copie {ed.custom ? 'les raretés ci-dessus (séries, numérotées, style)' : 'le retour aux réglages par défaut'} vers les types cochés. Le statut « secret » n’est pas copié.
-        Un type dont des cartes ne rentreraient plus dans ces réglages est refusé (les autres sont traités).
+        Copie {ed.custom ? 'les raretés ci-dessus (séries, numérotées, style)' : 'le retour aux réglages par défaut'} vers les cartes cochées. Le statut « secret » n’est pas copié.
+        Une carte dont des exemplaires ne rentreraient plus dans ces réglages est refusée (les autres sont traitées).
       </p>
       <div className="rar-copy-list">
         {others.map((t) => (
@@ -751,17 +751,17 @@ function CopyRarities({ ed, others, run, busy }) {
       <div className="row">
         <button type="button" className="btn ghost" onClick={() => setPicked(new Set(others.map((t) => t.id)))}>Tout cocher</button>
         <button type="button" className="btn ghost" onClick={() => setPicked(new Set())}>Tout décocher</button>
-        <button type="button" className="btn" disabled={busy || targets.length === 0 || !!ed.problem} onClick={apply}>Appliquer à {targets.length} type{targets.length > 1 ? 's' : ''}</button>
+        <button type="button" className="btn" disabled={busy || targets.length === 0 || !!ed.problem} onClick={apply}>Appliquer à {targets.length} carte{targets.length > 1 ? 's' : ''}</button>
       </div>
     </details>
   )
 }
 
-// Éditeur de type pour PC : le détail du type en haut, ses raretés dessous, un seul bouton « Enregistrer le type »
+// Éditeur de type pour PC : le détail du type en haut, ses raretés dessous, un seul bouton « Enregistrer la carte »
 function TypeEditorWide({ type, categoryId, nextPos, data, run, busy, others, onSaved }) {
   const [f, setF] = useState({ name: type?.name ?? '', position: type?.position ?? nextPos ?? 1, image: type?.image ?? '' })
   const ed = useRarityEditor(type, data, categoryId)
-  const previewType = { id: type?.id ?? 0, name: f.name || 'Nouveau type', image: f.image }
+  const previewType = { id: type?.id ?? 0, name: f.name || 'Nouvelle carte', image: f.image }
   const valid = f.name.trim() && !ed.problem
   const save = () =>
     run(async (pw) => {
@@ -771,14 +771,14 @@ function TypeEditorWide({ type, categoryId, nextPos, data, run, busy, others, on
       if (id && (ed.toSend !== null || ed.secret !== !!type?.secret)) await api.adminSaveTypeRarities(pw, id, ed.toSend, ed.secret)
       onSaved?.(id)
       return res
-    }, type ? 'Type enregistré.' : 'Type créé.')
+    }, type ? 'Carte enregistrée.' : 'Carte créée.')
   return (
     <div className="ted">
-      <section className="ted-card ted-detail" aria-label="Détail du type">
+      <section className="ted-card ted-detail" aria-label="Détail de la carte">
         <header className="ted-head">
           <span className="admin-type-art big"><TypeArt type={{ image: f.image }} /></span>
           <div className="ted-title">
-            <h3>{type ? type.name : 'Nouveau type'}</h3>
+            <h3>{type ? type.name : 'Nouvelle carte'}</h3>
             <p className="fine">
               {type && type.taken > 0 && <span className="badge">{fmt(type.taken)} tirées</span>}
               {type?.series_count && <span className="badge">{fmt(type.series_count)} séries</span>}
@@ -786,9 +786,9 @@ function TypeEditorWide({ type, categoryId, nextPos, data, run, busy, others, on
             </p>
           </div>
           <div className="ted-actions">
-            <button className="btn" disabled={busy || !valid} onClick={save}>{type ? 'Enregistrer le type' : 'Créer le type'}</button>
+            <button className="btn" disabled={busy || !valid} onClick={save}>{type ? 'Enregistrer la carte' : 'Créer la carte'}</button>
             {type && type.taken === 0 && (
-              <button className="btn ghost danger" disabled={busy} onClick={() => window.confirm(`Supprimer « ${type.name} » ?`) && run((pw) => api.adminDeleteType(pw, type.id), 'Type supprimé.')}>
+              <button className="btn ghost danger" disabled={busy} onClick={() => window.confirm(`Supprimer « ${type.name} » ?`) && run((pw) => api.adminDeleteType(pw, type.id), 'Carte supprimée.')}>
                 Supprimer
               </button>
             )}
@@ -799,24 +799,24 @@ function TypeEditorWide({ type, categoryId, nextPos, data, run, busy, others, on
           <label>Position<input type="number" value={f.position} onChange={(e) => setF({ ...f, position: e.target.value })} /></label>
           <label className="check inline ted-secret">
             <input type="checkbox" checked={ed.secret} onChange={(e) => ed.setSecret(e.target.checked)} />
-            <span>Type secret : carte mystère dans l’album tant qu’aucune carte n’est possédée (numéro au-delà de la checklist, ex. 4/3)</span>
+            <span>Carte secrète : carte mystère dans l’album tant qu’aucune carte n’est possédée (numéro au-delà de la checklist, ex. 4/3)</span>
           </label>
           <div className="ted-image"><ImageField label="Image (emoji ou adresse https://)" value={f.image} onChange={(v) => setF((cur) => ({ ...cur, image: v }))} /></div>
         </div>
       </section>
 
-      <section className="ted-card ted-rarities" aria-label="Raretés du type">
+      <section className="ted-card ted-rarities" aria-label="Raretés de la carte">
         <header className="rar-head">
           <h3>Raretés</h3>
-          <span className="muted">{ed.custom ? 'propres à ce type' : 'réglages par défaut (onglet Raretés)'}</span>
+          <span className="muted">{ed.custom ? 'propres à cette carte' : 'réglages par défaut (onglet Raretés)'}</span>
           <div className="ted-actions">
             {ed.custom
               ? <button type="button" className="btn ghost" onClick={ed.resetToDefaults}>Revenir aux réglages par défaut</button>
-              : <button type="button" className="btn ghost" onClick={ed.customize}>Personnaliser les raretés de ce type</button>}
+              : <button type="button" className="btn ghost" onClick={ed.customize}>Personnaliser les raretés de cette carte</button>}
           </div>
         </header>
         <p className="fine">
-          Chaque rareté a ses propres séries (1/1 à N/N). <strong>0 série = la rareté n’existe pas pour ce type.</strong> « Numérotées » = les premières séries au numéro visible.
+          Chaque rareté a ses propres séries (1/1 à N/N). <strong>0 série = la rareté n’existe pas pour cette carte.</strong> « Numérotées » = les premières séries au numéro visible.
           {type?.taken > 0 && ed.custom ? ' Des cartes ont déjà été tirées : retirer une rareté ou réduire ses séries sous une carte existante est refusé.' : ''}
           {!ed.custom && ' Réglages par défaut : personnalise-les pour choisir les raretés et le style (FullArt…).'}
         </p>
@@ -838,18 +838,18 @@ function TypesWide({ data, run, busy, initialSelection = null }) {
   const type = typeof sel === 'number' ? types.find((t) => t.id === sel) ?? null : null
   const nextPos = Math.max(0, ...types.map((t) => t.position)) + 1
   const pickCat = (id) => { setCatId(id); setSel(null); setQuery('') }
-  if (!data.categories.length) return <p className="muted">Crée d’abord une catégorie.</p>
+  if (!data.categories.length) return <p className="muted">Crée d’abord une collection.</p>
   const mode = sel === 'new' ? 'new' : sel === 'import' ? 'import' : type ? 'edit' : 'none'
   return (
     <div className="admin-md types-wide">
       <aside className="md-list" aria-label="Types">
         <label>
-          Catégorie
+          Collection
           <select value={catId ?? ''} onChange={(e) => pickCat(Number(e.target.value))}>
             {data.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </label>
-        <input type="search" className="md-search" placeholder={`Rechercher parmi ${types.length} type${types.length > 1 ? 's' : ''}…`} value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Rechercher un type" />
+        <input type="search" className="md-search" placeholder={`Rechercher parmi ${types.length} carte${types.length > 1 ? 's' : ''}…`} value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Rechercher un type" />
         <div className="row nowrap">
           <button type="button" className={`btn ${mode === 'new' ? '' : 'ghost'}`} onClick={() => setSel('new')}>+ Nouveau</button>
           <button type="button" className={`btn ${mode === 'import' ? '' : 'ghost'}`} onClick={() => setSel('import')}>Importer</button>
@@ -866,7 +866,7 @@ function TypesWide({ data, run, busy, initialSelection = null }) {
               </button>
             </li>
           ))}
-          {shown.length === 0 && <li className="muted md-empty">{types.length ? 'Aucun type ne correspond.' : 'Aucun type dans cette catégorie.'}</li>}
+          {shown.length === 0 && <li className="muted md-empty">{types.length ? 'Aucune carte ne correspond.' : 'Aucune carte dans cette collection.'}</li>}
         </ul>
       </aside>
       <section className="md-detail">
@@ -877,7 +877,7 @@ function TypesWide({ data, run, busy, initialSelection = null }) {
             type={type} categoryId={catId} data={data} run={run} busy={busy} others={types.filter((t) => t.id !== type.id)} />
         )}
         {mode === 'import' && <ImportPanel key={`import-${catId}-${types.length}`} categoryId={catId} types={types} data={data} run={run} busy={busy} />}
-        {mode === 'none' && <p className="muted md-empty">Choisis un type dans la liste, crée-en un nouveau, ou importe-en plusieurs d’un coup (fichier CSV et photos).</p>}
+        {mode === 'none' && <p className="muted md-empty">Choisis une carte dans la liste, crée-en une nouvelle, ou importe-en plusieurs d’un coup (fichier CSV et photos).</p>}
       </section>
     </div>
   )
@@ -979,7 +979,7 @@ function ImportPanel({ categoryId, types, data, run, busy }) {
         return { made, skipped, updated }
       },
       (res) => [
-        `${res.made} type${res.made > 1 ? 's' : ''} importé${res.made > 1 ? 's' : ''}`,
+        `${res.made} carte${res.made > 1 ? 's' : ''} importée${res.made > 1 ? 's' : ''}`,
         res.skipped ? `${res.skipped} ignoré${res.skipped > 1 ? 's' : ''} (déjà présent${res.skipped > 1 ? 's' : ''})` : '',
         res.updated ? `${res.updated} photo${res.updated > 1 ? 's' : ''} mise${res.updated > 1 ? 's' : ''} à jour` : '',
       ].filter(Boolean).join(', ') + '.',
@@ -988,32 +988,32 @@ function ImportPanel({ categoryId, types, data, run, busy }) {
   return (
     <div className="import-panel">
       <header className="ted-head">
-        <h3>Importer des types</h3>
+        <h3>Importer des cartes</h3>
         {canImport && (
           <div className="ted-actions">
             <button className="btn" disabled={busy || photoBusy || errors.length > 0 || nothing} onClick={doImport}>
-              {nothing && !errors.length ? 'Rien de nouveau à importer' : `Importer ${toCreate.length} type${toCreate.length > 1 ? 's' : ''}${updates.length ? ` et mettre à jour ${updates.length} photo${updates.length > 1 ? 's' : ''}` : ''}`}
+              {nothing && !errors.length ? 'Rien de nouveau à importer' : `Importer ${toCreate.length} carte${toCreate.length > 1 ? 's' : ''}${updates.length ? ` et mettre à jour ${updates.length} photo${updates.length > 1 ? 's' : ''}` : ''}`}
             </button>
             <button type="button" className="btn ghost" onClick={() => { setParsed(null); setPhotos([]); setFileName(''); setCreateMissing(false) }}>Annuler</button>
           </div>
         )}
       </header>
       <details className="import-help" open={!loaded}>
-        <summary>Format du fichier de types et des photos</summary>
+        <summary>Format du fichier de cartes et des photos</summary>
         <p className="muted">
-          <strong>1. Fichier de types</strong> (CSV ou texte, une ligne par type) : <strong>nom ; position ; image ; secret ; raretés</strong>. Seul le nom est obligatoire. Image : un emoji ou une
+          <strong>1. Fichier de cartes</strong> (CSV ou texte, une ligne par carte) : <strong>nom ; position ; image ; secret ; raretés</strong>. Seul le nom est obligatoire. Image : un emoji ou une
           adresse https://. Secret : oui / non. Raretés : <code>Ultra Rare:50:5:fullart|Super Rare:100:1|Commune:500:0</code> (rareté : séries : numérotées : style, séparées par « | ;
-          séries à 0 = la rareté n’existe pas pour ce type ; numérotées et style facultatifs). {MAX_ROWS} types maximum, tout ou rien : une ligne invalide annule l’import. Un nom déjà présent dans
-          la catégorie est ignoré.
+          séries à 0 = la rareté n’existe pas pour cette carte ; numérotées et style facultatifs). {MAX_ROWS} cartes maximum, tout ou rien : une ligne invalide annule l’import. Un nom déjà présent dans
+          la collection est ignoré.
         </p>
         <p className="muted">
-          <strong>2. Photos</strong> (plusieurs fichiers image d’un coup, facultatif) : chaque photo est rapprochée d’un type par <strong>le nom du fichier</strong> (« chat-va.png » → type « Chat va »,
-          accents et majuscules ignorés). Elle remplace l’image du fichier de types, ou met à jour la photo d’un type déjà présent. Les photos sont réduites à 256 px.
+          <strong>2. Photos</strong> (plusieurs fichiers image d’un coup, facultatif) : chaque photo est rapprochée d’une carte par <strong>le nom du fichier</strong> (« chat-va.png » → carte « Chat va »,
+          accents et majuscules ignorés). Elle remplace l’image du fichier de cartes, ou met à jour la photo d’une carte déjà présente. Les photos sont réduites à 256 px.
         </p>
       </details>
       <div className="row">
         <label className="btn ghost file-btn">
-          1. Choisir le fichier de types
+          1. Choisir le fichier de cartes
           <input type="file" accept=".csv,.tsv,.txt,text/csv,text/plain" onChange={onFile} hidden />
         </label>
         <button type="button" className="btn ghost" onClick={downloadTemplate}>Télécharger un modèle complet</button>
@@ -1030,13 +1030,13 @@ function ImportPanel({ categoryId, types, data, run, busy }) {
       {photos.length > 0 && (
         <div className="import-photos">
           <p>
-            <strong>{photos.length} photo{photos.length > 1 ? 's' : ''}</strong> : {photoByLine.size} rapprochée{photoByLine.size > 1 ? 's' : ''} d’une ligne du fichier, {updates.length} pour un type déjà présent,
+            <strong>{photos.length} photo{photos.length > 1 ? 's' : ''}</strong> : {photoByLine.size} rapprochée{photoByLine.size > 1 ? 's' : ''} d’une ligne du fichier, {updates.length} pour une carte déjà présente,
             {' '}{orphans.length} sans correspondance{dupPhotos.length ? `, ${dupPhotos.length} en double` : ''}{photos.length > okPhotos.length ? `, ${photos.length - okPhotos.length} illisible${photos.length - okPhotos.length > 1 ? 's' : ''}` : ''}.
           </p>
           {orphans.length > 0 && (
             <label className="check inline">
               <input type="checkbox" checked={createMissing} onChange={(e) => setCreateMissing(e.target.checked)} />
-              <span>Créer un type pour chaque photo sans correspondance ({orphans.length}) : {orphans.slice(0, 4).map((p) => p.name).join(', ')}{orphans.length > 4 ? '…' : ''}</span>
+              <span>Créer une carte pour chaque photo sans correspondance ({orphans.length}) : {orphans.slice(0, 4).map((p) => p.name).join(', ')}{orphans.length > 4 ? '…' : ''}</span>
             </label>
           )}
           {updates.length > 0 && <p className="fine">Photos mises à jour : {updates.map((u) => u.type.name).join(', ')}.</p>}
@@ -1091,7 +1091,7 @@ export function ConfigTab({ data, run, busy }) {
     <div className="admin-list cols-2">
       <p className="muted">Réglages du jeu et de la boutique. Les modifications s’appliquent tout de suite.</p>
       {(data.text_config ?? []).map((row) => <TextConfigRow key={row.key} row={row} run={run} busy={busy} />)}
-      {data.config.map((row) => <ConfigRow key={row.key} row={row} run={run} busy={busy} />)}
+      {data.config.filter((row) => row.key !== 'card_reward_booster').map((row) => <ConfigRow key={row.key} row={row} run={run} busy={busy} />)}
     </div>
   )
 }
@@ -1271,6 +1271,27 @@ export function BoosterEditor({ booster, rarities, run, busy, onCreated, onDelet
   )
 }
 
+// Booster offert quand une carte est complétée dans l'album : il est lié à la collection de la carte et ne s'ouvre que dans cette collection.
+// 0 = l'ancien booster Gold (à ouvrir depuis la page Boosters).
+export function RewardBoosterPicker({ data, run, busy }) {
+  const row = (data.config ?? []).find((r) => r.key === 'card_reward_booster')
+  if (!row) return null
+  const options = (data.booster_types ?? []).filter((b) => !b.is_standard && b.enabled && (!b.role || b.role === 'subscription_gift'))
+  const value = Number(row.value) || 0
+  return (
+    <div className="reward-picker">
+      <label>
+        <strong>Booster offert quand une carte est complétée</strong>
+        <select value={value} disabled={busy} onChange={(e) => run((pw) => api.adminSetConfig(pw, 'card_reward_booster', Number(e.target.value)), 'Booster de récompense enregistré.')}>
+          <option value={0}>Ancien booster Gold (à ouvrir)</option>
+          {options.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      </label>
+      <p className="fine">Quand un joueur remplit tous les emplacements d’une carte dans son album, il reçoit ce booster. Il est lié à la collection de la carte et ne s’ouvre que dans cette collection.</p>
+    </div>
+  )
+}
+
 export function BoostersTab({ data, run, busy, wide = false }) {
   const list = data.booster_types ?? []
   const [sel, setSel] = useState(list.find((b) => b.is_standard)?.id ?? list[0]?.id ?? 'new')
@@ -1300,6 +1321,7 @@ export function BoostersTab({ data, run, busy, wide = false }) {
         <aside className="md-list" aria-label="Boosters">
           {items}
           <p className="fine">Chaque booster définit, carte par carte, la répartition des raretés. Le Standard se recharge tout seul ; les autres s’achètent en pièces ou s’offrent.</p>
+          <RewardBoosterPicker data={data} run={run} busy={busy} />
         </aside>
         <section className="md-detail">{editor}</section>
       </div>
@@ -1308,6 +1330,7 @@ export function BoostersTab({ data, run, busy, wide = false }) {
   return (
     <div className="admin-list">
       <p className="muted">Chaque booster définit, carte par carte, la répartition des raretés. Le Standard se recharge tout seul ; les autres s’achètent en pièces ou s’offrent.</p>
+      <RewardBoosterPicker data={data} run={run} busy={busy} />
       <div className="booster-list">{items}</div>
       {editor}
     </div>
@@ -1319,14 +1342,14 @@ export function RaritiesTab({ data, run, busy }) {
     <div className="admin-list cols-2">
       <p className="muted">
         Nom, couleurs et seuils. « Taille de série maximale » : une rareté à seuil concerne les séries jusqu’à cette taille (vide = toutes les
-        autres). Ce sont les seuils par défaut des types qui n’ont pas de raretés propres ; chaque type peut les personnaliser (tranches, numéros
-        visibles) dans l’onglet « Types ».
+        autres). Ce sont les seuils par défaut des cartes qui n’ont pas de raretés propres ; chaque carte peut les personnaliser (tranches, numéros
+        visibles) dans l’onglet « Cartes ».
       </p>
       {data.rarities.map((r) => <RarityForm key={r.id} rarity={r} run={run} busy={busy} />)}
       <h3>Nouvelle rareté</h3>
       <p className="muted">
         Unique, Alpha et Omega sont fixes (1/1, 1/m, m/m) ; Alpha et Omega ne concernent que les séries dont le numéro est visible (ailleurs, ces cartes ont la rareté de leur tranche). On ne peut ajouter qu’une rareté « à seuil », entre les raretés existantes. Elle
-        devient un seuil par défaut ; pour l’utiliser sur un type qui a déjà ses propres raretés, ajoute-la dans sa fiche (onglet « Types »).
+        devient un seuil par défaut ; pour l’utiliser sur une carte qui a déjà ses propres raretés, ajoute-la dans sa fiche (onglet « Cartes »).
       </p>
       <NewRarityForm key={`new-rarity-${data.rarities.length}`} rarities={data.rarities} run={run} busy={busy} />
     </div>

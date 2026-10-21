@@ -13,11 +13,12 @@ async function rpc(fn, args) {
 }
 
 export const getStatus = () => rpc('status')
-export const openBooster = () => rpc('open_booster')
+// category = la collection choisie par le joueur (absente : la première collection ouverte, comme avant)
+export const openBooster = (category = null) => rpc('open_booster', category ? { p_category: category } : {})
 // Boosters paramétrables : ouvrir un booster d'un autre type que le Standard (stock du joueur), en acheter avec des pièces
-export const openBoosterType = (typeId) => rpc('open_booster_of_type', { p_type: typeId })
-export const buyBooster = (typeId, quantity = 1) => rpc('buy_booster', { p_type: typeId, p_quantity: quantity })
-export const openGoldenPack = () => rpc('open_golden_pack')
+export const openBoosterType = (typeId, category = null) => rpc('open_booster_of_type', { p_type: typeId, ...(category ? { p_category: category } : {}) })
+export const buyBooster = (typeId, quantity = 1, category = null) => rpc('buy_booster', { p_type: typeId, p_quantity: quantity, ...(category ? { p_category: category } : {}) })
+export const openGoldenPack = (category = null) => rpc('open_golden_pack', category ? { p_category: category } : {})
 export const ackRewards = () => rpc('ack_rewards')
 export const getStats = (category = null) => rpc('my_stats', { p_category: category })
 export const getOdds = (category = null, boosterType = null) => rpc('draw_odds', { p_category: category, p_booster_type: boosterType })
@@ -57,7 +58,7 @@ export const friendRemove = (userId) => rpc('friend_remove', { p_user: userId })
 export const friendsList = () => rpc('friends_list')
 export const friendCards = (friendId, doubles = false, limit = 60, offset = 0) =>
   rpc('friend_cards', { p_friend: friendId, p_doubles: doubles, p_limit: limit, p_offset: offset })
-// « Voir la collection » : [{ type_id, holders }] = joueurs distincts qui possèdent au moins une carte de chaque type de la catégorie
+// « Voir la collection » : [{ type_id, holders }] = joueurs distincts qui possèdent au moins une carte de chaque type de la collection
 export const collectionHolders = (category) => rpc('collection_holders', { p_category: category })
 export const myTypeCards = (type, rarity = null) => rpc('my_type_cards', { p_type: type, p_rarity: rarity })
 export const setAlbumPick = (type, base, series, number) => rpc('set_album_pick', { p_type: type, p_base: base, p_series: series, p_number: number })
@@ -129,7 +130,7 @@ export async function getLegal() {
   }
 }
 
-// Catalogue : catégories de boosters et types de cartes (lisible par tous)
+// Catalogue : collections de boosters et types de cartes (lisible par tous)
 export async function getCatalog() {
   const [cats, types, typeRarities] = await Promise.all([
     supabase.from(table('categories')).select('*').order('position').order('id'),
@@ -146,7 +147,7 @@ export async function getCatalog() {
 export const adminData = (pw) => rpc('admin_data', { p_password: pw })
 export const adminForceDeleteCategory = (pw, id, confirmName) =>
   rpc('admin_force_delete_category', { p_password: pw, p_id: id, p_confirm_name: confirmName })
-// Copie une catégorie (types, images, raretés) de la préproduction vers la production. Réservée à la console de PRÉPRODUCTION : la fonction
+// Copie une collection (types, images, raretés) de la préproduction vers la production. Réservée à la console de PRÉPRODUCTION : la fonction
 // n'existe pas dans le schéma de production. Exige aussi le mot de passe administrateur de la production.
 export const adminCopyCategoryToProd = (pw, categoryId, prodPassword, createMissingRarities = false) =>
   rpc('admin_copy_category_to_prod', { p_password: pw, p_category: categoryId, p_prod_password: prodPassword, p_create_missing_rarities: !!createMissingRarities })
@@ -216,7 +217,7 @@ export function explain(e) {
     prod_admin_locked: 'Trop d’essais sur la production : son accès admin est verrouillé pendant 15 minutes.',
     prod_admin_not_set: 'Aucun mot de passe administrateur n’est défini en production.',
     prod_not_authenticated: 'Tu n’es pas connecté.',
-    prod_category_exists: 'Une catégorie de ce nom existe déjà en production : elle n’est pas écrasée. Renomme-la ici ou supprime l’ancienne en production.',
+    prod_category_exists: 'Une collection de ce nom existe déjà en production : elle n’est pas écrasée. Renomme-la ici ou supprime l’ancienne en production.',
   }
   for (const [code, text] of Object.entries(prodMessages)) if (m.includes(code)) return text
   const badRow = m.match(/invalid_import_row:(\d+)/)
@@ -226,21 +227,21 @@ export function explain(e) {
     admin_locked: 'Trop d’essais : l’accès admin est verrouillé pendant 15 minutes.',
     admin_not_set: 'Aucun mot de passe admin n’est défini : voir le README (' + PREFIX + 'admin_set_password).',
     invalid_import: 'Import vide ou illisible.',
-    import_too_large: 'Trop de types : 500 maximum par import.',
+    import_too_large: 'Trop de cartes : 500 maximum par import.',
     invalid_series: 'Le nombre de séries doit être compris entre 1 et 5000.',
     invalid_color: 'Les couleurs doivent être au format #rrggbb.',
     invalid_image: 'Image invalide : utilise un emoji, une adresse https:// ou une image téléversée.',
     image_too_large: 'Image trop lourde : choisis une image plus petite.',
     series_locked: 'Le nombre de séries ne peut plus changer : des cartes ont déjà été tirées.',
-    category_started: 'Suppression impossible : des cartes de cette catégorie ont déjà été tirées.',
-    type_started: 'Suppression impossible : des cartes de ce type ont déjà été tirées.',
+    category_started: 'Suppression impossible : des cartes de cette collection ont déjà été tirées.',
+    type_started: 'Suppression impossible : des exemplaires de cette carte ont déjà été tirés.',
     password_too_short: 'Le mot de passe doit contenir au moins 8 caractères.',
     invalid_value: 'Valeur invalide.',
     not_found: 'Élément introuvable.',
   }
   for (const [code, text] of Object.entries(adminMessages)) if (m.includes(code)) return text
   if (m.includes('invalid_name')) return 'Le nom est vide ou trop long.'
-  if (m.includes('category_closed')) return 'Revente à la banque indisponible : cette catégorie est terminée. Tu peux toujours vendre la carte sur le marché.'
+  if (m.includes('category_closed')) return 'Revente à la banque indisponible : cette collection est terminée. Tu peux toujours vendre la carte sur le marché.'
   if (m.includes('try_again')) return 'Le tirage a été interrompu : réessaie dans un instant.'
   if (m.includes('no_golden_pack')) return 'Tu n’as pas de pack doré à ouvrir.'
   if (m.includes('no_boosters')) return 'Tu n’as plus de booster pour le moment.'
@@ -259,6 +260,7 @@ export function explain(e) {
   if (m.includes('invalid_booster_slots')) return 'Répartition invalide : chaque carte a au moins une rareté, avec un poids positif, sans doublon.'
   if (m.includes('invalid_booster')) return 'Booster invalide : nom de 1 à 40 caractères, 1 à 10 cartes, couleur, prix entier ou vide.'
   if (m.includes('booster_is_standard')) return 'Le booster Standard ne peut pas être supprimé.'
+  if (m.includes('collection_closed')) return 'Cette collection n’est plus ouverte. Choisis-en une autre.'
   if (m.includes('open_timeout')) return 'L’ouverture prend trop de temps. Ton booster a peut-être été ouvert : vérifie ton stock et ta collection, puis réessaie.'
   if (m.includes('invalid_invite')) return 'Ce lien d’invitation n’est plus valide : demande à ton ami de t’en envoyer un nouveau.'
   if (m.includes('inviter_full')) return 'Ton ami a atteint la limite de 200 amis : vous ne pouvez pas devenir amis pour l’instant.'
@@ -268,13 +270,13 @@ export function explain(e) {
   if (m.includes('unknown_booster')) return 'Ce booster n’existe pas ou n’est plus disponible.'
   if (m.includes('not_enough_coins')) return 'Tu n’as pas assez de pièces.'
   if (m.includes('invalid_quantity')) return 'Quantité invalide.'
-  if (m.includes('invalid_type_rarities')) return 'Raretés du type invalides : une même rareté une seule fois, séries entre 0 et 5000 (au moins une rareté avec des séries), « numérotées » au plus égal au nombre de séries, style Simple ou FullArt.'
+  if (m.includes('invalid_type_rarities')) return 'Raretés de la carte invalides : une même rareté une seule fois, séries entre 0 et 5000 (au moins une rareté avec des séries), « numérotées » au plus égal au nombre de séries, style Simple ou FullArt.'
   if (m.includes('id_taken')) return 'Cet identifiant de rareté existe déjà.'
   if (m.includes('invalid_id')) return 'Identifiant invalide : minuscules, chiffres et _ uniquement, 2 à 20 caractères, débute par une lettre.'
   if (m.includes('invalid_max_series')) return 'Taille de série maximale invalide : un nombre entier d’au moins 1 (pas de plafond ouvert pour une nouvelle rareté).'
   if (m.includes('rarity_protected')) return 'Unique, Alpha et Omega ne peuvent pas être supprimées.'
   if (m.includes('rarity_in_use')) return 'Cette rareté est utilisée (cartes déjà classées, booster doré ou répartition d’un booster) : elle ne peut pas être supprimée.'
-  if (m.includes('name_mismatch')) return 'Le nom tapé ne correspond pas exactement au nom de la catégorie : rien n’a été supprimé.'
+  if (m.includes('name_mismatch')) return 'Le nom tapé ne correspond pas exactement au nom de la collection : rien n’a été supprimé.'
   if (m.includes('card_in_album')) return 'Cette carte est dans ton album : elle ne peut pas être vendue. Retire-la de l’album pour la vendre.'
   if (m.includes('not_enough_cards')) return 'Il n’y a pas assez de cartes vendables dans cette pile (celles de l’album ou en vente sont exclues).'
   if (m.includes('invalid_count')) return 'Quantité invalide : entre un nombre entier de cartes, minimum 1.'

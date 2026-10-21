@@ -46,6 +46,8 @@ let bad = 0
 const ok = (name, cond) => { console.log(cond ? 'OK  ' : 'FAIL', name); if (!cond) bad++ }
 const wait = (ms) => act(async () => { await new Promise((r) => setTimeout(r, ms)) })
 const text = (h) => h.textContent.replace(/\s+/g, ' ')
+const title = (h) => (h.querySelector('.pack-name')?.textContent ?? '').trim()          // « Booster », « Booster Silver »…
+const coll = (h) => (h.querySelector('.pack-collection')?.textContent ?? '').trim()    // la collection sous le titre
 const until = async (fn, ms = 4000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (fn()) return true; await wait(15) } return fn() }
 
 const silver = { id: 21, name: 'Silver', cards: 5, color: '#c0c0c0', glow: 'silver', price: 50, quantity: 2 }
@@ -97,10 +99,10 @@ ok('étagère : un paquet vide est éteint (sans halo), les boutons sont désact
   const m = await mountPage({ ...base, booster_types: [silver, art, forSale] })
   ok('Standard + 2 autres boosters en stock : 3 paquets côte à côte, avec leur nom sur la bande et leur stock', bands(m.host).join('|') === 'Standard|Silver|Art Rare assuré' && counts(m.host).join('|') === '×10|×2|×1' && !m.host.querySelector('.pack-button'))
   ok('les halos de chaque booster : aucun, argenté, violet', ['', 'glow-silver', 'glow-purple'].every((c, i) => (c ? m.host.querySelectorAll('.pack-shelf .pack-wrap')[i].className.includes(c) : !m.host.querySelectorAll('.pack-shelf .pack-wrap')[i].className.includes('glow'))))
-  ok('par défaut le booster du stock gratuit est choisi : « Ouvrir un booster », 10 boosters prêts', pressed(m.host).join() === 'true,false,false' && !!btn(m.host, /^Ouvrir un booster$/) && /10 boosters prêts/.test(text(m.host)) && /Booster « Chattrapez les tous ! »/.test(text(m.host)))
+  ok('par défaut le booster du stock gratuit est choisi : « Ouvrir un booster », 10 boosters prêts', pressed(m.host).join() === 'true,false,false' && !!btn(m.host, /^Ouvrir un booster$/) && /10 boosters prêts/.test(text(m.host)) && title(m.host) === 'Booster' && coll(m.host) === 'Chattrapez les tous !')
   ok('« Autres boosters » ne répète pas les paquets déjà visibles ; il garde ceux qui sont à acheter (Bronze)', (() => { const list = m.host.querySelector('.extra-boosters'); return !!list && /Bronze/.test(list.textContent) && !/Silver|Art Rare assuré/.test(list.textContent) })())
   await click(m.host.querySelectorAll('.pack-shelf .shelf-pack')[1])
-  ok('toucher le paquet Silver le choisit : titre « Booster Silver », 2 boosters prêts, 5 cartes, bouton « Ouvrir un booster Silver »', pressed(m.host).join() === 'false,true,false' && /Booster Silver « Chattrapez les tous ! »/.test(text(m.host)) && /2 boosters prêts/.test(text(m.host)) && /5 cartes/.test(text(m.host)) && !!btn(m.host, /^Ouvrir un booster Silver$/))
+  ok('toucher le paquet Silver le choisit : titre « Booster Silver » sur la collection, 2 boosters prêts, 5 cartes, bouton « Ouvrir un booster Silver »', pressed(m.host).join() === 'false,true,false' && title(m.host) === 'Booster Silver' && coll(m.host) === 'Chattrapez les tous !' && /2 boosters prêts/.test(text(m.host)) && /5 cartes/.test(text(m.host)) && !!btn(m.host, /^Ouvrir un booster Silver$/))
   opened.length = 0
   await click(btn(m.host, /^Ouvrir un booster Silver$/)); await wait(30)
   ok('« Ouvrir un booster Silver » ouvre bien un Silver (booster de stock n°21), pas le Standard', opened.length === 1 && opened[0][0] === 'type' && opened[0][1] === 21)
@@ -130,7 +132,7 @@ ok('étagère : un paquet vide est éteint (sans halo), les boutons sont désact
 {
   const member = { ...base, standard_booster: { id: 9, name: 'OneMore', glow: 'gold' }, subscription: { enabled: true, active: true, name: 'OneMore', booster_name: 'OneMore' }, booster_types: [silver] }
   const m = await mountPage(member)
-  ok('membre Pro : son paquet « OneMore » avec halo doré est le premier de l\'étagère, choisi par défaut ; bouton « Ouvrir un booster OneMore »', bands(m.host)[0] === 'OneMore' && m.host.querySelectorAll('.pack-shelf .pack-wrap')[0].className.includes('glow-gold') && pressed(m.host)[0] === true && !!btn(m.host, /^Ouvrir un booster OneMore$/) && /Booster OneMore « Chattrapez/.test(text(m.host)))
+  ok('membre Pro : son paquet « OneMore » avec halo doré est le premier de l\'étagère, choisi par défaut ; bouton « Ouvrir un booster OneMore »', bands(m.host)[0] === 'OneMore' && m.host.querySelectorAll('.pack-shelf .pack-wrap')[0].className.includes('glow-gold') && pressed(m.host)[0] === true && !!btn(m.host, /^Ouvrir un booster OneMore$/) && title(m.host) === 'Booster OneMore' && coll(m.host) === 'Chattrapez les tous !')
   await m.unmount()
 }
 {
@@ -151,7 +153,7 @@ ok('étagère : un paquet vide est éteint (sans halo), les boutons sont désact
   ok('le paquet Gold porte son nom sur la bande, sa palette dorée et sa pastille ×1', /class="pack-wrap[^"]*golden/.test(packs()[1].innerHTML) && />Gold</.test(packs()[1].innerHTML) && /×1/.test(packs()[1].textContent))
   ok('le Standard reste choisi au départ (gros bouton « Ouvrir un booster »), le bloc « Un booster Gold à ouvrir » n\'existe plus', packs()[0].getAttribute('aria-pressed') === 'true' && btn(m.host, /^Ouvrir un booster/).textContent === 'Ouvrir un booster' && !m.host.querySelector('.gold-rewards') && !/Un booster Gold à ouvrir/.test(text(m.host)))
   await click(packs()[1])
-  ok('toucher le paquet Gold le choisit : titre « Booster Gold « Chattrapez les tous ! » », « 1 booster Gold prêt · gagné avec CHAT’PELLE », bouton « Ouvrir un booster Gold »', packs()[1].getAttribute('aria-pressed') === 'true' && /Booster Gold « Chattrapez les tous ! »/.test(text(m.host)) && /1 booster Gold prêt/.test(text(m.host)) && /gagné avec CHAT’PELLE/.test(text(m.host)) && !!btn(m.host, /^Ouvrir un booster Gold$/))
+  ok('toucher le paquet Gold le choisit : titre « Booster Gold » sur la collection « Chattrapez les tous ! », « 1 booster Gold prêt · gagné avec CHAT’PELLE », bouton « Ouvrir un booster Gold »', packs()[1].getAttribute('aria-pressed') === 'true' && title(m.host) === 'Booster Gold' && coll(m.host) === 'Chattrapez les tous !' && /1 booster Gold prêt/.test(text(m.host)) && /gagné avec CHAT’PELLE/.test(text(m.host)) && !!btn(m.host, /^Ouvrir un booster Gold$/))
   opened.length = 0
   await click(btn(m.host, /^Ouvrir un booster Gold$/)); await wait(60)
   ok('« Ouvrir un booster Gold » demande au serveur d\'ouvrir CETTE récompense (identifiant 5), pas un booster ordinaire', opened.length === 1 && opened[0][0] === 'gold' && opened[0][1] === 5)

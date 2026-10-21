@@ -56,7 +56,7 @@ export default function Collection({ goMarket }) {
     return (
       <section className="page">
         <h1 className="page-title">Collection</h1>
-        <div className="empty"><p><strong>Aucune catégorie pour le moment.</strong></p></div>
+        <div className="empty"><p><strong>Aucune collection pour le moment.</strong></p></div>
       </section>
     )
   }
@@ -65,7 +65,7 @@ export default function Collection({ goMarket }) {
     <section className="page">
       <h1 className="page-title">Collection</h1>
 
-      <div className="cat-tabs" role="tablist" aria-label="Catégories de boosters">
+      <div className="cat-tabs" role="tablist" aria-label="Collections de boosters">
         {categories.filter((c) => c.enabled).map((c) => (
           <button
             key={c.id}
@@ -125,7 +125,7 @@ export default function Collection({ goMarket }) {
   )
 }
 
-// Statistiques de l'album de la catégorie : le full set compte tous les emplacements SAUF la rareté Unique, qui n'en fait pas partie (cartes 1/1)
+// Statistiques de l'album de la collection : le full set compte tous les emplacements SAUF la rareté Unique, qui n'en fait pas partie (cartes 1/1)
 // Petite fenêtre d'information (bouton « i ») : garde l'écran épuré, le détail est à un clic
 export function InfoButton({ onClick, label = 'Informations' }) {
   return <button type="button" className="info-btn" aria-label={label} title={label} onClick={onClick}>i</button>
@@ -159,7 +159,7 @@ export function AlbumStats({ rows, rarityMap, initialInfo = false }) {
       {st.byRarity.length > 0 && (
         <ul className="album-rarity-stats" aria-label="Emplacements remplis par rareté">
           {st.byRarity.map((e) => (
-            <li key={e.id} className={e.total === 0 ? 'none' : undefined} title={e.total === 0 ? 'Aucun emplacement de cette rareté dans cette catégorie' : undefined} style={{ '--r1': rarityMap[e.id]?.color, '--r2': rarityMap[e.id]?.color2 }}>
+            <li key={e.id} className={e.total === 0 ? 'none' : undefined} title={e.total === 0 ? 'Aucun emplacement de cette rareté dans cette collection' : undefined} style={{ '--r1': rarityMap[e.id]?.color, '--r2': rarityMap[e.id]?.color2 }}>
               <i className="rarity-dot" aria-hidden="true" />
               {rarityMap[e.id]?.name ?? e.id} <strong>{e.filled}/{e.total}</strong>
               {e.suffix && <span className="muted"> · {e.suffix}</span>}
@@ -195,7 +195,7 @@ export function Album({ rows, catalog, rarityMap, onRefresh, categoryId = null }
   const [showCollection, setShowCollection] = useState(false)
   if (rows === null) return null
   if (rows.length === 0) {
-    return <div className="empty"><p><strong>Aucune carte dans cette catégorie pour l’instant.</strong></p></div>
+    return <div className="empty"><p><strong>Aucune carte dans cette collection pour l’instant.</strong></p></div>
   }
   const groups = []
   for (const r of rows) {
@@ -292,7 +292,7 @@ export function Album({ rows, catalog, rarityMap, onRefresh, categoryId = null }
 
 // Choix de la carte d'un emplacement : une seule proposition pour toutes les cartes à numéro masqué (elles sont
 // indiscernables), une par carte à numéro visible. Une fois placée dans l'album, une carte ne peut plus être vendue.
-// « Voir la collection » : toutes les cartes de la catégorie avec leur numéro et, dessous, 👤 + le nombre de détenteurs (joueurs qui en
+// « Voir la collection » : toutes les cartes de la collection avec leur numéro et, dessous, 👤 + le nombre de détenteurs (joueurs qui en
 // possèdent au moins un exemplaire, toi compris : 20 exemplaires chez toi et 3 chez un ami = 2 détenteurs). Une carte est visible dès
 // qu'elle a au moins un détenteur ; celles que personne ne possède restent cachées derrière un « ? » (leur numéro reste visible).
 export function CollectionHoldersView({ categoryName, types, checklist, holders, loading = false, error = '', onClose }) {
@@ -497,7 +497,7 @@ export function StackModal({ stack, catalog, rarityMap, onClose, onChanged, onLi
             <section>
               <h3>Vente rapide</h3>
               {closed ? (
-                <p className="muted">Indisponible : la catégorie « {category.name} » est terminée. Tu peux vendre tes cartes sur le marché, une par une.</p>
+                <p className="muted">Indisponible : la collection « {category.name} » est terminée. Tu peux vendre tes cartes sur le marché, une par une.</p>
               ) : info.free === 0 ? (
                 <p className="muted">Aucune carte vendable dans cette pile (elles sont en vente ou dans l’album).</p>
               ) : (
@@ -599,9 +599,9 @@ export function MyCards({ catId, catTypes, rarities, rarityMap, stats, version, 
         <span className="muted">{loading ? 'Chargement…' : `${fmt(cardsTotal)} carte${cardsTotal > 1 ? 's' : ''}`}</span>
         <div className="toolbar-selects">
           <label className="select">
-            <span className="sr">Type</span>
+            <span className="sr">Carte</span>
             <select value={type} onChange={(e) => setType(e.target.value)}>
-              <option value="">Tous les types</option>
+              <option value="">Toutes les cartes</option>
               {catTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </label>

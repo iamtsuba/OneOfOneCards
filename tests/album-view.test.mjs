@@ -57,7 +57,7 @@ const rmArt = { ...rarityMap, artrare: { id: 'artrare', name: 'Art Rare', kind: 
 const statsArt = renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows, rarityMap: rmArt })))
 const items = [...statsArt.matchAll(/<li[^>]*>(?:<i [^>]*><\/i>)?([^<]*)<strong>([^<]*)<\/strong>/g)].map((m) => `${m[1].trim()} ${m[2]}`)
 ok('décompte par rareté : TOUTES les raretés existantes y sont (Commune, Peu Commune, Art Rare, Ultra Rare, Alpha…), dans l\'ordre de rareté', items.map((x) => x.split(' ').slice(0, -1).join(' ')).join('|') === 'Commune|Peu Commune|Art Rare|Ultra Rare|Alpha')
-ok('décompte : Art Rare et Peu Commune sans emplacement ici : « 0/0 », en retrait avec une explication ; les autres gardent leurs compteurs', /<li class="none" title="Aucun emplacement de cette rareté dans cette catégorie"[^>]*><i [^>]*><\/i>Art Rare <strong>0\/0<\/strong>/.test(statsArt) && /Peu Commune <strong>0\/0<\/strong>/.test(statsArt) && /Commune <strong>1\/2<\/strong>/.test(statsArt) && !/<li class="none"[^>]*>(?:<i [^>]*><\/i>)?Commune /.test(statsArt))
+ok('décompte : Art Rare et Peu Commune sans emplacement ici : « 0/0 », en retrait avec une explication ; les autres gardent leurs compteurs', /<li class="none" title="Aucun emplacement de cette rareté dans cette collection"[^>]*><i [^>]*><\/i>Art Rare <strong>0\/0<\/strong>/.test(statsArt) && /Peu Commune <strong>0\/0<\/strong>/.test(statsArt) && /Commune <strong>1\/2<\/strong>/.test(statsArt) && !/<li class="none"[^>]*>(?:<i [^>]*><\/i>)?Commune /.test(statsArt))
 ok('décompte : une rareté créée par l\'admin y apparaît sans aucune modification du code', /Art Rare <strong>/.test(statsArt) && !/Art Rare/.test(stats))
 ok('stats : chargement tant que l’album n’est pas là', /Chargement/.test(renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows: null, rarityMap })))))
 const none = renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows: rows.filter((r) => r.pick_series != null || r.owned_count === 0), rarityMap })))
@@ -73,7 +73,7 @@ ok('album : « À remplir (2) » pour l’Ultra Rare, « Manquante » pour les a
 ok('album : un emplacement sans exemplaire n’est pas cliquable', (html.match(/<button[^>]*album-slot missing[^>]*disabled/g) || []).length === 2 && !/<button[^>]*album-slot (filled|fillable)[^>]*disabled/.test(html))
 ok('album : numéro de checklist et progression du master set par carte (l’Alpha n’y compte pas : 1/2)', /n° 1\/2/.test(html) && /n° 2\/2/.test(html) && /album-type-count">1\/2</.test(html) && /album-type-count">0\/1</.test(html))
 ok('album : couleur de rareté portée par l’emplacement', /--r1:#e11d48/.test(html))
-ok('album : vide = message', /Aucune carte dans cette catégorie/.test(renderToStaticMarkup(wrap(React.createElement(Album, { rows: [], catalog, rarityMap, onRefresh: () => {} })))))
+ok('album : vide = message', /Aucune carte dans cette collection/.test(renderToStaticMarkup(wrap(React.createElement(Album, { rows: [], catalog, rarityMap, onRefresh: () => {} })))))
 
 // Numéro masqué : la carte de l'album n'affiche pas son numéro
 const hiddenRows = [{ type_id: 2, type_name: 'Chat va pas ?', type_image: '😾', rarity_id: 'common', pick_series: 50, pick_number: 9, owned_count: 1 }]
@@ -143,7 +143,7 @@ ok('pile : vente rapide d’une carte au prix du jeu (1 carte pour 2 pièces), c
 ok('pile : mise en vente sur le marché, une carte à la fois', /Une carte à la fois/.test(sm) && !/disabled=""[^>]*>Mettre une carte en vente/.test(sm))
 const catalogClosed = { ...catalog2, typeMap: { ...catalog2.typeMap, 1: { ...catalog2.typeMap[1], category_id: 1 } }, categoryMap: { 1: { id: 1, name: 'Chats', closed: true } } }
 const closedHtml = stackOf(stackCards, { direct_sell_price: 2, closed_categories: [1] }, { catalog: catalogClosed })
-ok('pile : catégorie terminée → vente rapide indisponible (plus de bouton Vendre), marché toujours possible', /Indisponible : la catégorie « Chats » est terminée/.test(closedHtml) && !/Vendre \d+ carte/.test(closedHtml) && /Mettre une carte en vente/.test(closedHtml))
+ok('pile : collection terminée → vente rapide indisponible (plus de bouton Vendre), marché toujours possible', /Indisponible : la collection « Chats » est terminée/.test(closedHtml) && !/Vendre \d+ carte/.test(closedHtml) && /Mettre une carte en vente/.test(closedHtml))
 const allListed = stackOf(Array.from({ length: 3 }, (_, i) => mk(40, 2 + i, false, { listed: true })), { direct_sell_price: 1, closed_categories: [] })
 ok('pile : rien de vendable → message et mise en vente désactivée', /Aucune carte vendable/.test(allListed) && /disabled=""[^>]*>Mettre une carte en vente/.test(allListed))
 
@@ -178,7 +178,7 @@ ok('secrète découverte : elle apparaît comme une carte normale (nom, n° 4/3 
   ok('album : un bouton « Voir la collection » à côté du texte d’introduction', /class="album-intro"/.test(withBtn) && /<button type="button" class="btn ghost album-collection-btn">Voir la collection<\/button>/.test(withBtn) && withBtn.indexOf('album-intro') < withBtn.indexOf('Voir la collection'))
   ok('album : plus de long texte d’introduction (il est derrière le bouton « i » des statistiques)', !/Un emplacement par rareté de chaque carte/.test(withBtn) && /une carte placée dans l’album ne peut plus être vendue/i.test(renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows: albumRowsMin, rarityMap, initialInfo: true })))) && /placée automatiquement/.test(renderToStaticMarkup(wrap(React.createElement(AlbumStats, { rows: albumRowsMin, rarityMap, initialInfo: true })))))
   const noBtn = renderToStaticMarkup(wrap(React.createElement(Album, { rows: albumRowsMin, catalog, rarityMap, onRefresh: () => {} })))
-  ok('album : pas de bouton sans catégorie connue', !/Voir la collection/.test(noBtn))
+  ok('album : pas de bouton sans collection connue', !/Voir la collection/.test(noBtn))
   ok('album : la fenêtre n’est pas ouverte tant qu’on n’a pas cliqué', !/holders-panel|holder-grid/.test(withBtn))
 
   const ts = [
@@ -192,8 +192,8 @@ ok('secrète découverte : elle apparaît comme une carte normale (nom, n° 4/3 
   const v = view()
   const tiles = v.split('<li ').slice(1)
   const tile = (name) => tiles.find((x) => x.includes(`>${name}</strong>`))
-  ok('collection : une fenêtre avec le nom de la catégorie et un bouton Fermer', /role="dialog"[^>]*aria-label="Collection Chattrapez les tous !"/.test(v) && /Collection « Chattrapez les tous ! »/.test(v) && />Fermer</.test(v))
-  ok('collection : une tuile par type de la catégorie, dans l’ordre de la checklist (secret en dernier)', tiles.length === 4 && v.indexOf('n° 1/3') < v.indexOf('n° 2/3') && v.indexOf('n° 2/3') < v.indexOf('n° 3/3') && v.indexOf('n° 3/3') < v.indexOf('n° 4/3'))
+  ok('collection : une fenêtre avec le nom de la collection et un bouton Fermer', /role="dialog"[^>]*aria-label="Collection Chattrapez les tous !"/.test(v) && /Collection « Chattrapez les tous ! »/.test(v) && />Fermer</.test(v))
+  ok('collection : une tuile par type de la collection, dans l’ordre de la checklist (secret en dernier)', tiles.length === 4 && v.indexOf('n° 1/3') < v.indexOf('n° 2/3') && v.indexOf('n° 2/3') < v.indexOf('n° 3/3') && v.indexOf('n° 3/3') < v.indexOf('n° 4/3'))
   ok('collection : sous chaque carte, 👤 et le nombre de détenteurs (au lieu du mot « détenteurs »)', /👤 2/.test(tile('Chat va ?')) && /👤 1/.test(tile('Chat va pas ?')) && /👤 5/.test(tile('Chat caché')) && /👤 0/.test(v) && !/>\d+ détenteurs?</.test(v))
   ok('collection : le nombre reste annoncé aux lecteurs d’écran (« 2 détenteurs », « 1 détenteur »)', /aria-label="2 détenteurs"/.test(tile('Chat va ?')) && /aria-label="1 détenteur"/.test(tile('Chat va pas ?')) && /aria-label="0 détenteur"/.test(v))
   ok('collection : « 20 chez moi + 3 chez un ami » donne 2 détenteurs (👤 2), pas 23', /👤 2/.test(tile('Chat va ?')) && !/👤 23/.test(v))

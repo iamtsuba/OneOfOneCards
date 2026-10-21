@@ -28,7 +28,7 @@ export default function Landing() {
         <h2>Un album par rareté</h2>
         <p>
           Pour chaque carte et chaque rareté, ton album a un emplacement que tu remplis avec l’exemplaire de ton choix. Une carte placée dans
-          l’album est protégée : elle ne peut plus être vendue tant qu’elle y figure. Complète le full set de ta catégorie !
+          l’album est protégée : elle ne peut plus être vendue tant qu’elle y figure. Complète le full set de ta collection !
         </p>
 
         <h2>Un marché entre joueurs</h2>

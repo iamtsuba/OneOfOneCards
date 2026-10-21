@@ -83,7 +83,7 @@ export function PackShelf({ packs, selected, category, disabled, onSelect }) {
 }
 
 // Autres types de boosters (Silver, Gold, Légende…) : en stock et/ou en vente contre des pièces. Chacun est un PAQUET comme le booster principal (son nom sur la bande, son halo,
-// son stock en pastille) avec ses boutons dessous (Ouvrir, Acheter) ; « i » ouvre leurs chances. category = la catégorie en cours (titre du paquet).
+// son stock en pastille) avec ses boutons dessous (Ouvrir, Acheter) ; « i » ouvre leurs chances. category = la collection en cours (titre du paquet).
 export function ExtraBoosters({ items, coins, disabled, onOpen, onBuy, onInfo, category = null }) {
   if (!items || items.length === 0) return null
   return (
@@ -135,7 +135,12 @@ export function GoldRewardList({ rewards, typeMap, name = 'Gold', disabled, onOp
   )
 }
 
-export default function Boosters({ goCollection }) {
+// Collection choisie, retenue d'une visite à l'autre
+const COLLECTION_KEY = 'o1o_collection'
+const readSavedCollection = () => { try { const v = Number(window.localStorage.getItem(COLLECTION_KEY)); return v > 0 ? v : null } catch { return null } }
+const saveCollection = (id) => { try { window.localStorage.setItem(COLLECTION_KEY, String(id)) } catch { /* stockage indisponible : le choix vaut pour cette visite */ } }
+
+export default function Boosters({ goCollection, initialCategory = null }) {
   const { status, setStatus, refreshStatus, rarityMap, catalog, setRevealing } = useGame()
   const [overlay, setOverlay] = useState(null)
   const [error, setError] = useState('')
@@ -159,13 +164,21 @@ export default function Boosters({ goCollection }) {
   const boosters = status?.boosters ?? 0
   const bonus = status?.bonus_boosters ?? 0
   const total = boosters + bonus
-  const category = catalog.categoryMap[status?.active_category_id]
-  const nextCategory = status?.next_category
+  // Collections ouvertes EN MÊME TEMPS : le joueur choisit celle dans laquelle il ouvre ses boosters ; tous les boosters de la page s'y rapportent
+  const activeList = status?.active_categories ?? (status?.active_category_id ? [{ id: status.active_category_id, name: catalog.categoryMap[status.active_category_id]?.name, cards_taken: status.cards_taken, total_cards: status.total_cards }] : [])
+  const [collPick, setCollPick] = useState(() => initialCategory ?? readSavedCollection())
+  useEffect(() => { if (initialCategory) setCollPick(initialCategory) }, [initialCategory])
+  const selectedCat = activeList.find((c) => c.id === collPick) ?? activeList[0] ?? null
+  const category = selectedCat ? catalog.categoryMap[selectedCat.id] : undefined
+  const pickCollection = (id) => { setCollPick(id); saveCollection(id) }
+  // Boosters de chaque type : ceux sans collection + ceux liés à la collection choisie
+  const linkedQty = (typeId) => (status?.linked_boosters ?? []).filter((l) => l.booster_type_id === typeId && l.category_id === selectedCat?.id).reduce((n, l) => n + l.quantity, 0)
+  const boosterTypes = (status?.booster_types ?? []).map((b) => ({ ...b, quantity: b.quantity + linkedQty(b.id) }))
   // Étagère : le booster du stock gratuit, puis le booster Gold gagné (juste à côté, s'il y en a un à ouvrir), puis les autres boosters que le joueur a en stock (3 paquets au plus)
   const goldRewards = status?.gold_rewards ?? []
   const hasGold = goldRewards.length > 0
   const [pick, setPick] = useState(null)   // clé du paquet choisi : 'main', 'gold' ou 't<id>' ; null = choix automatique
-  const shelfTypes = (status?.booster_types ?? []).filter((b) => b.quantity > 0).slice(0, SHELF_MAX - 1 - (hasGold ? 1 : 0))
+  const shelfTypes = boosterTypes.filter((b) => b.quantity > 0).slice(0, SHELF_MAX - 1 - (hasGold ? 1 : 0))
   const shelfPacks = [{ key: 'main', name: status?.standard_booster?.name, glow: status?.standard_booster?.glow, color: status?.standard_booster?.color, count: total },
     ...(hasGold ? [{ key: 'gold', name: status?.reward_booster?.name ?? 'Gold', glow: status?.reward_booster?.glow, golden: true, count: goldRewards.length }] : []),
     ...shelfTypes.map((b) => ({ key: `t${b.id}`, name: b.name, glow: b.glow, color: b.color, count: b.quantity }))]
@@ -215,9 +228,9 @@ export default function Boosters({ goCollection }) {
     setError('')
     setNotice('')
     try {
-      const res = await api.buyBooster(it.id, 1)
+      const res = await api.buyBooster(it.id, 1, selectedCat?.id)
       setStatus(res.status)
-      setNotice(`Un booster ${it.name} a été ajouté à ton stock.`)
+      setNotice(`Un booster ${it.name} a été ajouté à ton stock${selectedCat ? ` pour la collection « ${selectedCat.name} »` : ''}.`)
     } catch (e) {
       setError(explain(e))
     }
@@ -227,7 +240,7 @@ export default function Boosters({ goCollection }) {
   async function open(fromSummary = false, kind = 'normal', rewardId = null) {
     const isGold = kind === 'gold'
     const isType = kind === 'type'
-    const typeInfo = isType ? (status?.booster_types ?? []).find((x) => x.id === rewardId) : null
+    const typeInfo = isType ? boosterTypes.find((x) => x.id === rewardId) : null
     const isPack = kind === 'golden' || isGold
     const goldType = isGold ? catalog?.typeMap?.[goldRewards.find((g) => g.id === rewardId)?.type_id] : null
     const goldCategory = goldType ? catalog?.categoryMap?.[goldType.category_id] : null
@@ -238,8 +251,8 @@ export default function Boosters({ goCollection }) {
     setOverlay({ phase: 'shake', categoryId: (goldCategory ?? category).id, golden: isPack, gold: isGold, label: shakeBooster?.name, glow: shakeBooster?.glow, color: shakeBooster?.color })
     const t0 = Date.now()
     try {
-      const res = await withTimeout(isType ? api.openBoosterType(rewardId) : isGold ? api.openGoldReward(rewardId) : isPack ? api.openGoldenPack() : api.openBooster())
-      setStatus(res.status)
+      const res = await withTimeout(isType ? api.openBoosterType(rewardId, selectedCat?.id) : isGold ? api.openGoldReward(rewardId) : isPack ? api.openGoldenPack(selectedCat?.id) : api.openBooster(selectedCat?.id))
+      setStatus(res.status)   // (une collection terminée entre-temps arrive comme une erreur « collection_closed » : rien n'est ouvert, le stock est intact)
       // Les cartes les plus rares sont révélées en dernier
       const cards = [...res.cards].sort(
         (a, b) => (rarityMap[b.rarity_id]?.sort_order ?? 0) - (rarityMap[a.rarity_id]?.sort_order ?? 0),
@@ -277,9 +290,23 @@ export default function Boosters({ goCollection }) {
           </button>
         )}
 
-        {selGold ? (
-          <p className="pack-name">Booster {goldName} « {catalog?.categoryMap?.[goldCard?.category_id]?.name ?? category?.name} »</p>
-        ) : category && <p className="pack-name">Booster {selType ? `${selType.name} ` : boosterName ? `${boosterName} ` : ''}« {category.name} »</p>}
+        {(selGold || category) && (
+          <>
+            <p className="pack-name">Booster{selGold ? ` ${goldName}` : selType ? ` ${selType.name}` : boosterName ? ` ${boosterName}` : ''}</p>
+            {selGold ? (
+              <p className="pack-collection">{catalog?.categoryMap?.[goldCard?.category_id]?.name ?? category?.name}</p>
+            ) : activeList.length > 1 ? (
+              <label className="select pack-collection">
+                <span className="sr">Collection</span>
+                <select value={selectedCat?.id ?? ''} disabled={!!overlay} onChange={(e) => pickCollection(Number(e.target.value))}>
+                  {activeList.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </label>
+            ) : (
+              <p className="pack-collection">{category.name}</p>
+            )}
+          </>
+        )}
         <p className="stock">
           {status ? (
             selGold ? (
@@ -303,7 +330,7 @@ export default function Boosters({ goCollection }) {
           Ouvrir un booster{selGold ? ` ${goldName}` : selType ? ` ${selType.name}` : boosterName ? ` ${boosterName}` : ''}
         </button>
 
-        <ExtraBoosters category={category} items={(status?.booster_types ?? []).filter((b) => !shelfTypes.some((s) => s.id === b.id))} coins={coinsFree} disabled={!!overlay} onOpen={(it) => open(false, 'type', it.id)} onBuy={buy} onInfo={setOddsFor} />
+        <ExtraBoosters category={category} items={boosterTypes.filter((b) => !shelfTypes.some((s) => s.id === b.id))} coins={coinsFree} disabled={!!overlay} onOpen={(it) => open(false, 'type', it.id)} onBuy={buy} onInfo={setOddsFor} />
         {oddsFor && category && <BoosterOddsSheet category={category} boosterType={oddsFor} rarityMap={rarityMap} onClose={() => setOddsFor(null)} />}
         {goldenPacks > 0 && (
           <div className="golden-reward">
@@ -333,15 +360,14 @@ export default function Boosters({ goCollection }) {
             +{status.regen_amount} boosters toutes les {status.regen_minutes} minutes, jusqu’à {status.max_boosters} en stock.
           </p>
         )}
-        {status && category && (
+        {status && selectedCat && (
           <p className="fine">
-            {category.name} : {fmt(status.cards_taken)} cartes tirées sur {fmt(status.total_cards)}.
-            {nextCategory ? ` Quand elles seront toutes tirées, la catégorie « ${nextCategory.name} » s’ouvrira.` : ' C’est la dernière catégorie.'}
+            {selectedCat.name} : {fmt(selectedCat.cards_taken)} cartes tirées sur {fmt(selectedCat.total_cards)}.
           </p>
         )}
         {category && <Odds category={category} />}
         {status && !category && (
-          <p className="msg info">Toutes les catégories de boosters ont été entièrement tirées. De nouvelles arriveront bientôt.</p>
+          <p className="msg info">Toutes les collections de boosters ont été entièrement tirées. De nouvelles arriveront bientôt.</p>
         )}
 
         {status?.shop_enabled && (
@@ -429,8 +455,8 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
         {specials.map((r, i) => <Fireworks key={r.id} rarity={r} delay={i * 1800} />)}
         {overlay.nextCategoryId !== overlay.categoryId && catalog?.categoryMap?.[overlay.categoryId] && (
           <p className="category-done">
-            Catégorie « {catalog.categoryMap[overlay.categoryId].name} » terminée !
-            {catalog.categoryMap[overlay.nextCategoryId] ? ` « ${catalog.categoryMap[overlay.nextCategoryId].name} » est maintenant ouverte.` : ' Toutes les catégories sont terminées.'}
+            Collection « {catalog.categoryMap[overlay.categoryId].name} » terminée !
+            {catalog.categoryMap[overlay.nextCategoryId] ? ` « ${catalog.categoryMap[overlay.nextCategoryId].name} » est maintenant ouverte.` : ' Toutes les collections sont terminées.'}
           </p>
         )}
         <h2 className={`overlay-title ${golden ? 'gold' : ''}`}>{gold ? `Booster ${label ?? 'Gold'}` : golden ? 'Booster doré' : label ? `Booster ${label}` : 'Ton booster'}</h2>

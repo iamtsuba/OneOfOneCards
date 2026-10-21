@@ -103,7 +103,7 @@ export function OddsBody({ data, category, rarityMap, initialInfo = false, compa
   )
 }
 
-// Chances de tirage de la catégorie en cours, calculées par le serveur sur les cartes encore disponibles
+// Chances de tirage de la collection en cours, calculées par le serveur sur les cartes encore disponibles
 export default function Odds({ category }) {
   const { rarityMap, status } = useGame()
   const [open, setOpen] = useState(false)
@@ -129,7 +129,7 @@ export default function Odds({ category }) {
   )
 }
 
-// Chances d'un type de booster (hors Standard) dans la catégorie en cours, dans une fenêtre
+// Chances d'un type de booster (hors Standard) dans la collection en cours, dans une fenêtre
 export function BoosterOddsSheet({ category, boosterType, rarityMap, onClose }) {
   const [data, setData] = useState(null)
   const [error, setError] = useState('')

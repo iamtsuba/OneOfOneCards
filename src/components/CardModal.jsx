@@ -72,7 +72,7 @@ export default function CardModal({ sel, rarity, onClose, onChanged, onRefresh, 
     taken: 'Cette carte a déjà été tirée par un autre joueur. Tu peux peut-être l’acheter sur le marché.',
     free: category?.closed
       ? 'Cette carte n’a pas été tirée.'
-      : 'Cette carte n’a pas encore été tirée : elle est toujours dans les boosters de sa catégorie.',
+      : 'Cette carte n’a pas encore été tirée : elle est toujours dans les boosters de sa collection.',
   }
 
   return (
@@ -137,7 +137,7 @@ export default function CardModal({ sel, rarity, onClose, onChanged, onRefresh, 
               <h3>Revendre à la banque</h3>
               {categoryClosed ? (
                 <p className="muted">
-                  Indisponible : la catégorie « {category.name} » est terminée, la progression est définitive. Tu peux vendre cette carte sur le marché.
+                  Indisponible : la collection « {category.name} » est terminée, la progression est définitive. Tu peux vendre cette carte sur le marché.
                 </p>
               ) : (
                 <>

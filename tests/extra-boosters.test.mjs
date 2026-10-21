@@ -53,7 +53,7 @@ ok('la bande de chaque paquet prend la couleur réglée sur son booster (Silver 
 ok('le halo de chaque booster entoure son paquet (Silver argenté, Légende arc-en-ciel) ; pas de halo sans réglage', /has-glow glow-silver/.test(tile(html, 'Silver')) && /has-glow glow-rainbow/.test(tile(html, 'Légende')) && !/glow/.test(tile(html, 'Bronze')) && !/glow/.test(tile(html, 'Mini')))
 ok('le stock en pastille sur le paquet (×2, ×1) seulement quand il y en a', /shelf-count[^>]*>×2</.test(tile(html, 'Silver')) && /shelf-count[^>]*>×1</.test(tile(html, 'Légende')) && !/shelf-count/.test(tile(html, 'Bronze')) && !/shelf-count/.test(tile(html, 'Mini')))
 ok('les boutons sont DESSOUS le paquet : le paquet vient avant le nom, le nom avant les boutons (Acheter, Ouvrir, « i »)', (() => { const t = tile(html, 'Silver'); return t.indexOf('pack-wrap') < t.indexOf('<strong>Silver') && t.indexOf('<strong>Silver') < t.indexOf('extra-actions') && t.indexOf('extra-actions') < t.indexOf('Acheter') })())
-ok('avec la catégorie en cours, le titre du paquet est le sien ; sans catégorie, pas de plantage', /Chat’trapez les tous !/.test(tile(withCat, 'Silver')) && !/undefined|NaN/.test(html))
+ok('avec la collection en cours, le titre du paquet est le sien ; sans collection, pas de plantage', /Chat’trapez les tous !/.test(tile(withCat, 'Silver')) && !/undefined|NaN/.test(html))
 ok('texte court et sans donnée parasite', !/undefined|NaN|null/.test(html) && html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').length < 420)
 
 if (bad) { console.error(`\n${bad} ÉCHEC(S)`); process.exit(1) }

@@ -74,9 +74,9 @@ for (const c of CASES) {
   ok(`[dist/${c.mode}] titre « ${c.title} » et référencement ${c.banner ? 'bloqué (noindex)' : 'autorisé'}`, html.includes(`<title>${c.title}</title>`) && html.includes(c.banner ? 'noindex' : 'index,follow'))
   ok(`[dist/${c.mode}] aucune trace de « opennumber » ni « OneOfOne » dans le site compilé`, !/opennumber|OneOfOne/i.test(html + bundle))
   ok(`[dist/${c.mode}] contient son préfixe ${c.prefix}`, bundle.includes(`"${c.prefix}"`))
-  // La copie d'une catégorie vers la production n'existe QUE dans le site de préproduction (ni bouton, ni appel serveur dans celui de production)
+  // La copie d'une collection vers la production n'existe QUE dans le site de préproduction (ni bouton, ni appel serveur dans celui de production)
   const copyTraces = ['Copier vers la production', 'admin_copy_category_to_prod', 'Mot de passe administrateur de la production']
-  ok(`[dist/${c.mode}] copie de catégorie vers la production : ${c.banner ? 'présente' : 'AUCUNE trace'} dans le site compilé`,
+  ok(`[dist/${c.mode}] copie de collection vers la production : ${c.banner ? 'présente' : 'AUCUNE trace'} dans le site compilé`,
     c.banner ? copyTraces.every((t) => bundle.includes(t)) : copyTraces.every((t) => !bundle.includes(t)))
 }
 

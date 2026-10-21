@@ -113,9 +113,9 @@ select pg_temp.expect('plus de détenteur : supprimé, répartitions et stocks a
 
 \echo '--- droits'
 select pg_temp.expect('joueur connecté : acheter, ouvrir, administrer (avec le mot de passe) ; anonyme : rien ; tables fermées',
-  has_function_privilege('authenticated', 'public.{{P}}buy_booster(int, int)', 'execute') and has_function_privilege('authenticated', 'public.{{P}}open_booster_of_type(int)', 'execute')
+  has_function_privilege('authenticated', 'public.{{P}}buy_booster(int, int, int)', 'execute') and has_function_privilege('authenticated', 'public.{{P}}open_booster_of_type(int, int)', 'execute')
   and has_function_privilege('authenticated', 'public.{{P}}admin_save_booster_type(text, int, text, int, text, int, boolean, jsonb, text, text)', 'execute')
-  and not has_function_privilege('anon', 'public.{{P}}buy_booster(int, int)', 'execute') and not has_function_privilege('anon', 'public.{{P}}admin_grant_boosters(text, int, int, text)', 'execute')
+  and not has_function_privilege('anon', 'public.{{P}}buy_booster(int, int, int)', 'execute') and not has_function_privilege('anon', 'public.{{P}}admin_grant_boosters(text, int, int, text)', 'execute')
   and not has_function_privilege('authenticated', 'public.{{P}}draw_booster_cards(uuid, int, int)', 'execute') and not has_function_privilege('authenticated', 'public.{{P}}pick_series(int, int, int, double precision, jsonb)', 'execute')
   and not has_table_privilege('authenticated', 'public.{{P}}booster_types', 'select') and not has_table_privilege('authenticated', 'public.{{P}}user_boosters', 'select') and not has_table_privilege('authenticated', 'public.{{P}}booster_type_slots', 'select'));
 

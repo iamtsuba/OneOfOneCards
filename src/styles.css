@@ -942,3 +942,14 @@ html.subscriber { --bg: #fbf1d3; }
 .tile-flag.missing { background: #d9f0e3; color: #0d5a35; box-shadow: inset 0 0 0 1.5px rgba(34, 160, 90, .45); }
 
 .chips.wrap { flex-wrap: wrap; overflow: visible; }
+
+/* Boosters : « Booster … » puis la collection (texte, ou liste déroulante s'il y en a plusieurs d'ouvertes) */
+.pack-name { margin-bottom: 2px; }
+.pack-collection { margin: 0 0 10px; font-weight: 700; font-size: 17px; text-align: center; color: var(--ink-soft, #4a4f7a); }
+label.pack-collection { display: flex; justify-content: center; }
+label.pack-collection select { min-width: 220px; max-width: 100%; font-weight: 700; }
+
+/* Admin : booster offert quand une carte est complétée */
+.reward-picker { display: grid; gap: 6px; padding: 12px; margin: 10px 0; border-radius: 14px; background: var(--surface, #fff); box-shadow: 0 1px 2px rgba(27,31,59,.08); }
+.reward-picker label { display: grid; gap: 6px; }
+.reward-picker select { width: 100%; }

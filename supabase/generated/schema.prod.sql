@@ -804,6 +804,11 @@ create or replace function public.o1ocards_active_category()
 returns int language sql stable set search_path = public as $$
   select id from public.o1ocards_categories where enabled and not closed order by position, id limit 1
 $$;
+-- Toutes les collections activées et non terminées sont ouvertes EN MÊME TEMPS (le joueur choisit celle dans laquelle il ouvre ses boosters)
+create or replace function public.o1ocards_active_categories()
+returns table (id int) language sql stable set search_path = public as $$
+  select c.id from public.o1ocards_categories c where c.enabled and not c.closed order by c.position, c.id
+$$;
 
 -- Nombre total de cartes d'une catégorie (tous types) et nombre déjà tirées
 create or replace function public.o1ocards_category_total(p_category int)
@@ -1069,10 +1074,7 @@ begin
   end if;
   select coalesce(sum(current_bid), 0) into v_locked
   from public.o1ocards_listings where current_bidder = p.id and status = 'active';
-  select jsonb_build_object('id', c.id, 'name', c.name) into v_next
-  from public.o1ocards_categories c
-  where c.enabled and not c.closed and c.id is distinct from v_cat
-  order by c.position, c.id limit 1;
+  v_next := null;   -- toutes les collections activées et non terminées sont ouvertes en même temps : il n'y a plus de « suivante »
   select coalesce(jsonb_agg(id order by id), '[]'::jsonb) into v_closed
   from public.o1ocards_categories where closed;
   return jsonb_build_object(
@@ -1114,13 +1116,24 @@ begin
                              'gift_name',            (select bt.name from public.o1ocards_booster_types bt where bt.role = 'subscription_gift' and bt.enabled),
                              'gift_quantity',        coalesce(public.o1ocards_cfg('subscription_gift_quantity'), 0)::int),
     'booster_types',       (select coalesce(jsonb_agg(jsonb_build_object('id', bt.id, 'name', bt.name, 'cards', bt.cards, 'color', bt.color, 'glow', bt.glow, 'price', bt.price_coins,
-                                                                          'quantity', coalesce(ub.quantity, 0)) order by bt.position, bt.id), '[]'::jsonb)
+                                                                          'quantity', coalesce(ub.quantity, 0) + coalesce((select sum(l.quantity) from public.o1ocards_user_collection_boosters l join public.o1ocards_categories c on c.id = l.category_id
+                                                                                                                         where l.user_id = p.id and l.booster_type_id = bt.id and (c.closed or not c.enabled)), 0)) order by bt.position, bt.id), '[]'::jsonb)
                             from public.o1ocards_booster_types bt
                             left join public.o1ocards_user_boosters ub on ub.booster_type_id = bt.id and ub.user_id = p.id
-                            where bt.enabled and not bt.is_standard and (bt.role is null or bt.role = 'subscription_gift') and (bt.price_coins is not null or coalesce(ub.quantity, 0) > 0)),
+                            where bt.enabled and not bt.is_standard and (bt.role is null or bt.role = 'subscription_gift')
+                              and (bt.price_coins is not null or coalesce(ub.quantity, 0) > 0 or exists (select 1 from public.o1ocards_user_collection_boosters l where l.user_id = p.id and l.booster_type_id = bt.id and l.quantity > 0))),
     'gold_rewards',        (select coalesce(jsonb_agg(jsonb_build_object('id', g.id, 'type_id', g.type_id, 'seen', g.seen) order by g.id), '[]'::jsonb)
                             from public.o1ocards_gold_rewards g where g.user_id = p.id and g.opened_at is null),
     'active_category_id',  v_cat,
+    'active_categories',   (select coalesce(jsonb_agg(jsonb_build_object('id', c.id, 'name', c.name, 'cards_taken', public.o1ocards_category_taken(c.id), 'total_cards', public.o1ocards_category_total(c.id)) order by c.position, c.id), '[]'::jsonb)
+                            from public.o1ocards_categories c where c.enabled and not c.closed),
+    'linked_boosters',     (select coalesce(jsonb_agg(jsonb_build_object('booster_type_id', l.booster_type_id, 'category_id', l.category_id, 'quantity', l.quantity)), '[]'::jsonb)
+                            from public.o1ocards_user_collection_boosters l join public.o1ocards_categories c on c.id = l.category_id
+                            where l.user_id = p.id and l.quantity > 0 and c.enabled and not c.closed),
+    'reward_booster_id',   nullif(coalesce(public.o1ocards_cfg('card_reward_booster'), 0), 0)::int,
+    'reward_notices',      (select coalesce(jsonb_agg(jsonb_build_object('id', g.id, 'type_id', g.type_id, 'category_id', ty.category_id, 'booster_name', bt.name) order by g.id), '[]'::jsonb)
+                            from public.o1ocards_gold_rewards g join public.o1ocards_types ty on ty.id = g.type_id left join public.o1ocards_booster_types bt on bt.id = g.granted_booster_type
+                            where g.user_id = p.id and g.granted_booster_type is not null and not g.seen),
     'next_category',       v_next,
     'closed_categories',   v_closed,
     'cards_taken',         v_taken,
@@ -1304,6 +1317,29 @@ alter table public.o1ocards_booster_types enable row level security;
 alter table public.o1ocards_booster_type_slots enable row level security;
 alter table public.o1ocards_user_boosters enable row level security;
 revoke all on public.o1ocards_booster_types, public.o1ocards_booster_type_slots, public.o1ocards_user_boosters from anon, authenticated;
+
+-- Stock de boosters LIÉS à une collection (récompense d'une carte complétée, achats) : ils ne s'ouvrent que dans cette collection. Le stock sans collection (user_boosters) s'ouvre dans la collection choisie.
+create table if not exists public.o1ocards_user_collection_boosters (
+  user_id         uuid not null references public.o1ocards_profiles (id) on delete cascade,
+  booster_type_id int  not null references public.o1ocards_booster_types (id) on delete cascade,
+  category_id     int  not null references public.o1ocards_categories (id) on delete cascade,
+  quantity        int  not null default 0 check (quantity >= 0),
+  primary key (user_id, booster_type_id, category_id)
+);
+alter table public.o1ocards_user_collection_boosters enable row level security;
+revoke all on public.o1ocards_user_collection_boosters from anon, authenticated;
+-- Booster offert quand une carte est complétée dans l'album : identifiant d'un type de booster (onglet Boosters de l'admin) ; 0 = l'ancien booster Gold. Au premier passage : le booster nommé Premium s'il existe.
+insert into public.o1ocards_config (key, value, description)
+select 'card_reward_booster', coalesce((select bt.id from public.o1ocards_booster_types bt where lower(bt.name) = 'premium' and not bt.is_standard order by bt.id limit 1), 0),
+       'Booster offert quand une carte est complétée dans l''album (identifiant du type de booster ; 0 = ancien booster Gold)'
+on conflict (key) do nothing;
+
+create or replace function public.o1ocards_grant_collection_booster(p_uid uuid, p_type int, p_cat int, p_qty int)
+returns void language sql security definer set search_path = public as $$
+  insert into public.o1ocards_user_collection_boosters (user_id, booster_type_id, category_id, quantity) values (p_uid, p_type, p_cat, p_qty)
+  on conflict (user_id, booster_type_id, category_id) do update set quantity = public.o1ocards_user_collection_boosters.quantity + excluded.quantity
+$$;
+revoke all on function public.o1ocards_grant_collection_booster(uuid, int, int, int) from public, anon, authenticated;
 
 -- Les anciens mécanismes (poids par rareté, nombre de cartes en réglage) disparaissent au profit des types de boosters
 drop function if exists public.o1ocards_seed_rarity_weights();
@@ -1582,7 +1618,8 @@ revoke all on function public.o1ocards_pick_series(int, int, int, double precisi
 revoke all on function public.o1ocards_auto_place_album(uuid, int, text, int, int) from public, anon, authenticated;
 revoke all on function public.o1ocards_draw_booster_cards(uuid, int, int) from public, anon, authenticated;
 
-create or replace function public.o1ocards_open_booster()
+drop function if exists public.o1ocards_open_booster();
+create or replace function public.o1ocards_open_booster(p_category int default null)
 returns jsonb language plpgsql security definer set search_path = public set jit = off as $$
 declare
   uid       uuid := auth.uid();
@@ -1617,8 +1654,13 @@ begin
 
   <<category_loop>>
   loop
-    v_cat := public.o1ocards_active_category();
-    if v_cat is null then raise exception 'pool_empty'; end if;
+    if p_category is not null then   -- collection choisie par le joueur : elle doit être ouverte
+      v_cat := p_category;
+      if not exists (select 1 from public.o1ocards_categories c where c.id = v_cat and c.enabled and not c.closed) then raise exception 'collection_closed'; end if;
+    else
+      v_cat := public.o1ocards_active_category();
+      if v_cat is null then raise exception 'pool_empty'; end if;
+    end if;
     got := 0; exhausted := false; res := '[]'::jsonb; v_golden := false;
 
     -- Booster doré : chance très faible, contenu défini dans golden_contents
@@ -1638,13 +1680,16 @@ begin
 
     exit category_loop when got > 0;
     if exhausted then
-      update public.o1ocards_categories set closed = true where id = v_cat;   -- catégorie terminée : on passe à la suivante
-      continue category_loop;
+      update public.o1ocards_categories set closed = true where id = v_cat;   -- collection terminée
+      if p_category is not null then   -- le joueur avait choisi cette collection : rien n'est ouvert, le stock est intact
+        return jsonb_build_object('error', 'collection_closed', 'status', public.o1ocards_status_json(p));
+      end if;
+      continue category_loop;   -- sans collection choisie : on passe à la suivante
     end if;
     raise exception 'try_again';
   end loop category_loop;
 
-  -- Catégorie complètement tirée : elle se ferme, la suivante s'ouvre pour le prochain booster
+  -- Collection complètement tirée : elle se ferme
   if public.o1ocards_category_taken(v_cat) >= public.o1ocards_category_total(v_cat) then
     update public.o1ocards_categories set closed = true where id = v_cat;
   end if;
@@ -1661,45 +1706,61 @@ begin
 end $$;
 
 -- Ouvrir un booster d'un autre type que le Standard (stock du joueur : achat en pièces ou don de l'admin)
-create or replace function public.o1ocards_open_booster_of_type(p_type int)
+drop function if exists public.o1ocards_open_booster_of_type(int);
+create or replace function public.o1ocards_open_booster_of_type(p_type int, p_category int default null)
 returns jsonb language plpgsql security definer set search_path = public set jit = off as $$
 declare
-  uid uuid := auth.uid(); p public.o1ocards_profiles; bt public.o1ocards_booster_types; v_qty int; v_cat int; got int; exhausted boolean; res jsonb; d jsonb;
+  uid uuid := auth.uid(); p public.o1ocards_profiles; bt public.o1ocards_booster_types; v_cat int; v_lq int; v_uq int; v_oc int;
+  got int; exhausted boolean; res jsonb; d jsonb;
 begin
   if uid is null then raise exception 'not_authenticated'; end if;
   p := public.o1ocards_sync(uid);
   select * into bt from public.o1ocards_booster_types where id = p_type and enabled and not is_standard and (role is null or role = 'subscription_gift');
   if not found then raise exception 'unknown_booster'; end if;
-  select quantity into v_qty from public.o1ocards_user_boosters where user_id = uid and booster_type_id = p_type for update;
-  if coalesce(v_qty, 0) <= 0 then raise exception 'no_boosters'; end if;
 
-  <<category_loop>>
-  loop
-    v_cat := public.o1ocards_active_category();
-    if v_cat is null then raise exception 'pool_empty'; end if;
-    d := public.o1ocards_draw_booster_cards(uid, v_cat, p_type);
-    res := d -> 'cards';
-    got := jsonb_array_length(res);
-    exhausted := (d ->> 'exhausted')::boolean;
-    exit category_loop when got > 0;
+  v_cat := coalesce(p_category, public.o1ocards_active_category());
+  if v_cat is null then raise exception 'pool_empty'; end if;
+  if not exists (select 1 from public.o1ocards_categories c where c.id = v_cat and c.enabled and not c.closed) then raise exception 'collection_closed'; end if;
+
+  -- Stock : d'abord les boosters liés à CETTE collection, puis ceux sans collection, puis ceux d'une collection terminée (qu'on ne pourrait plus ouvrir ailleurs)
+  select quantity into v_lq from public.o1ocards_user_collection_boosters where user_id = uid and booster_type_id = p_type and category_id = v_cat for update;
+  select quantity into v_uq from public.o1ocards_user_boosters where user_id = uid and booster_type_id = p_type for update;
+  if coalesce(v_lq, 0) <= 0 and coalesce(v_uq, 0) <= 0 then
+    select l.category_id into v_oc from public.o1ocards_user_collection_boosters l join public.o1ocards_categories c on c.id = l.category_id
+    where l.user_id = uid and l.booster_type_id = p_type and l.quantity > 0 and (c.closed or not c.enabled) order by l.category_id limit 1 for update of l;
+    if v_oc is null then raise exception 'no_boosters'; end if;
+  end if;
+
+  d := public.o1ocards_draw_booster_cards(uid, v_cat, p_type);
+  res := d -> 'cards';
+  got := jsonb_array_length(res);
+  exhausted := (d ->> 'exhausted')::boolean;
+  if got = 0 then
     if exhausted then
       update public.o1ocards_categories set closed = true where id = v_cat;
-      continue category_loop;
+      return jsonb_build_object('error', 'collection_closed', 'status', public.o1ocards_status_json(p));
     end if;
     raise exception 'try_again';
-  end loop category_loop;
+  end if;
 
   if public.o1ocards_category_taken(v_cat) >= public.o1ocards_category_total(v_cat) then
     update public.o1ocards_categories set closed = true where id = v_cat;
   end if;
-  update public.o1ocards_user_boosters set quantity = quantity - 1 where user_id = uid and booster_type_id = p_type;
+  if coalesce(v_lq, 0) > 0 then
+    update public.o1ocards_user_collection_boosters set quantity = quantity - 1 where user_id = uid and booster_type_id = p_type and category_id = v_cat;
+  elsif coalesce(v_uq, 0) > 0 then
+    update public.o1ocards_user_boosters set quantity = quantity - 1 where user_id = uid and booster_type_id = p_type;
+  else
+    update public.o1ocards_user_collection_boosters set quantity = quantity - 1 where user_id = uid and booster_type_id = p_type and category_id = v_oc;
+  end if;
   update public.o1ocards_profiles set boosters_opened = boosters_opened + 1 where id = uid returning * into p;
   return jsonb_build_object('cards', res, 'golden', false, 'category_id', v_cat, 'booster', jsonb_build_object('id', bt.id, 'name', bt.name, 'color', bt.color, 'glow', bt.glow),
                             'status', public.o1ocards_status_json(p));
 end $$;
 
 -- Acheter des boosters d'un type en vente avec ses pièces (hors pièces bloquées par des enchères)
-create or replace function public.o1ocards_buy_booster(p_type int, p_quantity int default 1)
+drop function if exists public.o1ocards_buy_booster(int, int);
+create or replace function public.o1ocards_buy_booster(p_type int, p_quantity int default 1, p_category int default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare uid uuid := auth.uid(); p public.o1ocards_profiles; bt public.o1ocards_booster_types; v_total bigint; v_locked bigint;
 begin
@@ -1707,19 +1768,25 @@ begin
   if p_quantity is null or p_quantity < 1 or p_quantity > 50 then raise exception 'invalid_quantity'; end if;
   select * into bt from public.o1ocards_booster_types where id = p_type and enabled and not is_standard and price_coins is not null;
   if not found then raise exception 'not_for_sale'; end if;
+  -- achat pour une collection : le booster y est lié (il ne s'ouvre que dans cette collection)
+  if p_category is not null and not exists (select 1 from public.o1ocards_categories c where c.id = p_category and c.enabled and not c.closed) then raise exception 'collection_closed'; end if;
   p := public.o1ocards_sync(uid);
   v_total := bt.price_coins::bigint * p_quantity;
   select coalesce(sum(current_bid), 0) into v_locked from public.o1ocards_listings where current_bidder = uid and status = 'active';
   if p.coins - v_locked < v_total then raise exception 'not_enough_coins'; end if;
   update public.o1ocards_profiles set coins = coins - v_total where id = uid returning * into p;
-  insert into public.o1ocards_user_boosters (user_id, booster_type_id, quantity) values (uid, p_type, p_quantity)
-  on conflict (user_id, booster_type_id) do update set quantity = public.o1ocards_user_boosters.quantity + excluded.quantity;
+  if p_category is not null then
+    perform public.o1ocards_grant_collection_booster(uid, p_type, p_category, p_quantity);
+  else
+    insert into public.o1ocards_user_boosters (user_id, booster_type_id, quantity) values (uid, p_type, p_quantity)
+    on conflict (user_id, booster_type_id) do update set quantity = public.o1ocards_user_boosters.quantity + excluded.quantity;
+  end if;
   return jsonb_build_object('ok', true, 'status', public.o1ocards_status_json(p));
 end $$;
-revoke all on function public.o1ocards_open_booster_of_type(int) from public, anon;
-revoke all on function public.o1ocards_buy_booster(int, int) from public, anon;
-grant execute on function public.o1ocards_open_booster_of_type(int) to authenticated;
-grant execute on function public.o1ocards_buy_booster(int, int) to authenticated;
+revoke all on function public.o1ocards_open_booster_of_type(int, int) from public, anon;
+revoke all on function public.o1ocards_buy_booster(int, int, int) from public, anon;
+grant execute on function public.o1ocards_open_booster_of_type(int, int) to authenticated;
+grant execute on function public.o1ocards_buy_booster(int, int, int) to authenticated;
 
 -- ---------- Admin : créer, modifier, supprimer un type de booster ; offrir des boosters ----------
 -- p_slots = [{position, rarity_id, weight}] : chaque carte de 1 à p_cards a au moins une rareté (ordinaire ou Unique), chaque couple une seule fois.
@@ -1786,7 +1853,8 @@ begin
   if not found then raise exception 'not_found'; end if;
   if bt.is_standard then raise exception 'booster_is_standard'; end if;
   if bt.role = 'card_reward' then raise exception 'booster_protected'; end if;   -- le booster de récompense est utilisé par le jeu
-  if exists (select 1 from public.o1ocards_user_boosters where booster_type_id = p_id and quantity > 0) then raise exception 'booster_has_holders'; end if;
+  if p_id = nullif(coalesce(public.o1ocards_cfg('card_reward_booster'), 0), 0)::int then raise exception 'booster_protected'; end if;   -- offert quand une carte est complétée
+  if exists (select 1 from public.o1ocards_user_boosters where booster_type_id = p_id and quantity > 0) or exists (select 1 from public.o1ocards_user_collection_boosters where booster_type_id = p_id and quantity > 0) then raise exception 'booster_has_holders'; end if;
   delete from public.o1ocards_booster_types where id = p_id;
   return jsonb_build_object('ok', true);
 end $$;
@@ -1815,15 +1883,17 @@ grant execute on function public.o1ocards_admin_delete_booster_type(text, int) t
 grant execute on function public.o1ocards_admin_grant_boosters(text, int, int, text) to authenticated;
 
 -- Ouvre un pack doré gagné en complétant une série (catégorie en cours). Ne consomme aucun booster.
-create or replace function public.o1ocards_open_golden_pack()
+drop function if exists public.o1ocards_open_golden_pack();
+create or replace function public.o1ocards_open_golden_pack(p_category int default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare uid uuid := auth.uid(); p public.o1ocards_profiles; v_cat int; res jsonb;
 begin
   if uid is null then raise exception 'not_authenticated'; end if;
   p := public.o1ocards_sync(uid);
   if p.golden_packs <= 0 then raise exception 'no_golden_pack'; end if;
-  v_cat := public.o1ocards_active_category();
+  v_cat := coalesce(p_category, public.o1ocards_active_category());
   if v_cat is null then raise exception 'pool_empty'; end if;
+  if not exists (select 1 from public.o1ocards_categories c where c.id = v_cat and c.enabled and not c.closed) then raise exception 'collection_closed'; end if;
   res := public.o1ocards_draw_golden(uid, v_cat);
   if jsonb_array_length(res) = 0 then raise exception 'pool_empty'; end if;
   if public.o1ocards_category_taken(v_cat) >= public.o1ocards_category_total(v_cat) then
@@ -2944,6 +3014,9 @@ create table if not exists public.o1ocards_gold_rewards (
   cards      jsonb,
   unique (user_id, type_id)
 );
+-- Récompense d'une carte complétée : booster offert (type de booster), au lieu de l'ancien booster Gold à ouvrir
+alter table public.o1ocards_gold_rewards add column if not exists granted_booster_type int references public.o1ocards_booster_types (id) on delete set null;
+
 alter table public.o1ocards_gold_rewards enable row level security;
 revoke all on public.o1ocards_gold_rewards from anon, authenticated;
 
@@ -2970,6 +3043,7 @@ $$;
 -- Crée la récompense si tous les emplacements de la carte sont remplis dans l'album du joueur (et s'il ne l'a pas déjà eue)
 create or replace function public.o1ocards_check_type_reward(p_uid uuid, p_type int)
 returns void language plpgsql security definer set search_path = public as $$
+declare v_bt int := nullif(coalesce(public.o1ocards_cfg('card_reward_booster'), 0), 0)::int; v_cat int; n int;
 begin
   if exists (select 1 from public.o1ocards_gold_rewards where user_id = p_uid and type_id = p_type) then return; end if;
   if not exists (select 1 from public.o1ocards_type_album_slots(p_type)) then return; end if;
@@ -2980,7 +3054,15 @@ begin
       where p.user_id = p_uid and p.type_id = p_type and p.rarity_id = sl.rid
         and public.o1ocards_rarity_id(p.number, p.series, p.type_id, p.base_rarity) = p.rarity_id)
   ) then return; end if;
-  insert into public.o1ocards_gold_rewards (user_id, type_id) values (p_uid, p_type) on conflict (user_id, type_id) do nothing;
+  -- Carte complétée : un booster (celui choisi dans l'admin, par défaut Premium) est offert, LIÉ à la collection de la carte
+  if v_bt is not null and exists (select 1 from public.o1ocards_booster_types where id = v_bt and enabled and not is_standard) then
+    select ty.category_id into v_cat from public.o1ocards_types ty where ty.id = p_type;
+    insert into public.o1ocards_gold_rewards (user_id, type_id, opened_at, granted_booster_type) values (p_uid, p_type, now(), v_bt) on conflict (user_id, type_id) do nothing;
+    get diagnostics n = row_count;
+    if n = 1 then perform public.o1ocards_grant_collection_booster(p_uid, v_bt, v_cat, 1); end if;
+  else   -- aucun booster de récompense choisi : l'ancien booster Gold à ouvrir
+    insert into public.o1ocards_gold_rewards (user_id, type_id) values (p_uid, p_type) on conflict (user_id, type_id) do nothing;
+  end if;
 end $$;
 
 -- Les séries d'une catégorie qui ont encore des cartes, avec ce qui reste : alpha (numéro 1) et omega (numéro m) libres, cartes « du milieu » libres
@@ -3192,6 +3274,17 @@ delete from public.o1ocards_album_picks p where public.o1ocards_rarity_id(p.numb
 select public.o1ocards_auto_place_album(c.owner_id, c.type_id, c.base_rarity, c.series, c.number)
 from public.o1ocards_cards c
 where c.series = 1 and c.owner_id is not null and not public.o1ocards_number_visible(c.type_id, c.base_rarity, 1);
+
+-- ---------- Anciens boosters Gold non ouverts : ils deviennent des boosters de récompense liés à la collection de leur carte ----------
+do $$
+declare v_bt int := nullif(coalesce(public.o1ocards_cfg('card_reward_booster'), 0), 0)::int; r record;
+begin
+  if v_bt is null or not exists (select 1 from public.o1ocards_booster_types where id = v_bt and enabled and not is_standard) then return; end if;
+  for r in select g.id, g.user_id, ty.category_id from public.o1ocards_gold_rewards g join public.o1ocards_types ty on ty.id = g.type_id where g.opened_at is null loop
+    perform public.o1ocards_grant_collection_booster(r.user_id, v_bt, r.category_id, 1);
+    update public.o1ocards_gold_rewards set opened_at = now(), granted_booster_type = v_bt, seen = true where id = r.id;
+  end loop;
+end $$;
 
 -- ---------- Lien d'invitation : devenir ami en ouvrant un lien ----------
 -- Chaque joueur a UN code d'invitation (20 caractères hexadécimaux au hasard). Celui qui ouvre le lien, une fois connecté, devient ami tout de suite avec son propriétaire
@@ -3751,7 +3844,7 @@ begin
     'booster_types', (select coalesce(jsonb_agg(to_jsonb(bt) || jsonb_build_object(
       'slots', (select coalesce(jsonb_agg(jsonb_build_object('position', sl.position, 'rarity_id', sl.rarity_id, 'weight', sl.weight) order by sl.position, sl.weight desc, sl.rarity_id), '[]'::jsonb)
                 from public.o1ocards_booster_type_slots sl where sl.booster_type_id = bt.id),
-      'holders', (select coalesce(sum(ub.quantity), 0) from public.o1ocards_user_boosters ub where ub.booster_type_id = bt.id)) order by bt.position, bt.id), '[]'::jsonb)
+      'holders', (select coalesce(sum(ub.quantity), 0) from public.o1ocards_user_boosters ub where ub.booster_type_id = bt.id) + (select coalesce(sum(l.quantity), 0) from public.o1ocards_user_collection_boosters l where l.booster_type_id = bt.id)) order by bt.position, bt.id), '[]'::jsonb)
       from public.o1ocards_booster_types bt),
     'unique_wins', (select coalesce(jsonb_agg(jsonb_build_object(
         'id', x.id, 'email', x.email, 'username', x.username,
@@ -4175,8 +4268,8 @@ grant execute on function public.o1ocards_credit_purchase(text, uuid, int, int, 
 
 -- Fonctions de l'application : joueurs connectés uniquement
 revoke all on function public.o1ocards_status()                                          from public, anon;
-revoke all on function public.o1ocards_open_booster()                                    from public, anon;
-revoke all on function public.o1ocards_open_golden_pack()                                from public, anon;
+revoke all on function public.o1ocards_open_booster(int)                                 from public, anon;
+revoke all on function public.o1ocards_open_golden_pack(int)                             from public, anon;
 revoke all on function public.o1ocards_ack_rewards()                                     from public, anon;
 revoke all on function public.o1ocards_list_collection(int, int, text, text, int, int)   from public, anon;
 revoke all on function public.o1ocards_my_stats(int)                                     from public, anon;
@@ -4220,8 +4313,8 @@ revoke all on function public.o1ocards_notifications_list(int)                  
 revoke all on function public.o1ocards_notifications_mark_read(bigint[])                 from public, anon;
 
 grant execute on function public.o1ocards_status()                                          to authenticated;
-grant execute on function public.o1ocards_open_booster()                                    to authenticated;
-grant execute on function public.o1ocards_open_golden_pack()                                to authenticated;
+grant execute on function public.o1ocards_open_booster(int)                                 to authenticated;
+grant execute on function public.o1ocards_open_golden_pack(int)                             to authenticated;
 grant execute on function public.o1ocards_ack_rewards()                                     to authenticated;
 grant execute on function public.o1ocards_list_collection(int, int, text, text, int, int)   to authenticated;
 grant execute on function public.o1ocards_my_stats(int)                                     to authenticated;

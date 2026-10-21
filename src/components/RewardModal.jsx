@@ -16,7 +16,7 @@ export default function RewardModal({ rewards, onClose }) {
               <li key={`${r.type_id}-${r.series}`}>
                 <span className="reward-art"><TypeArt type={type} /></span>
                 <span>
-                  <strong>{type?.name ?? 'Type'}</strong>
+                  <strong>{type?.name ?? 'Carte'}</strong>
                   <small>série de {r.series} cartes, toutes à toi</small>
                 </span>
               </li>

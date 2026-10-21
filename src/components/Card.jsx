@@ -2,7 +2,7 @@ import { isSpecial } from '../rarity'
 import { useGame } from '../game'
 import TypeArt from './TypeArt'
 
-// Carte numérotée : couleur entièrement déterminée par la rareté (pas par la catégorie/le booster).
+// Carte numérotée : couleur entièrement déterminée par la rareté (pas par la collection/le booster).
 // De haut en bas : rareté, numéro n/m en jaune cerné avec zéro devant (07/10 ; masqué selon la rareté), grande
 // illustration du type, nom du type, numéro de checklist du type en bas à gauche (ex. 1/2).
 // Deux styles, réglés par rareté d'un type (catalog.cardStyle) : « simple » (image dans un cadre) et « fullart » (l'image couvre toute

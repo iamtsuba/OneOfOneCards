@@ -19,13 +19,13 @@ export function cardStyle(rows, base) {
   return r?.card_style === 'fullart' ? 'fullart' : 'simple'
 }
 
-// Nombre de séries d'un type : le sien (la plus grande de ses raretés), sinon celui de sa catégorie
+// Nombre de séries d'un type : le sien (la plus grande de ses raretés), sinon celui de sa collection
 export const typeSeries = (type, category) => type?.series_count ?? category?.series_count ?? 1
 
 // Nombre de cartes d'une rareté de smax séries : 1 + 2 + ... + smax
 export const cardCount = (smax) => (smax * (smax + 1)) / 2
 
-// Numéro de checklist « [k/N] » de chaque type dans sa catégorie : les types normaux de 1 à N (ordre de position),
+// Numéro de checklist « [k/N] » de chaque type dans sa collection : les types normaux de 1 à N (ordre de position),
 // les types secrets au-delà (N+1, N+2…), le total restant N (ex. [51/50]).
 export function checklistNumbers(types) {
   const byCat = {}
@@ -41,7 +41,7 @@ export function checklistNumbers(types) {
 }
 
 // Réglage par défaut d'un type sans raretés propres : chaque rareté « à seuil » avec son nombre de séries (max_series null = le
-// nombre de séries de la catégorie), numéros toujours visibles. globalRarities : raretés « à seuil » de la table rarities.
+// nombre de séries de la collection), numéros toujours visibles. globalRarities : raretés « à seuil » de la table rarities.
 export function defaultConfig(globalRarities, category) {
   const cap = category?.series_count ?? 1
   return (globalRarities ?? []).map((r) => ({ rarity_id: r.id, max_series: Math.min(r.max_series ?? cap, cap), numbered_series: Infinity }))
@@ -49,7 +49,7 @@ export function defaultConfig(globalRarities, category) {
 
 // Validation d'un tableau de raretés en cours d'édition ({rarity_id, max_series, numbered_series} en texte ou nombres), mêmes
 // règles que admin_save_type_rarities. Les raretés sont indépendantes : aucun ordre à respecter ; 0 série = la rareté n'existe pas
-// pour ce type. Renvoie '' si valide.
+// pour cette carte. Renvoie '' si valide.
 export function validateTypeRarities(rows) {
   if (!rows || rows.length === 0) return 'Ajoute au moins une rareté.'
   const ids = new Set()
@@ -60,10 +60,10 @@ export function validateTypeRarities(rows) {
     if (r.card_style != null && r.card_style !== '' && !CARD_STYLES.some((s) => s.id === r.card_style)) return 'Le style d’une carte est Simple ou FullArt.'
     if (ids.has(r.rarity_id)) return 'Une même rareté ne peut apparaître qu’une fois.'
     ids.add(r.rarity_id)
-    if (!Number.isInteger(max) || max < 0 || max > 5000) return 'Le nombre de séries est un entier entre 0 et 5000 (0 = la rareté n’existe pas pour ce type).'
+    if (!Number.isInteger(max) || max < 0 || max > 5000) return 'Le nombre de séries est un entier entre 0 et 5000 (0 = la rareté n’existe pas pour cette carte).'
     if (!Number.isInteger(num) || num < 0) return 'Le nombre de séries numérotées est un entier, 0 si la rareté n’est pas numérotée.'
     if (num > max) return `Les séries numérotées (${num}) ne peuvent pas dépasser le nombre de séries (${max}).`
   }
-  if (!rows.some((r) => Number(r.max_series) >= 1)) return 'Au moins une rareté doit avoir des séries (tout à 0 = un type sans aucune carte).'
+  if (!rows.some((r) => Number(r.max_series) >= 1)) return 'Au moins une rareté doit avoir des séries (tout à 0 = une carte sans aucun exemplaire).'
   return ''
 }

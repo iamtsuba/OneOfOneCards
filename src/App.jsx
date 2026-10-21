@@ -47,6 +47,7 @@ function Game({ session }) {
   const [tab, setTab] = useState(() => (new URLSearchParams(window.location.search).has('pro') ? 'profile' : 'boosters'))
   const [marketView, setMarketView] = useState('browse')
   const [marketListingId, setMarketListingId] = useState(null)
+  const [boostersCategory, setBoostersCategory] = useState(null)   // collection à montrer sur la page Boosters (arrivée depuis l'annonce d'une récompense)
   const [revealing, setRevealing] = useState(false)
   const [rarities, setRarities] = useState(null)
   const [catalogRaw, setCatalogRaw] = useState(null)
@@ -89,7 +90,7 @@ function Game({ session }) {
     return () => document.documentElement.classList.remove('subscriber')
   }, [subscriberOn])
 
-  // Une catégorie vient de se terminer (ou a été modifiée) : on relit le catalogue
+  // Une collection vient de se terminer (ou a été modifiée) : on relit le catalogue
   const activeCategory = status?.active_category_id
   useEffect(() => {
     if (catalogRaw) refreshCatalog().catch(() => {})
@@ -154,7 +155,7 @@ function Game({ session }) {
         {inviteNotice && (
           <p className="msg info invite-notice" role="status">{inviteNotice} <button type="button" className="link" onClick={() => setInviteNotice('')}>Fermer</button></p>
         )}
-        {tab === 'boosters' && <Boosters goCollection={() => setTab('collection')} />}
+        {tab === 'boosters' && <Boosters goCollection={() => setTab('collection')} initialCategory={boostersCategory} />}
         {tab === 'collection' && <Collection goMarket={(v) => { setMarketView(v || 'browse'); setMarketListingId(null); setTab('market') }} />}
         {tab === 'market' && <Market key={`${marketView}-${marketListingId || ''}`} initialView={marketView} initialListingId={marketListingId} />}
         {tab === 'friends' && <Friends />}
@@ -169,7 +170,17 @@ function Game({ session }) {
           }}
         />
       )}
-      {!revealing && (status.unseen_rewards ?? []).length === 0 && (status.gold_rewards ?? []).some((g) => !g.seen) && (
+      {!revealing && (status.unseen_rewards ?? []).length === 0 && (status.reward_notices ?? []).length > 0 && (
+        <GoldRewardModal
+          rewards={status.reward_notices}
+          onClose={async (openNow) => {
+            const first = status.reward_notices[0]
+            try { setStatus(await api.ackGoldRewards()) } catch { /* l'annonce réapparaîtra */ }
+            if (openNow) { setBoostersCategory(first?.category_id ?? null); setTab('boosters') }
+          }}
+        />
+      )}
+      {!revealing && (status.unseen_rewards ?? []).length === 0 && (status.reward_notices ?? []).length === 0 && (status.gold_rewards ?? []).some((g) => !g.seen) && (
         <GoldRewardModal
           rewards={status.gold_rewards.filter((g) => !g.seen)}
           onClose={async (openNow) => {

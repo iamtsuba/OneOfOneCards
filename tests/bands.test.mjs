@@ -28,24 +28,24 @@ ok('type B : Légende visible jusqu’à la série 10 seulement', numberVisible(
 ok('sans réglage propre ou rareté inconnue : toujours visible', numberVisible([], 'ultra', 400) && numberVisible(undefined, 'ultra', 400) && numberVisible(B, 'ultra', 400))
 ok('Commune non numérotée (0) : jamais visible', [1, 2, 500].every((m) => !numberVisible(A, 'common', m)))
 
-ok('nombre de séries : celui du type, sinon celui de la catégorie', typeSeries({ series_count: 100 }, { series_count: 500 }) === 100 && typeSeries({ series_count: null }, { series_count: 500 }) === 500)
+ok('nombre de séries : celui du type, sinon celui de la collection', typeSeries({ series_count: 100 }, { series_count: 500 }) === 100 && typeSeries({ series_count: null }, { series_count: 500 }) === 500)
 ok('nombre de cartes d’une rareté : 1 + 2 + … + N (50 séries = 1 275 cartes ; Légende 20 = 210)', cardCount(50) === 1275 && cardCount(20) === 210 && cardCount(1) === 1)
 
-// Réglages par défaut (type C du test SQL) : chaque rareté 1..max_series, « le reste » = séries de la catégorie
+// Réglages par défaut (type C du test SQL) : chaque rareté 1..max_series, « le reste » = séries de la collection
 const glob = [{ id: 'legende', max_series: 20 }, { id: 'ultra', max_series: 35 }, { id: 'super', max_series: 100 }, { id: 'rare', max_series: 250 },
   { id: 'peu_commune', max_series: 400 }, { id: 'common', max_series: null }]
 ok('réglages par défaut : 20, 35, 100, 250, 400, 500 séries (comme le type C du test SQL)', eq(defaultConfig(glob, { series_count: 500 }).map((r) => r.max_series), [20, 35, 100, 250, 400, 500]))
-ok('réglages par défaut plafonnés à la taille de la catégorie (60) : 20, 35, 60, 60, 60, 60', eq(defaultConfig(glob, { series_count: 60 }).map((r) => r.max_series), [20, 35, 60, 60, 60, 60]))
+ok('réglages par défaut plafonnés à la taille de la collection (60) : 20, 35, 60, 60, 60, 60', eq(defaultConfig(glob, { series_count: 60 }).map((r) => r.max_series), [20, 35, 60, 60, 60, 60]))
 ok('réglages par défaut : tous les numéros visibles', defaultConfig(glob, { series_count: 500 }).every((r) => r.numbered_series === Infinity))
 
-// Checklist : Chat Eau 1/2, Chat Peau 2/2, Chat Iny (secret) 3/2 ; une autre catégorie reste indépendante
+// Checklist : Chat Eau 1/2, Chat Peau 2/2, Chat Iny (secret) 3/2 ; une autre collection reste indépendante
 const cl = checklistNumbers([
   { id: 1, category_id: 1, position: 1, secret: false }, { id: 2, category_id: 1, position: 2, secret: true },
   { id: 3, category_id: 1, position: 3, secret: false }, { id: 4, category_id: 2, position: 1, secret: false },
 ])
 ok('checklist : types normaux numérotés dans l’ordre', eq(cl[1], { no: 1, total: 2, secret: false }) && eq(cl[3], { no: 2, total: 2, secret: false }))
 ok('checklist : le secret passe au-delà du total (ex. 51/50)', eq(cl[2], { no: 3, total: 2, secret: true }))
-ok('checklist : une autre catégorie est indépendante', eq(cl[4], { no: 1, total: 1, secret: false }))
+ok('checklist : une autre collection est indépendante', eq(cl[4], { no: 1, total: 1, secret: false }))
 
 // Validation : mêmes règles que admin_save_type_rarities (cf. test SQL) ; aucun ordre à respecter
 const txt = (rows) => rows.map((r) => ({ ...r, max_series: String(r.max_series), numbered_series: String(r.numbered_series) }))

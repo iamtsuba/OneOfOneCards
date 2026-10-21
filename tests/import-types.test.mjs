@@ -37,10 +37,10 @@ ok('javascript: refusé', !!err[4].error)
 ok('image trop longue refusée', !!err[5].error)
 ok('ligne valide intacte', !err[0].error)
 
-// Doublons (dans le fichier et avec la catégorie), casse ignorée
+// Doublons (dans le fichier et avec la collection), casse ignorée
 const dup = parseTypesFile('Foot;1;⚽\nfoot;2;⚽\nTennis;3;🎾', ['TENNIS']).rows
 ok('doublon dans le fichier signalé', !dup[0].duplicate && dup[1].duplicate)
-ok('doublon avec la catégorie signalé', dup[2].duplicate)
+ok('doublon avec la collection signalé', dup[2].duplicate)
 
 // Limites et fichiers vides
 ok('fichier vide', parseTypesFile('  \n ').fileError !== '')

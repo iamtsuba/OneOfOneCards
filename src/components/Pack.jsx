@@ -1,4 +1,4 @@
-// Booster dessiné en SVG : le nom de la catégorie en haut, son image au centre (« 1/1 » tant qu'elle n'en a pas), le nom du booster (Standard, OneMore…) sur la
+// Booster dessiné en SVG : le nom de la collection en haut, son image au centre (« 1/1 » tant qu'elle n'en a pas), le nom du booster (Standard, OneMore…) sur la
 // bande du bas (« 1/1 Cards » à défaut). Un halo de lumière peut entourer le paquet. Le bandeau du haut s'arrache à l'ouverture.
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { isImage } from './TypeArt'
@@ -14,7 +14,7 @@ function crimp(y0, y1, w, teeth) {
 }
 
 // Couleur de la bande du bas : celle réglée sur le booster (onglet Boosters de l'admin), avec un texte blanc ou foncé selon sa luminosité pour rester lisible.
-// Une couleur absente ou invalide laisse la couleur de la catégorie.
+// Une couleur absente ou invalide laisse la couleur de la collection.
 export function bandColors(color) {
   if (typeof color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(color)) return null
   const ch = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
@@ -22,7 +22,7 @@ export function bandColors(color) {
   return { '--pk-band': color, '--pk-bandtext': lum > 0.45 ? '#14173f' : '#ffffff' }
 }
 
-// Variables de couleur du booster, tirées de la catégorie (le booster doré garde sa propre palette) ; color = couleur de la bande réglée sur le booster
+// Variables de couleur du booster, tirées de la collection (le booster doré garde sa propre palette) ; color = couleur de la bande réglée sur le booster
 function packColors(category, color) {
   if (!category && !bandColors(color)) return undefined
   if (!category) return bandColors(color)

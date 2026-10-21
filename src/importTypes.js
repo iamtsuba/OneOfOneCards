@@ -3,7 +3,7 @@
 // ligne d'en-tête facultative (ses titres peuvent réordonner les colonnes). Seule dépendance : bands.js (pur), testable seul.
 //
 // Colonne « raretés » : une rareté par élément, séparés par « | », chacun « rareté:séries[:numérotées[:style]] ».
-//   rareté = son identifiant ou son nom (accents et casse ignorés) ; séries = 0 à 5000 (0 = la rareté n'existe pas pour ce type) ;
+//   rareté = son identifiant ou son nom (accents et casse ignorés) ; séries = 0 à 5000 (0 = la rareté n'existe pas pour cette carte) ;
 //   numérotées = séries au numéro visible (omis = toutes) ; style = simple (défaut) ou fullart.
 //   Exemple : Ultra Rare:50:5:fullart|Super Rare:100:1|Commune:500:0
 // Photos : matchPhotos() rapproche des fichiers image des types par leur nom de fichier (chat.png -> type « Chat »).
@@ -116,7 +116,7 @@ function checkImage(raw) {
   return { image, kind: 'emoji' }
 }
 
-// existingNames : noms déjà présents dans la catégorie (pour prévenir des doublons, ignorés à l'import) ; rarityList : [{id, name}]
+// existingNames : noms déjà présents dans la collection (pour prévenir des doublons, ignorés à l'import) ; rarityList : [{id, name}]
 export function parseTypesFile(raw, existingNames = [], rarityList = []) {
   const text = String(raw ?? '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n')
   const all = splitRows(text, detectDelimiter(text)).filter((r) => r.cells.some((c) => c.trim() !== ''))
@@ -130,7 +130,7 @@ export function parseTypesFile(raw, existingNames = [], rarityList = []) {
     all.shift()
   }
   if (all.length === 0) return { rows: [], fileError: 'Le fichier ne contient que l’en-tête.' }
-  if (all.length > MAX_ROWS) return { rows: [], fileError: `Trop de lignes : ${MAX_ROWS} types maximum par import.` }
+  if (all.length > MAX_ROWS) return { rows: [], fileError: `Trop de lignes : ${MAX_ROWS} cartes maximum par import.` }
 
   const seen = new Set(existingNames.map((n) => n.trim().toLowerCase()))
   const rows = all.map(({ cells, line }) => {
