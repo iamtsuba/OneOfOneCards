@@ -33,6 +33,6 @@ insert into o1ocards_album_picks (user_id, type_id, series, number) values ('111
 insert into o1ocards_unique_wins (user_id, type_id) values ('11111111-1111-1111-1111-111111111111', :t1);
 create table avant_comptes as select 'cards' k, count(*) n from o1ocards_cards union all select 'listings', count(*) from o1ocards_listings union all select 'bids', count(*) from o1ocards_bids union all select 'offers', count(*) from o1ocards_offers
   union all select 'favorites', count(*) from o1ocards_favorites union all select 'notifications', count(*) from o1ocards_notifications union all select 'album_picks', count(*) from o1ocards_album_picks
-  union all select 'series_rewards', count(*) from o1ocards_series_rewards union all select 'unique_wins', count(*) from o1ocards_unique_wins union all select 'profiles', count(*) from o1ocards_profiles;
+  union all select 'unique_wins', count(*) from o1ocards_unique_wins union all select 'profiles', count(*) from o1ocards_profiles;
 select string_agg(k || '=' || n, ' ' order by k) as avant from avant_comptes;
 select rarite, count(*) as cartes from avant_cartes group by rarite order by 2 desc;

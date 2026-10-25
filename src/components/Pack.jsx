@@ -22,7 +22,7 @@ export function bandColors(color) {
   return { '--pk-band': color, '--pk-bandtext': lum > 0.45 ? '#14173f' : '#ffffff' }
 }
 
-// Variables de couleur du booster, tirées de la collection (le booster doré garde sa propre palette) ; color = couleur de la bande réglée sur le booster
+// Variables de couleur du booster, tirées de la collection (le booster Gold garde sa propre palette dorée) ; color = couleur de la bande réglée sur le booster
 function packColors(category, color) {
   if (!category && !bandColors(color)) return undefined
   if (!category) return bandColors(color)
@@ -61,9 +61,9 @@ const STAR = 'M12 2.2l2.9 6.5 7.1.7-5.3 4.8 1.5 7-6.2-3.7-6.2 3.7 1.5-7L2 9.4l7.
 export default function Pack({ phase = 'idle', dim = false, golden = false, category = null, label = null, glow = 'none', color = null }) {
   const top = crimp(4, 20, 220, 30) + 'L230 34 L10 34 Z'
   const bottom = crimp(356, 340, 220, 30) + 'L230 326 L10 326 Z'
-  const title = packTitle(golden ? 'Booster doré' : category?.name)
+  const title = packTitle(category?.name ?? (golden ? (label ?? 'Gold') : undefined))   // le nom de la collection ; le Gold sans collection affiche son nom
   const band = bandLabel(label)
-  const halo = !dim && !golden && GLOW_IDS.includes(glow) ? glow : null   // pas de halo sur un paquet éteint (stock vide) ni sur le booster doré (qui a le sien)
+  const halo = !dim && !golden && GLOW_IDS.includes(glow) ? glow : null   // pas de halo sur un paquet éteint (stock vide) ni sur le booster Gold (qui a le sien)
   const image = golden ? '' : (category?.image ?? '')
   // Identifiants SVG propres à chaque booster : plusieurs boosters peuvent être affichés ensemble (aperçus de la console admin) et,
   // avec des identifiants communs, tous prendraient le dégradé du premier

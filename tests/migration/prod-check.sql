@@ -1,7 +1,7 @@
 \echo === 1. totaux avant / après
 select string_agg(k || '=' || n, ' ' order by k) as apres from (select 'cards' k, count(*) n from o1ocards_cards union all select 'listings', count(*) from o1ocards_listings union all select 'bids', count(*) from o1ocards_bids union all select 'offers', count(*) from o1ocards_offers
   union all select 'favorites', count(*) from o1ocards_favorites union all select 'notifications', count(*) from o1ocards_notifications union all select 'album_picks', count(*) from o1ocards_album_picks
-  union all select 'series_rewards', count(*) from o1ocards_series_rewards union all select 'unique_wins', count(*) from o1ocards_unique_wins union all select 'profiles', count(*) from o1ocards_profiles) x;
+  union all select 'unique_wins', count(*) from o1ocards_unique_wins union all select 'profiles', count(*) from o1ocards_profiles) x;
 select (select string_agg(k || '=' || n, ' ' order by k) from avant_comptes) as avant;
 \echo === 2. chaque carte garde-t-elle la rareté qu'elle AFFICHAIT ? (attendu 0 changement)
 select count(*) as cartes_sans_rarete_de_base from o1ocards_cards where base_rarity is null;

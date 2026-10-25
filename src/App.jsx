@@ -13,7 +13,6 @@ import Boosters from './components/Boosters'
 import Collection from './components/Collection'
 import Market from './components/Market'
 import Profile from './components/Profile'
-import RewardModal from './components/RewardModal'
 import EnvBanner from './components/EnvBanner'
 import NotificationBell from './components/NotificationBell'
 import { numberVisible, typeSeries, checklistNumbers, cardStyle } from './bands'
@@ -161,16 +160,7 @@ function Game({ session }) {
         {tab === 'friends' && <Friends />}
         {tab === 'profile' && <Profile session={session} />}
       </main>
-      {!revealing && (status.unseen_rewards ?? []).length > 0 && (
-        <RewardModal
-          rewards={status.unseen_rewards}
-          onClose={async (openNow) => {
-            try { setStatus(await api.ackRewards()) } catch { /* l'annonce réapparaîtra */ }
-            if (openNow) setTab('boosters')
-          }}
-        />
-      )}
-      {!revealing && (status.unseen_rewards ?? []).length === 0 && (status.reward_notices ?? []).length > 0 && (
+      {!revealing && (status.reward_notices ?? []).length > 0 && (
         <GoldRewardModal
           rewards={status.reward_notices}
           onClose={async (openNow) => {
@@ -180,7 +170,7 @@ function Game({ session }) {
           }}
         />
       )}
-      {!revealing && (status.unseen_rewards ?? []).length === 0 && (status.reward_notices ?? []).length === 0 && (status.gold_rewards ?? []).some((g) => !g.seen) && (
+      {!revealing && (status.reward_notices ?? []).length === 0 && (status.gold_rewards ?? []).some((g) => !g.seen) && (
         <GoldRewardModal
           rewards={status.gold_rewards.filter((g) => !g.seen)}
           onClose={async (openNow) => {

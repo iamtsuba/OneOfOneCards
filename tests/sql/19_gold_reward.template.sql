@@ -9,7 +9,7 @@ set request.jwt.claim.sub = :B; select public.{{P}}status() is not null as profi
 set request.jwt.claim.sub = :A;
 delete from public.{{P}}gold_rewards; delete from public.{{P}}album_picks; delete from public.{{P}}cards;
 update public.{{P}}categories set closed = true;
-update public.{{P}}config set value = 0 where key in ('rarity_exponent', 'series_reward_min_size');
+update public.{{P}}config set value = 0 where key = 'rarity_exponent';
 select exists (select 1 from public.{{P}}rarities where id = 'artrare') as had_art \gset
 insert into public.{{P}}rarities (id, name, kind, max_series, sort_order, color, color2, text_color) values ('artrare', 'Art Rare', 'range', 50, 4, '#fc0', '#a80', '#000') on conflict (id) do nothing;
 -- Le contenu du booster Gold vient du module Boosters (rôle « card_reward ») : on règle ses répartitions comme l'admin le ferait

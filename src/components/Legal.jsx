@@ -47,8 +47,8 @@ export function LegalDocument({ legal = {}, config = {} }) {
         ses boosters, et un booster ne contient que des cartes d’une seule collection. Le contenu d’un booster est tiré au hasard
         parmi les cartes encore disponibles de la collection choisie. Chaque carte numérotée n’existe qu’en un seul exemplaire :
         une carte déjà tirée par un joueur ne peut plus être tirée par un autre. Aucune carte et aucune rareté n’est garantie. La rareté d’une carte (Unique, Alpha, Omega, Ultra Rare,
-        Super Rare, Rare, Commune) dépend de son numéro et de la taille de sa série. Un booster peut exceptionnellement être
-        « doré », avec un contenu défini à l’avance.
+        Super Rare, Rare, Commune) dépend de son numéro et de la taille de sa série. Un booster peut exceptionnellement devenir
+        un booster « Gold », dont le contenu est défini à l’avance.
       </p>
 
       <h3>5. Commande et paiement</h3>

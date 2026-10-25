@@ -17,7 +17,7 @@ const SPECIAL = ['unique', 'alpha', 'omega']
 const tone = (r) => ({ '--r1': r?.color ?? '#d9d4c5', '--r2': r?.color2 ?? r?.color ?? '#b5ad99', '--rt': r?.text_color ?? '#222' })
 
 // Encart concis : une ligne par carte du booster avec la chance de chaque rareté (calculée sur les cartes réellement restantes), les cartes spéciales
-// par booster, le stock. Le détail (parts par rareté, règles, booster doré) est derrière le bouton « i ». Sans appel réseau : testable seul.
+// par booster, le stock. Le détail (parts par rareté, règles, booster Gold tiré au hasard) est derrière le bouton « i ». Sans appel réseau : testable seul.
 export function OddsBody({ data, category, rarityMap, initialInfo = false, compact = false }) {
   const [info, setInfo] = useState(initialInfo)
   const slots = data.slots
@@ -39,8 +39,7 @@ export function OddsBody({ data, category, rarityMap, initialInfo = false, compa
   const specials = data.by_rarity.filter((r) => SPECIAL.includes(rarityMap[r.id]?.kind) && r.remaining > 0 && r.per_booster > 0)
     .sort((x, y) => SPECIAL.indexOf(rarityMap[x.id].kind) - SPECIAL.indexOf(rarityMap[y.id].kind) || 0)
 
-  const golden = data.golden
-  const goldenList = (golden?.contents ?? []).map((c) => `${c.quantity} ${name(c.rarity_id)}`).join(', ')
+  const gold = data.gold   // booster Gold tiré au hasard : sa chance et son nom
   return (
     <>
       {lines.length > 0 && (
@@ -91,10 +90,9 @@ export function OddsBody({ data, category, rarityMap, initialInfo = false, compa
             })}
           </ul>
           <p>{data.exponent === 0 ? 'Dans une rareté, chaque carte restante a la même chance.' : 'Les petites séries ont moins de chances que les grandes.'} Si une rareté est épuisée, la carte est tirée parmi toutes celles qui restent.</p>
-          {golden && golden.chance > 0 && (
+          {gold && gold.chance > 0 && (
             <p>
-              Booster doré : {fmtShare(golden.chance)} par booster{goldenList ? `, il contient ${goldenList}` : ''}.
-              {golden.unique_chance > 0 && ` Et ${fmtShare(golden.unique_chance)} de chances d’avoir en plus une carte Unique (1/1) !`}
+              Booster {gold.name ?? 'Gold'} : {fmtShare(gold.chance)} de chances par booster ouvert, avec son propre contenu.
             </p>
           )}
         </InfoSheet>

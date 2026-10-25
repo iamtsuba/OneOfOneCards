@@ -54,7 +54,7 @@ const silver = { id: 21, name: 'Silver', cards: 5, color: '#c0c0c0', glow: 'silv
 const art = { id: 22, name: 'Art Rare assuré', cards: 5, color: '#f59e0b', glow: 'purple', price: null, quantity: 1 }
 const legende = { id: 23, name: 'Légende', cards: 3, color: '#111111', glow: 'rainbow', price: 80, quantity: 4 }
 const forSale = { id: 24, name: 'Bronze', cards: 2, color: '#b45309', glow: 'none', price: 20, quantity: 0 }
-const base = { id: 'u1', username: 'Tsuba', boosters: 10, bonus_boosters: 0, coins: 500, coins_locked: 0, golden_packs: 0, gold_rewards: [], unseen_rewards: [], max_boosters: 10, regen_minutes: 10, regen_amount: 10,
+const base = { id: 'u1', username: 'Tsuba', boosters: 10, bonus_boosters: 0, coins: 500, coins_locked: 0, gold_rewards: [], max_boosters: 10, regen_minutes: 10, regen_amount: 10,
   active_category_id: 5, next_refill_at: null, cards_taken: 10, total_cards: 100, cgv_version: 3, shop_enabled: false, booster_types: [], standard_booster: { id: 1, name: 'Standard', glow: 'none', color: '#e8452e' }, server_now: new Date().toISOString(),
   subscription: { enabled: false, active: false } }
 const catalog = { categoryMap: { 5: { id: 5, name: 'Chattrapez les tous !', color: '#f59e0b', color2: '#c2410c', text_color: '#fff', image: '🐱' } }, typeMap: { 21: { id: 21, category_id: 5, name: 'CHAT’PELLE', image: '🐱' }, 22: { id: 22, category_id: 5, name: 'CHAT’LET', image: '🐱' } }, types: [], rarities: [], cardRef: () => '', numberHidden: () => false }
@@ -187,6 +187,35 @@ ok('étagère : un paquet vide est éteint (sans halo), les boutons sont désact
   const m = await mountPage({ ...base, gold_rewards: [] })
   ok('sans booster Gold : rien ne change (un seul grand paquet)', !m.host.querySelector('.pack-shelf') && !!m.host.querySelector('.pack-button'))
   await m.unmount()
+}
+
+// ---------- ordre d'affichage réglé dans l'admin ----------
+{
+  const bt = (id, name, position, quantity) => ({ id, name, position, cards: 5, color: '#c0c0c0', glow: 'none', price: 50, quantity })
+  const silver = bt(21, 'Silver', 1, 2), art = bt(22, 'Art Rare assuré', 2, 1), bronze = bt(23, 'Bronze', 5, 1)
+  const std = (position) => ({ id: 1, name: 'Standard', glow: 'none', color: '#e8452e', position })
+  const names = (m) => [...m.host.querySelectorAll('.shelf-pack')].map((p) => p.getAttribute('aria-label').split(',')[0].replace(/^Booster /, ''))
+  const run = async (status) => { const m = await mountPage(status); const n = names(m); const extra = text(m.host.querySelector('.extra-boosters') ?? document.body); await m.unmount(); return { n, extra } }
+
+  let r = await run({ ...base, standard_booster: std(3), booster_types: [silver, art] })
+  ok('l\'ordre réglé dans l\'admin décide de la place de chaque paquet : Silver (1), Art Rare assuré (2), puis le Standard (3)', r.n.join('|') === 'Silver|Art Rare assuré|Standard')
+  r = await run({ ...base, standard_booster: std(3), booster_types: [silver, art, bronze] })
+  ok('4 boosters candidats : le Standard est toujours montré, puis les mieux classés ; le dernier passe dans « Autres boosters » (Bronze n° 5)', r.n.join('|') === 'Silver|Art Rare assuré|Standard' && /Bronze/.test(r.extra))
+  r = await run({ ...base, standard_booster: std(1), booster_types: [{ ...silver, position: 7 }, { ...art, position: 8 }, bronze] })
+  ok('le Standard en premier (n° 1) : puis Bronze (5) et Silver (7) ; Art Rare assuré (8) reste dans « Autres boosters »', r.n.join('|') === 'Standard|Bronze|Silver' && /Art Rare assuré/.test(r.extra))
+  r = await run({ ...base, standard_booster: std(9), booster_types: [silver, art, bronze] })
+  ok('le Standard en dernier (n° 9) est quand même montré (on ne peut pas perdre son stock gratuit de vue)', r.n.includes('Standard') && r.n.length === 3 && r.n[r.n.length - 1] === 'Standard')
+  r = await run({ ...base, standard_booster: std(3), reward_booster: { name: 'Gold', glow: 'gold', color: '#d4af37', cards: 5, id: 40, position: 2 }, gold_rewards: [{ id: 5, type_id: 21 }], booster_types: [silver] })
+  ok('le booster Gold gagné a son rang aussi : Silver (1), Gold (2), Standard (3)', r.n.join('|') === 'Silver|Gold|Standard')
+  r = await run({ ...base, standard_booster: std(3), reward_booster: { name: 'Gold', glow: 'gold', color: '#d4af37', cards: 5, id: 40, position: 7 }, gold_rewards: [{ id: 5, type_id: 21 }], booster_types: [silver, art] })
+  ok('Gold mal classé (n° 7) face à deux boosters mieux classés : il laisse sa place à Silver et Art Rare assuré', r.n.join('|') === 'Silver|Art Rare assuré|Standard' && !r.n.includes('Gold'))
+  r = await run({ ...base, standard_booster: std(undefined), booster_types: [{ ...silver, position: undefined }, { ...art, position: undefined }] })
+  ok('serveur de la version précédente (sans ordre) : l\'ordre d\'avant (Standard, puis les boosters dans l\'ordre reçu), sans plantage', r.n.join('|') === 'Standard|Silver|Art Rare assuré')
+  {
+    const m = await mountPage({ ...base, standard_booster: std(3), booster_types: [silver, art] })
+    ok('choix par défaut inchangé : le Standard (stock gratuit) est choisi même s\'il n\'est pas en tête', m.host.querySelectorAll('.shelf-pack')[2].getAttribute('aria-pressed') === 'true' && m.host.querySelectorAll('.shelf-pack')[0].getAttribute('aria-pressed') === 'false')
+    await m.unmount()
+  }
 }
 
 // ---------- limite d'attente de l'ouverture : plus de paquet figé ----------

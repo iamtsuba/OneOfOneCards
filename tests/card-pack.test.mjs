@@ -62,7 +62,8 @@ ok('booster avec une image https : elle est au centre, découpée aux coins arro
 ok('booster avec une image intégrée (téléversée) : affichée', /<image class="pack-image" href="data:image\/webp;base64,AAAA"/.test(pack({ category: { ...cat, image: 'data:image/webp;base64,AAAA' } })))
 ok('booster : les couleurs de la collection sont conservées', /--pk-a:#ffd9b0/.test(p0) && /--pk-text:#3d1f00/.test(p0))
 const pg = pack({ golden: true, category: { ...cat, image: '🕹️' } })
-ok('booster doré : « Booster doré » en haut et une étoile au centre (l’image de la collection est ignorée)', pg.indexOf('Booster doré') < pg.indexOf('pack-window') && /<path d="M12 2\.2l2\.9/.test(pg) && !/🕹️/.test(pg))
+ok('booster Gold : le nom de la collection en haut et une étoile au centre (l’image de la collection est ignorée)', pg.indexOf(cat.name) > -1 && pg.indexOf(cat.name) < pg.indexOf('pack-window') && /<path d="M12 2\.2l2\.9/.test(pg) && !/🕹️/.test(pg))
+ok('booster Gold sans collection : son nom en titre (« Gold » par défaut), jamais « Booster doré »', /pack-title[^>]*>Gold</.test(pack({ golden: true })) && /pack-title[^>]*>Palier</.test(pack({ golden: true, label: 'Palier' })) && !/Booster doré/.test(pack({ golden: true })))
 ok('booster sans collection : titre « 1/1 Cards » et « 1/1 » au centre', /pack-title[^>]*>1\/1 Cards</.test(pack({})) && /pack-mark/.test(pack({})))
 ok('booster : texte protégé (un nom avec des chevrons n’injecte rien)', !/<script/.test(pack({ category: { ...cat, name: '<script>x</script>' } })))
 
@@ -92,7 +93,7 @@ ok('nom du booster : le HTML est échappé (jamais interprété)', band({ label:
 const wrapClass = (props) => (pack({ category: cat, ...props }).match(/<div class="pack-wrap ([^"]*)"/) || [])[1]
 ok('halo : un paquet sans halo (aucun, absent ou inconnu) n\'a aucune classe de halo', ['none', undefined, null, '', 'laser', 'GOLD'].every((g) => !/glow/.test(wrapClass({ glow: g }))))
 ok('halo : chacun des 7 halos ajoute « has-glow glow-<nom> » autour du paquet', ['gold', 'silver', 'red', 'blue', 'green', 'purple', 'rainbow'].every((g) => new RegExp(`has-glow glow-${g}$`).test(wrapClass({ glow: g }).trim())))
-ok('halo : pas de halo sur un paquet éteint (plus de boosters) ni sur le booster doré (qui a déjà le sien)', !/glow/.test(wrapClass({ glow: 'gold', dim: true })) && !/has-glow/.test(wrapClass({ glow: 'gold', golden: true })) && /dim/.test(wrapClass({ glow: 'gold', dim: true })))
+ok('halo : pas de halo sur un paquet éteint (plus de boosters) ni sur le booster Gold (qui a déjà le sien)', !/glow/.test(wrapClass({ glow: 'gold', dim: true })) && !/has-glow/.test(wrapClass({ glow: 'gold', golden: true })) && /dim/.test(wrapClass({ glow: 'gold', dim: true })))
 ok('halo : se combine avec les phases d\'ouverture (shake, tear)', /shake .*has-glow glow-gold/.test(wrapClass({ glow: 'gold', phase: 'shake' })) && /tear .*has-glow glow-purple/.test(wrapClass({ glow: 'purple', phase: 'tear' })))
 ok('halo : décoratif (le paquet reste masqué aux lecteurs d\'écran)', /aria-hidden="true"/.test(pack({ category: cat, glow: 'gold' })))
 {
@@ -106,7 +107,7 @@ ok('texte de la bande lisible : blanc sur une couleur foncée, foncé sur une co
 ok('seule la bande change : le reste du paquet garde les couleurs de la collection', /--pk-a:#[0-9a-f]{3,6}/i.test(bandVar({ color: '#7c3aed' })) && /--pk-crimp:/.test(bandVar({ color: '#7c3aed' })) && !/--pk-a:#7c3aed/.test(bandVar({ color: '#7c3aed' })))
 ok('sans couleur, ou couleur invalide (ancien serveur) : la bande garde la couleur de la collection, sans plantage', ['', null, undefined, 'rouge', '#fff', '#12345', '#gggggg', 'red', 123, '#7c3aed '].every((c) => !/--pk-band:#7c3aed|--pk-band:rouge|--pk-band:red|--pk-band:#fff;/.test(bandVar({ color: c })) && /--pk-band:color-mix/.test(bandVar({ color: c }))))
 ok('bandColors : couleur valide (majuscules ou minuscules) -> variables ; sinon rien', bandColors('#7C3AED')['--pk-band'] === '#7C3AED' && bandColors('#7c3aed')['--pk-bandtext'] === '#ffffff' && bandColors('#fff') === null && bandColors(null) === null && bandColors(undefined) === null && bandColors('#12345g') === null)
-ok('le booster doré garde sa palette dorée (la couleur du booster ne s\'applique pas)', !/style=/.test((pack({ category: cat, golden: true, color: '#7c3aed' }).match(/class="pack-wrap[^"]*"[^>]*>/) || [''])[0]))
+ok('le booster Gold garde sa palette dorée (la couleur du booster ne s\'applique pas)', !/style=/.test((pack({ category: cat, golden: true, color: '#7c3aed' }).match(/class="pack-wrap[^"]*"[^>]*>/) || [''])[0]))
 ok('sans collection (aperçu), la couleur du booster s\'applique quand même à la bande', /--pk-band:#7c3aed/.test((pack({ color: '#7c3aed' }).match(/style="([^"]*)"/) || [])[1] ?? '') )
 console.log(bad ? `\n${bad} ÉCHEC(S)` : '\nCarte et booster : tous les contrôles sont passés.')
 process.exit(bad ? 1 : 0)

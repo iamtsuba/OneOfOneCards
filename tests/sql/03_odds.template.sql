@@ -21,7 +21,7 @@ from jsonb_array_elements(public.{{P}}draw_odds()->'by_rarity') r;
 select 'somme des parts = 1', round(sum((r->>'share')::numeric), 6), 'cartes restantes', sum((r->>'remaining')::bigint), 'pool_left', (public.{{P}}draw_odds()->>'pool_left')
 from jsonb_array_elements(public.{{P}}draw_odds()->'by_rarity') r;
 select 'catégorie / exposant / cartes par booster', public.{{P}}draw_odds()->>'category_id', public.{{P}}draw_odds()->>'exponent', public.{{P}}draw_odds()->>'cards_per_booster';
-select 'booster doré', public.{{P}}draw_odds()->'golden' as dore;
+select 'booster Gold tiré au hasard', public.{{P}}draw_odds()->'gold' as gold;
 
 \echo '=== 2. 600 vrais boosters (3 000 cartes) : fréquences observées / attendues'
 create temp table shares as select r->>'id' id, (r->>'share')::float p from jsonb_array_elements(public.{{P}}draw_odds()->'by_rarity') r;

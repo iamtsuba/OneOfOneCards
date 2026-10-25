@@ -184,7 +184,7 @@ ok('onglet Sécurité : s’affiche', clean(show(M.SecurityTab, { onChange: asyn
 // ---------- Boosters paramétrables (onglet Boosters) ----------
 {
   const std = data.booster_types.find((b) => b.is_standard)
-  const silver = { id: 9001, name: 'Silver', cards: 3, color: '#c0c0c0', price_coins: 50, enabled: true, is_standard: false, holders: 4,
+  const silver = { id: 9001, position: 2, name: 'Silver', cards: 3, color: '#c0c0c0', price_coins: 50, enabled: true, is_standard: false, holders: 4,
     slots: [{ position: 1, rarity_id: 'common', weight: 100 }, { position: 2, rarity_id: 'common', weight: 80 }, { position: 2, rarity_id: 'rare', weight: 20 }, { position: 3, rarity_id: 'rare', weight: 100 }] }
   const withSilver = { ...data, booster_types: [...data.booster_types, silver] }
   const bw = show(M.BoostersTab, { data: withSilver, wide: true })
@@ -193,7 +193,7 @@ ok('onglet Sécurité : s’affiche', clean(show(M.SecurityTab, { onChange: asyn
 
   ok('boosters : l\'onglet « Boosters » existe dans la console avec son compteur', />Boosters<span class="nav-count">2</.test(shellTabs) && show(M.AdminShell, { data: withSilver, tab: 'boosters', onTab: () => {}, busy: false, error: '', notice: '', run: () => {}, onChangePassword: () => {}, onClose: () => {}, wide: false }).includes('>Boosters</button>'))
   ok('boosters (PC) : liste à gauche et éditeur à droite, bouton « + Nouveau booster »', /class="admin-md boosters-wide"/.test(bw) && /aria-label="Boosters"/.test(bw) && />\+ Nouveau booster</.test(bw) && /class="md-detail"/.test(bw))
-  ok('boosters : la liste annonce le Standard (se recharge tout seul) et Silver (prix, stock)', /<strong>Standard<\/strong><small>5 cartes · Standard : se recharge tout seul<\/small>/.test(bw) && /<strong>Silver<\/strong><small>3 cartes · 50 pièces · 4 en stock<\/small>/.test(bw))
+  ok('boosters : la liste annonce le Standard (se recharge tout seul) et Silver (prix, stock)', /<strong>Standard<\/strong><small>n° \d+ · 5 cartes · Standard : se recharge tout seul<\/small>/.test(bw) && /<strong>Silver<\/strong><small>n° \d+ · 3 cartes · 50 pièces · 4 en stock<\/small>/.test(bw))
   ok('boosters : le Standard est ouvert par défaut, avec ses 5 cartes et leurs répartitions', /<h3>Standard<span class="muted"> · se recharge tout seul<\/span><\/h3>/.test(bw) && (bw.match(/<legend>Carte \d<\/legend>/g) || []).length === 5)
   ok('boosters : chaque ligne montre la rareté, son poids et sa chance en pourcentage (carte 1 : 100 %)', /aria-label="Poids de [^"]*, carte 1"/.test(bw) && /<span class="booster-pct" aria-label="chance">100 %<\/span>/.test(bw))
   ok('boosters : les chances de chaque carte totalisent 100 % (somme des pourcentages affichés, tolérance d\'arrondi)', (() => {
@@ -211,6 +211,11 @@ ok('onglet Sécurité : s’affiche', clean(show(M.SecurityTab, { onChange: asyn
   const empty = ed({ ...silver, name: '' })
   ok('boosters : un nom vide bloque l\'enregistrement', /Donne un nom au booster\./.test(empty) && /disabled="">Enregistrer/.test(empty))
   const nouveau = ed(null)
+  // ordre d'affichage sur la page Boosters
+  const orderInput = (h) => (h.match(/<label>Ordre d’affichage<input[^>]*>/) || [''])[0]
+  ok('boosters : champ « Ordre d\'affichage » dans chaque éditeur, avec la position actuelle (Silver n° 2) et l\'explication', /value="2"/.test(orderInput(es)) && /min="1" max="9999"/.test(orderInput(es)) && /1 = en premier sur la page Boosters/.test(es))
+  ok('boosters : un nouveau booster a le champ d\'ordre vide (« à la suite ») ; le Standard a aussi le sien', /placeholder="à la suite"/.test(orderInput(nouveau)) && !/value="\d/.test(orderInput(nouveau)) && /<label>Ordre d’affichage/.test(show(M.BoosterEditor, { booster: data.booster_types.find((b) => b.is_standard), rarities: data.rarities, run: () => {}, busy: false, onCreated: () => {}, onDeleted: () => {}, onDuplicate: () => {} })))
+  ok('boosters : un ordre invalide (0) est signalé et bloque l\'enregistrement', /L’ordre d’affichage doit être un nombre entier entre 1 et 9999/.test(ed({ ...silver, position: 0 })) && !/L’ordre d’affichage doit être/.test(es))
   ok('boosters : nouveau booster : « Créer le booster », 5 cartes à 100 % de la rareté la plus répandue, ni copie, ni suppression, ni don', />Créer le booster</.test(nouveau) && (nouveau.match(/<legend>Carte \d<\/legend>/g) || []).length === 5 && !/Dupliquer|Supprimer|Offrir des boosters/.test(nouveau)
     && /Nouveau booster/.test(nouveau) && (nouveau.match(/booster-pct" aria-label="chance">100 %</g) || []).length === 5)
   ok('boosters : seules les raretés ordinaires et Unique sont proposées (jamais Alpha ni Omega)', (() => { const opts = [...es.matchAll(/<option value="([a-z_0-9]+)"/g)].map((m) => m[1]); return opts.includes('unique') && opts.includes('common') && !opts.includes('alpha') && !opts.includes('omega') })())
@@ -218,10 +223,10 @@ ok('onglet Sécurité : s’affiche', clean(show(M.SecurityTab, { onChange: asyn
   ok('boosters (mobile) : liste puis éditeur l\'un sous l\'autre, sans mise en page à deux colonnes', bn !== null && !/admin-md/.test(bn) && /class="booster-list"/.test(bn) && /<h3>Standard/.test(bn))
   ok('boosters : sans aucun type (ancienne base), l\'onglet affiche un nouveau booster sans planter', show(M.BoostersTab, { data: { ...data, booster_types: undefined }, wide: false }) !== null)
   // ---- rôles : booster des abonnés, cadeau des abonnés, récompense de carte complétée (le Gold)
-  const goldB = { id: 9002, name: 'Gold', cards: 5, color: '#d4af37', price_coins: null, enabled: true, is_standard: false, role: 'card_reward', holders: 0,
+  const goldB = { id: 9002, position: 3, name: 'Gold', cards: 5, color: '#d4af37', price_coins: null, enabled: true, is_standard: false, role: 'card_reward', holders: 0,
     slots: [1, 2, 3].map((p) => ({ position: p, rarity_id: 'rare', weight: 100 })).concat([{ position: 4, rarity_id: 'super', weight: 100 }, { position: 5, rarity_id: 'numbered', weight: 3 }, { position: 5, rarity_id: 'alpha', weight: 1 }, { position: 5, rarity_id: 'omega', weight: 1 }, { position: 5, rarity_id: 'unique', weight: 1 }]) }
-  const oneMore = { id: 9003, name: 'OneMore', cards: 2, color: '#7c3aed', price_coins: null, enabled: true, is_standard: false, role: 'subscriber', holders: 0, slots: [{ position: 1, rarity_id: 'rare', weight: 1 }, { position: 2, rarity_id: 'super', weight: 1 }] }
-  const giftB = { id: 9004, name: 'Art Rare assuré', cards: 1, color: '#f59e0b', price_coins: null, enabled: true, is_standard: false, role: 'subscription_gift', holders: 0, slots: [{ position: 1, rarity_id: 'ultra', weight: 1 }] }
+  const oneMore = { id: 9003, position: 4, name: 'OneMore', cards: 2, color: '#7c3aed', price_coins: null, enabled: true, is_standard: false, role: 'subscriber', holders: 0, slots: [{ position: 1, rarity_id: 'rare', weight: 1 }, { position: 2, rarity_id: 'super', weight: 1 }] }
+  const giftB = { id: 9004, position: 5, name: 'Art Rare assuré', cards: 1, color: '#f59e0b', price_coins: null, enabled: true, is_standard: false, role: 'subscription_gift', holders: 0, slots: [{ position: 1, rarity_id: 'ultra', weight: 1 }] }
   const eg = ed(goldB), eo = ed(oneMore), ei = ed(giftB)
   const roleOptions = (h) => [...(h.match(/<label>Rôle[\s\S]*?<\/select>/) || [''])[0].matchAll(/<option value="([^"]*)"/g)].map((m) => m[1])
   ok('rôles : un booster ordinaire propose le choix du rôle (ordinaire, membres Pro, cadeau Pro, récompense) ; le Standard n\'en a pas', roleOptions(es).join('|') === '|subscriber|subscription_gift|card_reward' && !/<label>Rôle/.test(bw))
@@ -234,7 +239,7 @@ ok('onglet Sécurité : s’affiche', clean(show(M.SecurityTab, { onChange: asyn
   const alphaOrd = ed({ ...silver, role: null, slots: [{ position: 1, rarity_id: 'alpha', weight: 1 }, { position: 2, rarity_id: 'common', weight: 1 }, { position: 3, rarity_id: 'rare', weight: 1 }] })
   ok('un booster ordinaire qui contient Alpha est refusé avec la raison (réservé au booster de récompense), l\'enregistrement est bloqué', /role="alert">Carte 1 : « Alpha » n’est possible que dans le booster de récompense\./.test(alphaOrd) && /disabled="">Enregistrer/.test(alphaOrd))
   const listRoles = show(M.BoostersTab, { data: { ...data, booster_types: [...data.booster_types, goldB, oneMore, giftB] }, wide: true })
-  ok('liste : chaque booster de rôle annonce son rôle à la place du prix', /<strong>Gold<\/strong><small>5 cartes · Récompense : carte complétée/.test(listRoles) && /<strong>OneMore<\/strong><small>2 cartes · Booster des membres Pro/.test(listRoles) && /<strong>Art Rare assuré<\/strong><small>1 carte · Cadeau Pro/.test(listRoles))
+  ok('liste : chaque booster de rôle annonce son rôle à la place du prix', /<strong>Gold<\/strong><small>n° \d+ · 5 cartes · Récompense : carte complétée/.test(listRoles) && /<strong>OneMore<\/strong><small>n° \d+ · 2 cartes · Booster des membres Pro/.test(listRoles) && /<strong>Art Rare assuré<\/strong><small>n° \d+ · 1 carte · Cadeau Pro/.test(listRoles))
   ok('liste : le Standard reste ouvert par défaut même avec des boosters de rôle', /<h3>Standard<span/.test(listRoles))
   // ---- réglages texte (nom de l'abonnement)
   const withText = { ...data, text_config: [{ key: 'subscription_name', value: 'OneMore', description: 'Nom de l’abonnement (affiché aux joueurs)' }] }

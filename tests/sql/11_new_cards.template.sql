@@ -4,7 +4,7 @@
 delete from public.{{P}}album_picks; delete from public.{{P}}cards; delete from public.{{P}}listings;
 update public.{{P}}categories set closed = false, enabled = true;
 update public.{{P}}config set value = 100 where key = 'max_boosters';
-update public.{{P}}config set value = 0 where key in ('golden_booster_chance', 'golden_unique_chance');
+update public.{{P}}config set value = 0 where key = 'golden_booster_chance';
 update public.{{P}}profiles set boosters = 100, bonus_boosters = 0;
 set request.jwt.claim.sub = :A; select public.{{P}}status() is not null as profil_a;
 
@@ -42,9 +42,8 @@ end $$;
 select kind, total as cartes_tirees, nouvelles > 0 as des_nouvelles, nouvelles < total as des_deja_possedees, ecarts as ecarts_avec_le_calcul_attendu from verdict;
 select count(*) > 0 as collection_non_vide from public.{{P}}cards where owner_id = :A;
 
-\echo '=== boosters dorés : même règle'
+\echo '=== boosters Gold tirés au hasard : même règle'
 update public.{{P}}config set value = 1 where key = 'golden_booster_chance';
-update public.{{P}}config set value = 1 where key = 'golden_unique_chance';
 update public.{{P}}profiles set boosters = 20 where id = :A;
 truncate verdict;
 do $$
@@ -65,8 +64,8 @@ begin
       insert into seen values (c.t, c.rid);
     end loop;
   end loop;
-  insert into verdict values ('boosters dorés', v_total, v_new, v_bad + v_missing);
+  insert into verdict values ('boosters Gold', v_total, v_new, v_bad + v_missing);
 end $$;
 select kind, total as cartes_tirees, nouvelles > 0 as des_nouvelles, ecarts as ecarts_avec_le_calcul_attendu from verdict;
-update public.{{P}}config set value = 0 where key in ('golden_booster_chance', 'golden_unique_chance');
+update public.{{P}}config set value = 0 where key = 'golden_booster_chance';
 delete from public.{{P}}album_picks; delete from public.{{P}}cards;

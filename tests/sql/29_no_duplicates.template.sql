@@ -1,4 +1,4 @@
--- Jamais deux fois la même carte (le même type) dans un booster, quelle que soit la rareté : boosters ordinaires, booster Gold, booster doré ; doublon seulement si plus aucune autre carte n'existe.
+-- Jamais deux fois la même carte (le même type) dans un booster, quelle que soit la rareté : boosters ordinaires, booster Gold ; doublon seulement si plus aucune autre carte n'existe.
 \set A '''11111111-1111-1111-1111-111111111111'''
 \set QUIET on
 create or replace function pg_temp.expect(n text, c boolean) returns text language plpgsql as $$ begin if c is not true then raise exception 'ATTENDU : %', n; end if; return 'ok : ' || n; end $$;
@@ -6,7 +6,6 @@ set request.jwt.claim.sub = :A; select public.{{P}}status() is not null as profi
 create temp table bt_backup as select * from public.{{P}}booster_types;
 create temp table sl_backup as select * from public.{{P}}booster_type_slots;
 create temp table ub_backup as select * from public.{{P}}user_boosters;
-create temp table gc_backup as select * from public.{{P}}golden_contents;
 delete from public.{{P}}admin_log; delete from public.{{P}}secrets where key in ('admin_password_hash', 'admin_user_id');
 select public.{{P}}admin_set_password('thomarie');
 delete from public.{{P}}cards where owner_id = :A; delete from public.{{P}}album_picks where user_id = :A; delete from public.{{P}}gold_rewards;
@@ -51,18 +50,9 @@ select pg_temp.expect('JAMAIS deux fois la même carte dans un booster Gold (3 R
 select pg_temp.expect('le type géant sort une fois par booster Gold au plus, et plusieurs autres types sortent', (select coalesce(max(n), 0) from (select count(*) n from gb where type_id = :d1 group by b) z) <= 1 and (select count(distinct type_id) from gb) >= 6);
 delete from public.{{P}}cards where owner_id = :A;
 
-\echo '--- booster doré (achat de pièces)'
-delete from public.{{P}}golden_contents;
-insert into public.{{P}}golden_contents (rarity_id, quantity) values ('common', 2), ('rare', 2), ('super', 1);
-create temp table gd as select b, (c ->> 'type_id')::int as type_id from (select g as b, public.{{P}}draw_golden(:A, :cat) as j from generate_series(1, 60) g) x, jsonb_array_elements(x.j) c;
-select pg_temp.expect('60 boosters dorés de 5 cartes', (select count(*) from gd) = 300);
-select pg_temp.expect('JAMAIS deux fois la même carte dans un booster doré', not exists (select 1 from gd group by b, type_id having count(*) > 1));
-select pg_temp.expect('le type géant sort une fois par booster doré au plus, et plusieurs autres types sortent', (select coalesce(max(n), 0) from (select count(*) n from gd where type_id = :d1 group by b) z) <= 1 and (select count(distinct type_id) from gd) >= 6);
-
 -- nettoyage
 delete from public.{{P}}cards where owner_id = :A; delete from public.{{P}}album_picks where user_id = :A;
 delete from public.{{P}}categories where name in ('Doublons Param', 'Doublons Mini');
-delete from public.{{P}}golden_contents; insert into public.{{P}}golden_contents select * from gc_backup;
 delete from public.{{P}}booster_types where id not in (select id from bt_backup);
 delete from public.{{P}}booster_type_slots where booster_type_id in (select id from bt_backup); insert into public.{{P}}booster_type_slots select * from sl_backup;
 update public.{{P}}booster_types b set cards = o.cards from bt_backup o where o.id = b.id;

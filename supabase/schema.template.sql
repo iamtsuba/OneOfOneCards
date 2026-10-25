@@ -35,9 +35,7 @@ insert into public.{{P}}config (key, value, description) values
   ('subscription_price_cents',    999, 'Pass Pro : prix de l''achat unique en centimes d''euro (999 = 9,99 €) ; ne change pas ce que les membres ont déjà payé'),
   ('subscriber_regen_minutes',    5,   'Pass Pro : délai entre deux recharges de boosters pour les membres Pro (minutes)'),
   ('subscription_gift_quantity',  1,   'Pass Pro : boosters « cadeau Pro » offerts une seule fois, à l''achat'),
-  ('golden_booster_chance',  0.00000001, 'Chance qu''un booster soit doré (0.00000001 = 0,000001 %). Contenu dans {{P}}golden_contents'),
-  ('golden_unique_chance',   0.005, 'Chance qu''un booster doré contienne EN PLUS une carte Unique (1/1) (0.005 = 0,5 %). S''ajoute au contenu garanti de {{P}}golden_contents, indépendamment de lui'),
-  ('series_reward_min_size', 2,    'Une série complétée (toutes ses cartes d''un type) donne un pack doré au premier joueur qui la complète. Taille de série minimale pour être récompensée (0 = désactivé)'),
+  ('golden_booster_chance',  0.00000001, 'Chance qu''un booster ouvert devienne un booster Gold (0.00000001 = 0,000001 %). Contenu : celui du booster Gold du module Boosters'),
   ('shop_enabled',           {{SHOP_ENABLED}},    'Boutique Stripe : 1 = visible dans l''application, 0 = masquée (à passer à 1 une fois Stripe configuré). Activée par défaut en préproduction pour pouvoir tester les achats'),
   ('stripe_pack_boosters',   10,   'Boosters bonus ajoutés par achat'),
   ('stripe_pack_price_cents', 99,  'Prix d''un pack en centimes d''euro (99 = 0,99 EUR)'),
@@ -91,15 +89,6 @@ begin
   end if;
 end $$;
 
--- Contenu d'un booster doré : une ligne par rareté, avec le nombre de cartes tirées dans cette rareté
-create table if not exists public.{{P}}golden_contents (
-  rarity_id text primary key references public.{{P}}rarities (id) on delete cascade,
-  quantity  int not null default 1 check (quantity >= 1)
-);
-insert into public.{{P}}golden_contents (rarity_id, quantity) values
-  ('alpha', 1), ('omega', 1), ('ultra', 1), ('super', 1), ('rare', 1)
-on conflict (rarity_id) do nothing;
-
 -- ---------- Profils ----------
 create table if not exists public.{{P}}profiles (
   id                  uuid primary key references auth.users (id) on delete cascade,
@@ -112,8 +101,6 @@ create table if not exists public.{{P}}profiles (
 alter table public.{{P}}profiles add column if not exists coins bigint not null default 0;
 -- Boosters achetés : hors plafond de recharge, consommés après le stock gratuit
 alter table public.{{P}}profiles add column if not exists bonus_boosters int not null default 0;
--- Packs dorés gagnés en complétant une série : s'ouvrent à part, sans toucher au stock de boosters
-alter table public.{{P}}profiles add column if not exists golden_packs int not null default 0;
 do $$ begin
   if not exists (select 1 from pg_constraint where conname = '{{P}}profiles_coins_check') then
     alter table public.{{P}}profiles add constraint {{P}}profiles_coins_check check (coins >= 0);
@@ -343,71 +330,6 @@ create trigger {{P}}cards_counter_trg
   after insert or delete on public.{{P}}cards
   for each row execute function public.{{P}}cards_counter();
 
--- ---------- Séries complétées : un pack doré pour le PREMIER joueur qui possède toutes les cartes d'une série d'une rareté d'un type ----------
--- (une récompense par type, rareté et série, pour toute la communauté : un échange de cartes entre comptes ne la redonne pas)
-create table if not exists public.{{P}}series_rewards (
-  type_id     int  not null references public.{{P}}types (id) on delete cascade,
-  base_rarity text,
-  series      int  not null,
-  user_id     uuid not null references auth.users (id) on delete cascade,
-  claimed_at  timestamptz not null default now(),
-  seen        boolean not null default false,   -- le joueur a vu l'annonce de sa récompense
-  primary key (type_id, base_rarity, series)
-);
-alter table public.{{P}}series_rewards add column if not exists base_rarity text;
-create index if not exists {{P}}series_rewards_user_idx on public.{{P}}series_rewards (user_id, seen);
-
-create or replace function public.{{P}}cards_reward()
-returns trigger language plpgsql security definer set search_path = public as $$
-declare v_min int := coalesce(public.{{P}}cfg('series_reward_min_size'), 0)::int; v_owned int; v_rows int;
-begin
-  if new.owner_id is null then return new; end if;   -- carte retirée du jeu : rien à récompenser
-  if v_min < 1 or new.series < v_min then return new; end if;
-  select count(*) into v_owned from public.{{P}}cards
-  where type_id = new.type_id and base_rarity = new.base_rarity and series = new.series and owner_id = new.owner_id;
-  if v_owned = new.series then
-    insert into public.{{P}}series_rewards (type_id, base_rarity, series, user_id)
-    values (new.type_id, new.base_rarity, new.series, new.owner_id) on conflict (type_id, base_rarity, series) do nothing;
-    get diagnostics v_rows = row_count;
-    if v_rows = 1 then
-      update public.{{P}}profiles set golden_packs = golden_packs + 1 where id = new.owner_id;
-    end if;
-  end if;
-  return new;
-end $$;
-
-drop trigger if exists {{P}}cards_reward_trg on public.{{P}}cards;
-create trigger {{P}}cards_reward_trg
-  after insert or update of owner_id on public.{{P}}cards
-  for each row execute function public.{{P}}cards_reward();
-
--- Rattrapage (sûr à relancer) : séries déjà complètes par un seul joueur. Une série dont une carte a été retirée du jeu n'est
--- jamais complète : count(owner_id) ne compte que les cartes qui ont un propriétaire.
-create or replace function public.{{P}}series_rewards_backfill()
-returns int language plpgsql security definer set search_path = public as $$
-declare v_n int;
-begin
-  with ins as (
-    insert into public.{{P}}series_rewards (type_id, base_rarity, series, user_id)
-    select c.type_id, c.base_rarity, c.series, min(c.owner_id::text)::uuid
-    from public.{{P}}cards c
-    where coalesce((select value from public.{{P}}config where key = 'series_reward_min_size'), 0) >= 1
-      and c.series >= (select value from public.{{P}}config where key = 'series_reward_min_size')
-    group by c.type_id, c.base_rarity, c.series
-    having count(c.owner_id) = c.series and count(distinct c.owner_id) = 1
-    on conflict (type_id, base_rarity, series) do nothing
-    returning user_id
-  ),
-  upd as (
-    update public.{{P}}profiles pr set golden_packs = pr.golden_packs + x.n
-    from (select user_id, count(*) as n from ins group by user_id) x
-    where pr.id = x.user_id
-    returning 1
-  )
-  select count(*) into v_n from ins;
-  return v_n;
-end $$;
-
 -- ---------- Marché ----------
 create table if not exists public.{{P}}listings (
   id             bigint generated always as identity primary key,
@@ -555,7 +477,6 @@ begin
   update public.{{P}}notifications n set card_base = coalesce(
     (select c.base_rarity from public.{{P}}cards c where c.type_id = n.type_id and c.series = n.series and c.number = n.number),
     public.{{P}}default_base_rarity(n.type_id, n.series)) where n.card_base is null and n.type_id is not null;
-  update public.{{P}}series_rewards r set base_rarity = public.{{P}}default_base_rarity(r.type_id, r.series) where r.base_rarity is null;
   update public.{{P}}unique_wins u set base_rarity = public.{{P}}default_base_rarity(u.type_id, 1) where u.base_rarity is null;
   delete from public.{{P}}series_taken;   -- recalculé juste après avec la rareté de base
 
@@ -568,9 +489,6 @@ begin
   alter table public.{{P}}series_taken drop constraint {{P}}series_taken_pkey;
   alter table public.{{P}}series_taken add primary key (type_id, base_rarity, series);
 
-  alter table public.{{P}}series_rewards alter column base_rarity set not null;
-  alter table public.{{P}}series_rewards drop constraint {{P}}series_rewards_pkey;
-  alter table public.{{P}}series_rewards add primary key (type_id, base_rarity, series);
 
   alter table public.{{P}}favorites alter column base_rarity set not null;
   alter table public.{{P}}favorites drop constraint {{P}}favorites_pkey;
@@ -600,7 +518,6 @@ select type_id, base_rarity, series, count(*) from public.{{P}}cards group by ty
 on conflict (type_id, base_rarity, series) do update set taken = excluded.taken;
 update public.{{P}}series_taken t set taken = 0
 where not exists (select 1 from public.{{P}}cards c where c.type_id = t.type_id and c.base_rarity = t.base_rarity and c.series = t.series);
-select public.{{P}}series_rewards_backfill();
 
 -- Informations légales du vendeur et textes de consentement (affichés dans les conditions de vente).
 -- À compléter avant de vendre pour de vrai : voir README.
@@ -679,13 +596,11 @@ alter table public.{{P}}cards        enable row level security;
 alter table public.{{P}}series_taken enable row level security;
 alter table public.{{P}}listings     enable row level security;
 alter table public.{{P}}bids         enable row level security;
-alter table public.{{P}}golden_contents enable row level security;
 alter table public.{{P}}purchases    enable row level security;
 alter table public.{{P}}legal        enable row level security;
 alter table public.{{P}}consents     enable row level security;
 alter table public.{{P}}secrets      enable row level security;
 alter table public.{{P}}admin_log    enable row level security;
-alter table public.{{P}}series_rewards enable row level security;
 alter table public.{{P}}favorites     enable row level security;
 alter table public.{{P}}offers        enable row level security;
 alter table public.{{P}}notifications enable row level security;
@@ -732,8 +647,8 @@ create policy {{P}}cards_read_own on public.{{P}}cards
 
 revoke insert, update, delete on public.{{P}}config, public.{{P}}rarities, public.{{P}}profiles,
   public.{{P}}categories, public.{{P}}types, public.{{P}}cards from anon, authenticated;
-revoke all on public.{{P}}series_taken, public.{{P}}listings, public.{{P}}bids, public.{{P}}golden_contents,
-  public.{{P}}secrets, public.{{P}}admin_log, public.{{P}}series_rewards from anon, authenticated;
+revoke all on public.{{P}}series_taken, public.{{P}}listings, public.{{P}}bids,
+  public.{{P}}secrets, public.{{P}}admin_log from anon, authenticated;
 revoke all on public.{{P}}favorites, public.{{P}}offers, public.{{P}}notifications from anon, authenticated;
 revoke all on public.{{P}}unique_wins from anon, authenticated;
 revoke insert, update, delete on public.{{P}}type_rarities from anon, authenticated;
@@ -835,109 +750,6 @@ $$;
 -- Tire au hasard une carte encore disponible d'une rareté donnée dans une catégorie (booster doré).
 -- Même pondération que les boosters normaux : poids d'une carte = taille de série ^ exposant.
 -- (jit = off : le plan de ces requêtes est jugé coûteux par PostgreSQL, qui le compilerait à chaque appel pour ~35 ms de plus)
-drop function if exists public.{{P}}draw_rarity(text, int);
-drop function if exists public.{{P}}draw_rarity(text, int, int[]);
-create or replace function public.{{P}}draw_rarity(
-  p_rarity text, p_category int, p_exclude int[] default '{}', out o_type int, out o_base text, out o_series int, out o_number int
-)
-language plpgsql security definer set search_path = public set jit = off as $$
-declare
-  rar      public.{{P}}rarities;
-  e        double precision := public.{{P}}cfg('rarity_exponent')::double precision;
-  ts       int[];
-  bs       text[];
-  ms       int[];
-  av       int[];
-  hs       boolean[];
-  ws       double precision[];
-  total    double precision := 0;
-  x        double precision;
-  acc      double precision := 0;
-  i        int;
-  pick     int := 1;
-  k        int;
-  v_lo     int;
-  v_hi     int;
-  g_lo     int;
-begin
-  select * into rar from public.{{P}}rarities where id = p_rarity;
-  if not found then return; end if;
-  if not exists (select 1 from public.{{P}}categories where id = p_category) then return; end if;
-
-  -- Cartes encore disponibles de cette rareté AFFICHÉE : (type, rareté de base, série) avec le nombre de cartes restantes.
-  --  Unique : la carte 1/1 de chaque rareté de base ; Alpha / Omega : la 1re / dernière carte de chaque série à numéro visible
-  --  (série 2 à `numbered`) ; rareté « à seuil » : les cartes de SA rareté de base, soit 2..m-1 dans une série à numéro visible
-  --  (1/m = Alpha et m/m = Omega), soit toutes (1..m) dans une série à numéro masqué.
-  g_lo := case when rar.kind in ('alpha', 'omega') then 2 else 1 end;   -- une rareté ordinaire commence à la série 1 : la 1/1 d'une rareté à numéro masqué est une carte ordinaire
-  with cf as materialized (
-    select ty.id as type_id, c.rarity_id as base, c.smax, c.numbered, public.{{P}}is_fullart_rarity(c.rarity_id) as fa
-    from public.{{P}}types ty
-    cross join lateral public.{{P}}type_config(ty.id) c
-    where ty.category_id = p_category
-      and (rar.kind in ('unique', 'alpha', 'omega') or c.rarity_id = p_rarity)
-      and (rar.kind <> 'unique' or (c.numbered >= 1 and not public.{{P}}is_fullart_rarity(c.rarity_id)))   -- pas d'Unique sur une rareté sans numéro visible ni sur une Full Art Rare
-      and not (ty.id = any(coalesce(p_exclude, '{}'::int[])))   -- jamais un type déjà tiré dans ce booster
-  )
-  select array_agg(q.type_id order by q.type_id, q.base, q.m), array_agg(q.base order by q.type_id, q.base, q.m),
-         array_agg(q.m order by q.type_id, q.base, q.m), array_agg(q.avail order by q.type_id, q.base, q.m),
-         array_agg(q.hid order by q.type_id, q.base, q.m),
-         array_agg(q.avail * power(q.m::double precision, e) order by q.type_id, q.base, q.m)
-  into ts, bs, ms, av, hs, ws
-  from (
-    select cf.type_id, cf.base, g as m, (g > cf.numbered or (g = 1 and cf.fa)) as hid,   -- la 1/1 d'une Full Art Rare est une carte ordinaire de sa rareté
-      case
-        when rar.kind = 'unique' then
-          case when not exists (select 1 from public.{{P}}cards c where c.type_id = cf.type_id and c.base_rarity = cf.base and c.series = 1 and c.number = 1) then 1 else 0 end
-        when rar.kind = 'alpha' then
-          case when not exists (select 1 from public.{{P}}cards c where c.type_id = cf.type_id and c.base_rarity = cf.base and c.series = g and c.number = 1) then 1 else 0 end
-        when rar.kind = 'omega' then
-          case when not exists (select 1 from public.{{P}}cards c where c.type_id = cf.type_id and c.base_rarity = cf.base and c.series = g and c.number = g) then 1 else 0 end
-        else
-          case when not (g > cf.numbered or (g = 1 and cf.fa))
-               then greatest(g - 2 - (select count(*)::int from public.{{P}}cards c where c.type_id = cf.type_id and c.base_rarity = cf.base and c.series = g and c.number between 2 and g - 1), 0)
-               else g - (select count(*)::int from public.{{P}}cards c where c.type_id = cf.type_id and c.base_rarity = cf.base and c.series = g)
-          end
-      end as avail
-    from cf
-    cross join lateral generate_series(
-      g_lo,
-      case when rar.kind = 'unique' then 1
-           when rar.kind in ('alpha', 'omega') then least(cf.numbered::bigint, cf.smax)::int
-           else cf.smax end
-    ) g
-  ) q
-  where q.avail > 0;
-
-  if ts is null then return; end if;
-  for i in 1 .. array_length(ws, 1) loop total := total + ws[i]; end loop;
-  if total <= 0 then return; end if;
-
-  x := random() * total;
-  for i in 1 .. array_length(ws, 1) loop
-    pick := i;
-    acc := acc + ws[i];
-    exit when acc > x;
-  end loop;
-  o_type   := ts[pick];
-  o_base   := bs[pick];
-  o_series := ms[pick];
-
-  if rar.kind in ('unique', 'alpha') then
-    o_number := 1;
-  elsif rar.kind = 'omega' then
-    o_number := o_series;
-  else
-    v_lo := case when hs[pick] then 1 else 2 end;
-    v_hi := case when hs[pick] then o_series else o_series - 1 end;
-    k := floor(random() * av[pick])::int;
-    select y into o_number
-    from generate_series(v_lo, v_hi) y
-    where not exists (select 1 from public.{{P}}cards c where c.type_id = o_type and c.base_rarity = o_base and c.series = o_series and c.number = y)
-    order by y
-    offset k limit 1;
-  end if;
-end $$;
-
 create or replace function public.{{P}}ensure_profile(p_uid uuid)
 returns void language plpgsql security definer set search_path = public as $$
 declare v_base text; v_name text; i int := 1;
@@ -1087,10 +899,6 @@ begin
     'boosters',            p.boosters,
     'bonus_boosters',      p.bonus_boosters,
     'shop_enabled',        coalesce(public.{{P}}cfg('shop_enabled'), 0) = 1,
-    'golden_packs',        p.golden_packs,
-    'unseen_rewards',      (select coalesce(jsonb_agg(jsonb_build_object('type_id', r.type_id, 'base_rarity', r.base_rarity, 'series', r.series) order by r.claimed_at), '[]'::jsonb)
-                            from public.{{P}}series_rewards r where r.user_id = p.id and not r.seen),
-    'series_reward_min_size', coalesce(public.{{P}}cfg('series_reward_min_size'), 0)::int,
     'pack_boosters',       public.{{P}}cfg('stripe_pack_boosters')::int,
     'pack_price_cents',    public.{{P}}cfg('stripe_pack_price_cents')::int,
     'cgv_version',         coalesce(public.{{P}}cfg('cgv_version'), 1)::int,
@@ -1104,10 +912,10 @@ begin
     'coins_locked',        v_locked,
     'friend_requests',     (select count(*) from public.{{P}}friendships f where f.addressee_id = p.id and f.status = 'pending'),
     -- le booster qui s'ouvre avec le stock gratuit : le Standard, ou celui des abonnés pour un abonné
-    'standard_booster',    (select jsonb_build_object('id', bt.id, 'name', bt.name, 'cards', bt.cards, 'color', bt.color, 'glow', bt.glow) from public.{{P}}booster_types bt
+    'standard_booster',    (select jsonb_build_object('id', bt.id, 'name', bt.name, 'cards', bt.cards, 'color', bt.color, 'glow', bt.glow, 'position', bt.position) from public.{{P}}booster_types bt
                             where bt.id = coalesce((select sb.id from public.{{P}}booster_types sb where sb.role = 'subscriber' and sb.enabled and public.{{P}}is_subscriber(p.id)),
                                                    (select st.id from public.{{P}}booster_types st where st.is_standard))),
-    'reward_booster',      (select jsonb_build_object('id', bt.id, 'name', bt.name, 'cards', bt.cards, 'color', bt.color, 'glow', bt.glow) from public.{{P}}booster_types bt where bt.role = 'card_reward'),
+    'reward_booster',      (select jsonb_build_object('id', bt.id, 'name', bt.name, 'cards', bt.cards, 'color', bt.color, 'glow', bt.glow, 'position', bt.position) from public.{{P}}booster_types bt where bt.role = 'card_reward'),
     'subscription',        jsonb_build_object(
                              'enabled',              coalesce(public.{{P}}cfg('subscription_enabled'), 0) = 1,
                              'name',                 coalesce(public.{{P}}text_cfg('subscription_name'), 'OneMore'),
@@ -1120,7 +928,7 @@ begin
                              'gift_id',              (select bt.id from public.{{P}}booster_types bt where bt.role = 'subscription_gift' and bt.enabled),
                              'gift_name',            (select bt.name from public.{{P}}booster_types bt where bt.role = 'subscription_gift' and bt.enabled),
                              'gift_quantity',        coalesce(public.{{P}}cfg('subscription_gift_quantity'), 0)::int),
-    'booster_types',       (select coalesce(jsonb_agg(jsonb_build_object('id', bt.id, 'name', bt.name, 'cards', bt.cards, 'color', bt.color, 'glow', bt.glow, 'price', bt.price_coins,
+    'booster_types',       (select coalesce(jsonb_agg(jsonb_build_object('id', bt.id, 'name', bt.name, 'cards', bt.cards, 'color', bt.color, 'glow', bt.glow, 'position', bt.position, 'price', bt.price_coins,
                                                                           'quantity', coalesce(ub.quantity, 0) + coalesce((select sum(l.quantity) from public.{{P}}user_collection_boosters l join public.{{P}}categories c on c.id = l.category_id
                                                                                                                          where l.user_id = p.id and l.booster_type_id = bt.id and (c.closed or not c.enabled)), 0)) order by bt.position, bt.id), '[]'::jsonb)
                             from public.{{P}}booster_types bt
@@ -1159,78 +967,6 @@ begin
   perform public.{{P}}settle_due();
   p := public.{{P}}sync(auth.uid());
   return public.{{P}}status_json(p);
-end $$;
-
--- Tire le contenu d'un booster doré (défini dans {{P}}golden_contents) dans une catégorie et l'attribue au joueur.
--- Renvoie la liste des cartes obtenues (vide si plus aucune carte de ces raretés n'est disponible).
-create or replace function public.{{P}}draw_golden(p_uid uuid, p_cat int)
-returns jsonb language plpgsql security definer set search_path = public as $$
-declare
-  gc   record;
-  q    int;
-  t2   int;
-  tid  int;
-  m    int;
-  num  int;
-  rows int;
-  v_new boolean;
-  v_base text;
-  res  jsonb := '[]'::jsonb;
-  v_excl int[] := '{}';   -- types déjà tirés dans ce booster : jamais deux fois la même carte (sauf s'il n'y a plus d'autre carte)
-begin
-  for gc in select rarity_id, quantity from public.{{P}}golden_contents order by rarity_id loop
-    for q in 1 .. gc.quantity loop
-      t2 := 0;
-      while t2 < 10 loop
-        t2 := t2 + 1;
-        select d2.o_type, d2.o_base, d2.o_series, d2.o_number into tid, v_base, m, num
-        from public.{{P}}draw_rarity(gc.rarity_id, p_cat, v_excl) d2;
-        if tid is null and cardinality(v_excl) > 0 then   -- plus de carte différente : un doublon plutôt qu'un booster incomplet
-          select d2.o_type, d2.o_base, d2.o_series, d2.o_number into tid, v_base, m, num from public.{{P}}draw_rarity(gc.rarity_id, p_cat) d2;
-        end if;
-        exit when tid is null;
-        v_new := not public.{{P}}owns_card_rarity(p_uid, tid, public.{{P}}rarity_id(num, m, tid, v_base));
-        insert into public.{{P}}cards (type_id, base_rarity, series, number, owner_id) values (tid, v_base, m, num, p_uid)
-        on conflict (type_id, base_rarity, series, number) do nothing;
-        get diagnostics rows = row_count;
-        if rows = 1 then
-          v_excl := array_append(v_excl, tid);
-          if v_new then perform public.{{P}}auto_place_album(p_uid, tid, v_base, m, num); end if;
-          res := res || jsonb_build_array(jsonb_build_object(
-            'type_id', tid, 'base_rarity', v_base, 'series', m, 'number', num, 'rarity_id', public.{{P}}rarity_id(num, m, tid, v_base), 'is_new', v_new
-          ));
-          exit;
-        end if;
-      end loop;
-    end loop;
-  end loop;
-
-  -- Petite chance supplémentaire (indépendante du contenu garanti ci-dessus) d'une carte Unique (1/1) en plus
-  if random() < coalesce(public.{{P}}cfg('golden_unique_chance'), 0)::double precision then
-    t2 := 0;
-    while t2 < 10 loop
-      t2 := t2 + 1;
-      select d2.o_type, d2.o_base, d2.o_series, d2.o_number into tid, v_base, m, num
-      from public.{{P}}draw_rarity('unique', p_cat, v_excl) d2;
-      if tid is null and cardinality(v_excl) > 0 then
-        select d2.o_type, d2.o_base, d2.o_series, d2.o_number into tid, v_base, m, num from public.{{P}}draw_rarity('unique', p_cat) d2;
-      end if;
-      exit when tid is null;
-      v_new := not public.{{P}}owns_card_rarity(p_uid, tid, public.{{P}}rarity_id(num, m, tid, v_base));
-      insert into public.{{P}}cards (type_id, base_rarity, series, number, owner_id) values (tid, v_base, m, num, p_uid)
-      on conflict (type_id, base_rarity, series, number) do nothing;
-      get diagnostics rows = row_count;
-      if rows = 1 then
-        if v_new then perform public.{{P}}auto_place_album(p_uid, tid, v_base, m, num); end if;
-        res := res || jsonb_build_array(jsonb_build_object(
-          'type_id', tid, 'base_rarity', v_base, 'series', m, 'number', num, 'rarity_id', public.{{P}}rarity_id(num, m, tid, v_base), 'is_new', v_new
-        ));
-        exit;
-      end if;
-    end loop;
-  end if;
-
-  return res;
 end $$;
 
 -- Ouvre un booster de la catégorie en cours. Chaque carte tirée n'existait pas encore : elle devient
@@ -1668,12 +1404,16 @@ begin
     end if;
     got := 0; exhausted := false; res := '[]'::jsonb; v_golden := false;
 
-    -- Booster doré : chance très faible, contenu défini dans golden_contents
+    -- Booster Gold tiré au hasard (chance très faible) : même contenu que le booster Gold du module Boosters ; une carte de la collection, au hasard, tient lieu de « carte complétée »
     if random() < coalesce(public.{{P}}cfg('golden_booster_chance'), 0)::double precision then
       v_golden := true;
-      res := public.{{P}}draw_golden(uid, v_cat);
+      begin
+        res := public.{{P}}draw_gold_reward(uid, (select t.id from public.{{P}}types t where t.category_id = v_cat order by random() limit 1));
+      exception when others then
+        res := '[]'::jsonb;   -- booster Gold indisponible (pas de répartition, plus de cartes) : booster normal
+      end;
       got := jsonb_array_length(res);
-      if got = 0 then v_golden := false; end if;   -- contenu doré indisponible : booster normal
+      if got = 0 then v_golden := false; end if;
     end if;
 
     if not v_golden then
@@ -1707,7 +1447,8 @@ begin
   where id = uid returning * into p;
 
   return jsonb_build_object('cards', res, 'golden', v_golden, 'category_id', v_cat, 'status', public.{{P}}status_json(p),
-                            'booster', (select jsonb_build_object('id', bt.id, 'name', bt.name, 'color', bt.color, 'glow', bt.glow) from public.{{P}}booster_types bt where bt.id = v_std));
+                            'booster', (select jsonb_build_object('id', bt.id, 'name', bt.name, 'color', bt.color, 'glow', bt.glow) from public.{{P}}booster_types bt
+                                       where bt.id = case when v_golden then coalesce((select g.id from public.{{P}}booster_types g where g.role = 'card_reward'), v_std) else v_std end));
 end $$;
 
 -- Ouvrir un booster d'un autre type que le Standard (stock du joueur : achat en pièces ou don de l'admin)
@@ -1797,7 +1538,8 @@ grant execute on function public.{{P}}buy_booster(int, int, int) to authenticate
 -- p_slots = [{position, rarity_id, weight}] : chaque carte de 1 à p_cards a au moins une rareté (ordinaire ou Unique), chaque couple une seule fois.
 drop function if exists public.{{P}}admin_save_booster_type(text, int, text, int, text, int, boolean, jsonb);
 drop function if exists public.{{P}}admin_save_booster_type(text, int, text, int, text, int, boolean, jsonb, text);
-create or replace function public.{{P}}admin_save_booster_type(p_password text, p_id int, p_name text, p_cards int, p_color text, p_price int, p_enabled boolean, p_slots jsonb, p_role text default null, p_glow text default 'none')
+drop function if exists public.{{P}}admin_save_booster_type(text, int, text, int, text, int, boolean, jsonb, text, text);
+create or replace function public.{{P}}admin_save_booster_type(p_password text, p_id int, p_name text, p_cards int, p_color text, p_price int, p_enabled boolean, p_slots jsonb, p_role text default null, p_glow text default 'none', p_position int default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare err text := public.{{P}}admin_guard(p_password); v_id int; v_std boolean := false; v_old_role text; v_role text := nullif(trim(coalesce(p_role, '')), '');
         v_name text := trim(coalesce(p_name, '')); r record;
@@ -1809,6 +1551,7 @@ begin
   if p_price is not null and (p_price < 0 or p_price > 1000000000) then raise exception 'invalid_booster'; end if;
   if v_role is not null and v_role not in ('subscriber', 'subscription_gift', 'card_reward') then raise exception 'invalid_booster'; end if;
   if coalesce(p_glow, 'none') not in ('none', 'gold', 'silver', 'red', 'blue', 'green', 'purple', 'rainbow') then raise exception 'invalid_booster'; end if;
+  if p_position is not null and (p_position < 1 or p_position > 9999) then raise exception 'invalid_booster'; end if;   -- ordre d'affichage sur la page Boosters
   if p_slots is null or jsonb_typeof(p_slots) <> 'array' then raise exception 'invalid_booster_slots'; end if;
   -- Choix possibles d'une carte : raretés ordinaires et Unique ; en plus, pour le booster de récompense : Alpha, Omega et « numbered »
   for r in select (e ->> 'position')::int as pos, e ->> 'rarity_id' as rid, (e ->> 'weight')::double precision as w from jsonb_array_elements(p_slots) e loop
@@ -1833,9 +1576,9 @@ begin
 
   if p_id is null then
     insert into public.{{P}}booster_types (name, cards, color, price_coins, enabled, position, role, glow)
-    values (v_name, p_cards, p_color, p_price, coalesce(p_enabled, true), coalesce((select max(position) from public.{{P}}booster_types), 0) + 1, v_role, coalesce(p_glow, 'none')) returning id into v_id;
+    values (v_name, p_cards, p_color, p_price, coalesce(p_enabled, true), coalesce(p_position, coalesce((select max(position) from public.{{P}}booster_types), 0) + 1), v_role, coalesce(p_glow, 'none')) returning id into v_id;
   else
-    update public.{{P}}booster_types set name = v_name, cards = p_cards, color = p_color, role = v_role, glow = coalesce(p_glow, 'none'),
+    update public.{{P}}booster_types set name = v_name, cards = p_cards, color = p_color, role = v_role, glow = coalesce(p_glow, 'none'), position = coalesce(p_position, position),
            price_coins = case when v_std then null else p_price end,
            enabled = case when v_std or v_role = 'card_reward' then true else coalesce(p_enabled, true) end
     where id = p_id;
@@ -1880,44 +1623,12 @@ begin
   if p_username is not null and n = 0 then raise exception 'user_not_found'; end if;
   return jsonb_build_object('ok', true, 'players', n);
 end $$;
-revoke all on function public.{{P}}admin_save_booster_type(text, int, text, int, text, int, boolean, jsonb, text, text) from public, anon;
+revoke all on function public.{{P}}admin_save_booster_type(text, int, text, int, text, int, boolean, jsonb, text, text, int) from public, anon;
 revoke all on function public.{{P}}admin_delete_booster_type(text, int) from public, anon;
 revoke all on function public.{{P}}admin_grant_boosters(text, int, int, text) from public, anon;
-grant execute on function public.{{P}}admin_save_booster_type(text, int, text, int, text, int, boolean, jsonb, text, text) to authenticated;
+grant execute on function public.{{P}}admin_save_booster_type(text, int, text, int, text, int, boolean, jsonb, text, text, int) to authenticated;
 grant execute on function public.{{P}}admin_delete_booster_type(text, int) to authenticated;
 grant execute on function public.{{P}}admin_grant_boosters(text, int, int, text) to authenticated;
-
--- Ouvre un pack doré gagné en complétant une série (catégorie en cours). Ne consomme aucun booster.
-drop function if exists public.{{P}}open_golden_pack();
-create or replace function public.{{P}}open_golden_pack(p_category int default null)
-returns jsonb language plpgsql security definer set search_path = public as $$
-declare uid uuid := auth.uid(); p public.{{P}}profiles; v_cat int; res jsonb;
-begin
-  if uid is null then raise exception 'not_authenticated'; end if;
-  p := public.{{P}}sync(uid);
-  if p.golden_packs <= 0 then raise exception 'no_golden_pack'; end if;
-  v_cat := coalesce(p_category, public.{{P}}active_category());
-  if v_cat is null then raise exception 'pool_empty'; end if;
-  if not exists (select 1 from public.{{P}}categories c where c.id = v_cat and c.enabled and not c.closed) then raise exception 'collection_closed'; end if;
-  res := public.{{P}}draw_golden(uid, v_cat);
-  if jsonb_array_length(res) = 0 then raise exception 'pool_empty'; end if;
-  if public.{{P}}category_taken(v_cat) >= public.{{P}}category_total(v_cat) then
-    update public.{{P}}categories set closed = true where id = v_cat;
-  end if;
-  update public.{{P}}profiles set golden_packs = golden_packs - 1 where id = uid returning * into p;
-  return jsonb_build_object('cards', res, 'golden', true, 'category_id', v_cat, 'status', public.{{P}}status_json(p));
-end $$;
-
--- Marque les annonces de séries complétées comme vues
-create or replace function public.{{P}}ack_rewards()
-returns jsonb language plpgsql security definer set search_path = public as $$
-declare p public.{{P}}profiles;
-begin
-  if auth.uid() is null then raise exception 'not_authenticated'; end if;
-  update public.{{P}}series_rewards set seen = true where user_id = auth.uid() and not seen;
-  p := public.{{P}}sync(auth.uid());
-  return public.{{P}}status_json(p);
-end $$;
 
 -- Mes cartes (filtres catégorie / type / rareté, tri, pagination)
 -- Ma collection (page « Mes cartes »), paginée. Une tuile par carte à numéro VISIBLE ; une seule pile par (type, rareté)
@@ -2243,11 +1954,8 @@ begin
             from mix m group by m.n) z), '[]'::jsonb)
   ) into v_res;
 
-  select jsonb_build_object(
-           'chance', coalesce(public.{{P}}cfg('golden_booster_chance'), 0),
-           'unique_chance', coalesce(public.{{P}}cfg('golden_unique_chance'), 0),
-           'contents', coalesce((select jsonb_agg(jsonb_build_object('rarity_id', rarity_id, 'quantity', quantity) order by rarity_id)
-                                 from public.{{P}}golden_contents), '[]'::jsonb))
+  -- booster Gold tiré au hasard : sa chance et son nom
+  select jsonb_build_object('chance', coalesce(public.{{P}}cfg('golden_booster_chance'), 0), 'name', (select bt.name from public.{{P}}booster_types bt where bt.role = 'card_reward'))
   into v_golden;
 
   return jsonb_build_object(
@@ -2258,7 +1966,7 @@ begin
     'pool_left',         public.{{P}}category_total(v_cat) - public.{{P}}category_taken(v_cat),
     'by_rarity',         v_res -> 'by_rarity',
     'positions',         v_res -> 'positions',
-    'golden',            case when p_booster_type is null or v_bt.is_standard then v_golden else null end
+    'gold',              case when p_booster_type is null or v_bt.is_standard then v_golden else null end
   );
 end $$;
 
@@ -3293,6 +3001,35 @@ begin
   end loop;
 end $$;
 
+-- ---------- Suppression du pack doré (séries récompensées, packs dorés, contenu doré) ----------
+-- Les packs dorés non ouverts deviennent des boosters du type offert à la complétion d'une carte (sans collection : utilisables partout). Si aucun booster de récompense n'est choisi,
+-- ils restent comptés dans la colonne golden_packs, qui n'est supprimée que lorsqu'il n'y en a plus (relancer ce SQL après avoir choisi le booster de récompense).
+do $$
+declare v_bt int := nullif(coalesce(public.{{P}}cfg('card_reward_booster'), 0), 0)::int; v_left boolean;
+begin
+  if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = '{{P}}profiles' and column_name = 'golden_packs') then
+    if v_bt is not null and exists (select 1 from public.{{P}}booster_types where id = v_bt and enabled and not is_standard) then
+      execute format('insert into public.{{P}}user_boosters (user_id, booster_type_id, quantity) select id, %s, golden_packs from public.{{P}}profiles where golden_packs > 0 on conflict (user_id, booster_type_id) do update set quantity = public.{{P}}user_boosters.quantity + excluded.quantity', v_bt);
+      execute 'update public.{{P}}profiles set golden_packs = 0 where golden_packs > 0';
+    end if;
+    execute 'select exists (select 1 from public.{{P}}profiles where golden_packs > 0)' into v_left;
+    if not v_left then execute 'alter table public.{{P}}profiles drop column golden_packs'; end if;
+  end if;
+end $$;
+drop trigger if exists {{P}}cards_reward_trg on public.{{P}}cards;
+drop function if exists public.{{P}}cards_reward();
+drop function if exists public.{{P}}series_rewards_backfill();
+drop function if exists public.{{P}}open_golden_pack(int);
+drop function if exists public.{{P}}open_golden_pack();
+drop function if exists public.{{P}}ack_rewards();
+drop function if exists public.{{P}}draw_golden(uuid, int);
+drop function if exists public.{{P}}draw_rarity(text, int, int[]);
+drop function if exists public.{{P}}draw_rarity(text, int);
+drop table if exists public.{{P}}series_rewards;
+drop table if exists public.{{P}}golden_contents;
+delete from public.{{P}}config where key in ('series_reward_min_size', 'golden_unique_chance');
+update public.{{P}}config set description = 'Chance qu''un booster ouvert devienne un booster Gold (0.00000001 = 0,000001 %). Contenu : celui du booster Gold du module Boosters' where key = 'golden_booster_chance';
+
 -- ---------- Lien d'invitation : devenir ami en ouvrant un lien ----------
 -- Chaque joueur a UN code d'invitation (20 caractères hexadécimaux au hasard). Celui qui ouvre le lien, une fois connecté, devient ami tout de suite avec son propriétaire
 -- (sans demande à accepter). Le propriétaire peut générer un nouveau code : l'ancien lien ne marche plus.
@@ -4232,7 +3969,6 @@ begin
   select kind into v_kind from public.{{P}}rarities where id = p_id;
   if not found then raise exception 'not_found'; end if;
   if v_kind <> 'range' then raise exception 'rarity_protected'; end if;
-  if exists (select 1 from public.{{P}}golden_contents where rarity_id = p_id) then raise exception 'rarity_in_use'; end if;
   if exists (select 1 from public.{{P}}type_rarities where rarity_id = p_id) then raise exception 'rarity_in_use'; end if;
   if exists (select 1 from public.{{P}}booster_type_slots where rarity_id = p_id) then raise exception 'rarity_in_use'; end if;
   if exists (select 1 from public.{{P}}cards c where c.base_rarity = p_id) then
@@ -4260,12 +3996,8 @@ revoke all on function public.{{P}}sync(uuid) from public, anon, authenticated;
 revoke all on function public.{{P}}settle_due() from public, anon, authenticated;
 revoke all on function public.{{P}}status_json(public.{{P}}profiles) from public, anon, authenticated;
 revoke all on function public.{{P}}cards_counter() from public, anon, authenticated;
-revoke all on function public.{{P}}draw_rarity(text, int, int[]) from public, anon, authenticated;
-revoke all on function public.{{P}}draw_golden(uuid, int) from public, anon, authenticated;
 revoke all on function public.{{P}}owns_card_rarity(uuid, int, text) from public, anon, authenticated;
-revoke all on function public.{{P}}series_rewards_backfill() from public, anon, authenticated;
 revoke all on function public.{{P}}stack_cards(uuid, int, text) from public, anon, authenticated;
-revoke all on function public.{{P}}cards_reward() from public, anon, authenticated;
 revoke all on function public.{{P}}admin_guard(text) from public, anon, authenticated;
 -- Réservée au SQL Editor (mot de passe admin initial)
 revoke all on function public.{{P}}admin_set_password(text) from public, anon, authenticated;
@@ -4276,8 +4008,6 @@ grant execute on function public.{{P}}credit_purchase(text, uuid, int, int, text
 -- Fonctions de l'application : joueurs connectés uniquement
 revoke all on function public.{{P}}status()                                          from public, anon;
 revoke all on function public.{{P}}open_booster(int)                                 from public, anon;
-revoke all on function public.{{P}}open_golden_pack(int)                             from public, anon;
-revoke all on function public.{{P}}ack_rewards()                                     from public, anon;
 revoke all on function public.{{P}}list_collection(int, int, text, text, int, int)   from public, anon;
 revoke all on function public.{{P}}my_stats(int)                                     from public, anon;
 revoke all on function public.{{P}}draw_odds(int, int)                               from public, anon;
@@ -4321,8 +4051,6 @@ revoke all on function public.{{P}}notifications_mark_read(bigint[])            
 
 grant execute on function public.{{P}}status()                                          to authenticated;
 grant execute on function public.{{P}}open_booster(int)                                 to authenticated;
-grant execute on function public.{{P}}open_golden_pack(int)                             to authenticated;
-grant execute on function public.{{P}}ack_rewards()                                     to authenticated;
 grant execute on function public.{{P}}list_collection(int, int, text, text, int, int)   to authenticated;
 grant execute on function public.{{P}}my_stats(int)                                     to authenticated;
 grant execute on function public.{{P}}draw_odds(int, int)                               to authenticated;

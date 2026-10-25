@@ -61,7 +61,7 @@ const catalog = { categoryMap: { 5: col(5, 'Chat’trapez les tous !'), 6: col(6
 const premium = { id: 30, name: 'Premium', cards: 5, color: '#9ca3af', glow: 'none', price: 150, quantity: 0 }
 const c5 = { id: 5, name: 'Chat’trapez les tous !', cards_taken: 1500, total_cards: 12991836 }
 const c6 = { id: 6, name: 'Rat’trapez les tous !', cards_taken: 40, total_cards: 800000 }
-const base = { id: 'u1', username: 'Tsuba', boosters: 10, bonus_boosters: 0, coins: 500, coins_locked: 0, golden_packs: 0, gold_rewards: [], reward_notices: [], unseen_rewards: [], max_boosters: 10, regen_minutes: 10, regen_amount: 10,
+const base = { id: 'u1', username: 'Tsuba', boosters: 10, bonus_boosters: 0, coins: 500, coins_locked: 0, gold_rewards: [], reward_notices: [], max_boosters: 10, regen_minutes: 10, regen_amount: 10,
   active_category_id: 5, active_categories: [c5], linked_boosters: [], next_refill_at: null, cards_taken: 1500, total_cards: 12991836, next_category: null, cgv_version: 3, shop_enabled: false, booster_types: [],
   standard_booster: { id: 1, name: 'Standard', glow: 'none', color: '#e8452e' }, server_now: new Date().toISOString(), subscription: { enabled: false, active: false } }
 let currentStatus = base
@@ -179,6 +179,27 @@ const two = { ...base, active_categories: [c5, c6] }
   openReply = null
   await m.unmount()
   clearSaved()
+}
+
+// ---------- booster ordinaire devenu Gold par hasard ----------
+{
+  const card = { type_id: 1, base_rarity: 'rare', series: 5, number: 3, rarity_id: 'rare', is_new: true }
+  openReply = { cards: [card], golden: true, category_id: 5, booster: { id: 40, name: 'Gold', color: '#d4af37', glow: 'gold' }, status: base }
+  const m = await mountPage(base)
+  await click(btn(m.host, /^Ouvrir un booster$/))
+  const t0 = Date.now()
+  const hintOf = () => document.querySelector('.overlay-hint')?.textContent ?? ''
+  while (Date.now() - t0 < 8000 && !/carte 1 sur 1/.test(hintOf())) await wait(50)
+  const revealHint = hintOf()
+  await wait(300)
+  await click(document.querySelector('.reveal-card'))   // la carte est révélée : on passe au résumé
+  const t1 = Date.now()
+  while (Date.now() - t1 < 4000 && !document.querySelector('.overlay-title')) await wait(50)
+  const title = document.querySelector('.overlay-title')?.textContent ?? ''
+  ok('un booster ordinaire devenu Gold par hasard : annoncé « Booster Gold » (le nom du booster Gold du module Boosters) à la révélation puis au résumé, jamais « Booster doré »', /^Booster Gold : carte 1 sur 1/.test(revealHint) && title === 'Booster Gold' && !/doré/.test(document.body.textContent))
+  ok('l\'ouverture a bien été demandée normalement (booster du stock gratuit, collection 5)', calls.at(-1)[0] === 'open_booster' && calls.at(-1)[1].p_category === 5)
+  openReply = null
+  await m.unmount()
 }
 
 // ---------- aucune collection ouverte ----------

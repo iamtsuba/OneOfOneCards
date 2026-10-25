@@ -19,7 +19,6 @@ select pg_temp.try('update public.{{P}}categories set name = ''pirate''');
 select pg_temp.try('insert into public.{{P}}types (category_id, name) values (1, ''pirate'')');
 select pg_temp.try('select public.{{P}}admin_set_password(''pirate123'')');
 select pg_temp.try('select public.{{P}}admin_guard(''x'')');
-select pg_temp.try('select public.{{P}}draw_rarity(''alpha'', 1)');
 reset role;
 select 'catégories intactes', string_agg(name, ', ' order by position) from public.{{P}}categories;
 

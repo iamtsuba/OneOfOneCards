@@ -52,23 +52,14 @@ select public.{{P}}sell_direct(type_id, base_rarity, series, number)->'status'->
 select (select taken from public.{{P}}series_taken s where s.type_id = c2.type_id and s.series = c2.series) as taken_apres, exists (select 1 from public.{{P}}cards c where c.type_id=c2.type_id and c.series=c2.series and c.number=c2.number) as encore_possedee from c2;
 select 'la carte vendue peut être retirée de nouveau (retour dans le pool)', true;
 
-\echo '=== 5. booster doré dans la catégorie 2 (chance forcée)'
+\echo '=== 5. booster Gold tiré au hasard dans la catégorie 2 (chance forcée)'
 update public.{{P}}config set value = 1 where key = 'golden_booster_chance';
 create temp table gold as select public.{{P}}open_booster() r from generate_series(1,5);
 select (r->>'golden') golden, r->>'category_id' cat, jsonb_array_length(r->'cards') nb,
   (select string_agg(c->>'rarity_id', ',' order by c->>'rarity_id') from jsonb_array_elements(r->'cards') c) raretes,
   (select bool_and((c->>'type_id')::int between 9 and 16) from jsonb_array_elements(r->'cards') c) types_cat2
 from gold;
-select 'cartes dorées distinctes', count(*) = count(distinct (c->>'type_id', c->>'series', c->>'number')) from gold, jsonb_array_elements(r->'cards') c;
-
-\echo '=== 5bis. booster doré : chance bonus d''une Unique (1/1), forcée à 100 % pour le test'
-delete from public.{{P}}unique_wins;
-update public.{{P}}config set value = 1 where key = 'golden_unique_chance';
-create temp table gold2 as select public.{{P}}open_booster() r from generate_series(1,3);
-select jsonb_array_length(r->'cards') as nb_cartes_dont_bonus,
-  (select bool_or(c->>'rarity_id' = 'unique') from jsonb_array_elements(r->'cards') c) as contient_une_unique
-from gold2;
-update public.{{P}}config set value = 0 where key = 'golden_unique_chance';
+select 'cartes Gold distinctes', count(*) = count(distinct (c->>'type_id', c->>'series', c->>'number')) from gold, jsonb_array_elements(r->'cards') c;
 
 \echo '=== chaque 1/1 obtenue est journalisée (email, type, date), visible en admin'
 select count(*) as uniques_journalisees from public.{{P}}unique_wins;

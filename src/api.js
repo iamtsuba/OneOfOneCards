@@ -18,8 +18,6 @@ export const openBooster = (category = null) => rpc('open_booster', category ? {
 // Boosters paramétrables : ouvrir un booster d'un autre type que le Standard (stock du joueur), en acheter avec des pièces
 export const openBoosterType = (typeId, category = null) => rpc('open_booster_of_type', { p_type: typeId, ...(category ? { p_category: category } : {}) })
 export const buyBooster = (typeId, quantity = 1, category = null) => rpc('buy_booster', { p_type: typeId, p_quantity: quantity, ...(category ? { p_category: category } : {}) })
-export const openGoldenPack = (category = null) => rpc('open_golden_pack', category ? { p_category: category } : {})
-export const ackRewards = () => rpc('ack_rewards')
 export const getStats = (category = null) => rpc('my_stats', { p_category: category })
 export const getOdds = (category = null, boosterType = null) => rpc('draw_odds', { p_category: category, p_booster_type: boosterType })
 export const typeState = (type, series) => rpc('type_state', { p_type: type, p_series: series })
@@ -175,7 +173,7 @@ export const adminSaveRarity = (pw, r) =>
   })
 // Types de boosters (admin) : créer ou modifier (id nul = création), supprimer, offrir (pseudo vide = tous les joueurs)
 export const adminSaveBoosterType = (pw, id, b) =>
-  rpc('admin_save_booster_type', { p_password: pw, p_id: id, p_name: b.name, p_cards: b.cards, p_color: b.color, p_price: b.price, p_enabled: b.enabled, p_slots: b.slots, p_role: b.role || null, p_glow: glowOf(b.glow) })
+  rpc('admin_save_booster_type', { p_password: pw, p_id: id, p_name: b.name, p_cards: b.cards, p_color: b.color, p_price: b.price, p_enabled: b.enabled, p_slots: b.slots, p_role: b.role || null, p_glow: glowOf(b.glow), ...(b.position != null ? { p_position: b.position } : {}) })
 export const adminDeleteBoosterType = (pw, id) => rpc('admin_delete_booster_type', { p_password: pw, p_id: id })
 export const adminGrantBoosters = (pw, typeId, quantity, username = null) =>
   rpc('admin_grant_boosters', { p_password: pw, p_type: typeId, p_quantity: quantity, p_username: username })
@@ -243,7 +241,6 @@ export function explain(e) {
   if (m.includes('invalid_name')) return 'Le nom est vide ou trop long.'
   if (m.includes('category_closed')) return 'Revente à la banque indisponible : cette collection est terminée. Tu peux toujours vendre la carte sur le marché.'
   if (m.includes('try_again')) return 'Le tirage a été interrompu : réessaie dans un instant.'
-  if (m.includes('no_golden_pack')) return 'Tu n’as pas de pack doré à ouvrir.'
   if (m.includes('no_boosters')) return 'Tu n’as plus de booster pour le moment.'
   if (m.includes('pool_empty')) return 'Toutes les cartes ont déjà été tirées.'
   if (m.includes('username_taken')) return 'Ce pseudo est déjà pris : choisis-en un autre.'
@@ -275,7 +272,7 @@ export function explain(e) {
   if (m.includes('invalid_id')) return 'Identifiant invalide : minuscules, chiffres et _ uniquement, 2 à 20 caractères, débute par une lettre.'
   if (m.includes('invalid_max_series')) return 'Taille de série maximale invalide : un nombre entier d’au moins 1 (pas de plafond ouvert pour une nouvelle rareté).'
   if (m.includes('rarity_protected')) return 'Unique, Alpha et Omega ne peuvent pas être supprimées.'
-  if (m.includes('rarity_in_use')) return 'Cette rareté est utilisée (cartes déjà classées, booster doré ou répartition d’un booster) : elle ne peut pas être supprimée.'
+  if (m.includes('rarity_in_use')) return 'Cette rareté est utilisée (cartes déjà classées ou répartition d’un booster) : elle ne peut pas être supprimée.'
   if (m.includes('name_mismatch')) return 'Le nom tapé ne correspond pas exactement au nom de la collection : rien n’a été supprimé.'
   if (m.includes('card_in_album')) return 'Cette carte est dans ton album : elle ne peut pas être vendue. Retire-la de l’album pour la vendre.'
   if (m.includes('not_enough_cards')) return 'Il n’y a pas assez de cartes vendables dans cette pile (celles de l’album ou en vente sont exclues).'

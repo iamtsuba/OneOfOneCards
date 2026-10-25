@@ -1140,7 +1140,7 @@ function BoosterListItem({ b, on, onClick }) {
       <i className="cat-dot" style={{ '--cat1': b.color, '--cat2': b.color }} />
       <span className="md-item-text">
         <strong>{b.name}</strong>
-        <small>{b.cards} carte{b.cards > 1 ? 's' : ''} · {sale}{!b.enabled ? ' · désactivé' : ''}{b.holders > 0 ? ` · ${fmt(b.holders)} en stock` : ''}</small>
+        <small>n° {b.position} · {b.cards} carte{b.cards > 1 ? 's' : ''} · {sale}{!b.enabled ? ' · désactivé' : ''}{b.holders > 0 ? ` · ${fmt(b.holders)} en stock` : ''}</small>
       </span>
     </button>
   )
@@ -1156,12 +1156,14 @@ export function BoosterEditor({ booster, rarities, run, busy, onCreated, onDelet
     glow: glowOf(booster?.glow),
     name: booster?.name ?? '', cards: booster?.cards ?? 5, color: booster?.color ?? '#e8452e',
     price: booster?.price_coins == null ? '' : String(booster.price_coins), enabled: booster?.enabled ?? true,
+    position: booster?.position == null ? '' : String(booster.position),   // ordre d'affichage sur la page Boosters (vide = à la suite)
   }))
   const [pos, setPos] = useState(() => (booster?.slots ? slotsToPositions(booster.slots, booster.cards) : defaultPositions(rarities, booster?.cards ?? 5)))
   const [grant, setGrant] = useState({ qty: '1', who: '' })
   const choices = pickableRarities(rarities, f.role)
   const noSale = std || f.role === 'subscriber' || f.role === 'card_reward'   // jamais en vente
-  const problem = validateBooster({ name: f.name, cards: f.cards, price: noSale ? '' : f.price, positions: pos, role: f.role }, names, kinds)
+  const badOrder = f.position !== '' && !(Number.isInteger(Number(f.position)) && Number(f.position) >= 1 && Number(f.position) <= 9999)
+  const problem = validateBooster({ name: f.name, cards: f.cards, price: noSale ? '' : f.price, positions: pos, role: f.role }, names, kinds) || (badOrder ? 'L’ordre d’affichage doit être un nombre entier entre 1 et 9999 (ou vide).' : '')
 
   const setEntry = (i, j, patch) => setPos(pos.map((entries, k) => (k === i ? entries.map((e, m) => (m === j ? { ...e, ...patch } : e)) : entries)))
   const removeEntry = (i, j) => setPos(pos.map((entries, k) => (k === i ? entries.filter((_, m) => m !== j) : entries)))
@@ -1169,7 +1171,7 @@ export function BoosterEditor({ booster, rarities, run, busy, onCreated, onDelet
   const setCards = (n) => { setF({ ...f, cards: n }); setPos(resizePositions(pos, n)) }
 
   const save = () => run(
-    (pw) => api.adminSaveBoosterType(pw, booster?.id ?? null, { name: f.name.trim(), cards: f.cards, color: f.color, price: noSale || f.price === '' ? null : Number(f.price), enabled: std || f.role === 'card_reward' ? true : f.enabled, slots: positionsToSlots(pos), role: std ? null : f.role || null, glow: f.glow }),
+    (pw) => api.adminSaveBoosterType(pw, booster?.id ?? null, { name: f.name.trim(), cards: f.cards, color: f.color, price: noSale || f.price === '' ? null : Number(f.price), enabled: std || f.role === 'card_reward' ? true : f.enabled, slots: positionsToSlots(pos), role: std ? null : f.role || null, glow: f.glow, position: f.position === '' ? null : Number(f.position) }),
     (res) => { if (isNew && res?.id != null) onCreated(res.id); return 'Booster enregistré.' },
   )
   const remove = () => {
@@ -1195,6 +1197,10 @@ export function BoosterEditor({ booster, rarities, run, busy, onCreated, onDelet
             </select>
             <i className={`glow-swatch glow-${f.glow}`} aria-hidden="true" />
           </span>
+        </label>
+        <label>Ordre d’affichage
+          <input type="number" inputMode="numeric" min="1" max="9999" step="1" value={f.position} placeholder="à la suite" onChange={(e) => setF({ ...f, position: e.target.value })} />
+          <small className="fine">1 = en premier sur la page Boosters, puis 2, 3… À égalité, le plus ancien passe d’abord.</small>
         </label>
         {!std && (
           <label>Rôle

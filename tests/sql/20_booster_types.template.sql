@@ -102,7 +102,7 @@ create temp table od as select public.{{P}}draw_odds(null, :silver) as j;
 select pg_temp.expect('chances de Silver : 4 cartes, cartes 1 à 3 presque 100 % Commune, carte 4 presque 100 % Rare', (select jsonb_array_length(j -> 'positions') = 4 and j -> 'booster' ->> 'name' = 'Silver' and (j ->> 'cards_per_booster')::int = 4 from od)
   and (select (o ->> 'id') = 'common' and (o ->> 'p')::float > 0.9 from od, jsonb_array_elements(j -> 'positions' -> 0 -> 'mix') o limit 1)
   and (select (o ->> 'id') = 'rare' and (o ->> 'p')::float > 0.9 from od, jsonb_array_elements(j -> 'positions' -> 3 -> 'mix') o limit 1));
-select pg_temp.expect('le booster doré n''est annoncé que pour le Standard', (select j -> 'golden' = 'null'::jsonb or j -> 'golden' is null from od) and (public.{{P}}draw_odds(null, :std) -> 'golden') is not null);
+select pg_temp.expect('le booster Gold tiré au hasard n''est annoncé que pour le Standard', (select j -> 'gold' = 'null'::jsonb or j -> 'gold' is null from od) and (public.{{P}}draw_odds(null, :std) -> 'gold') is not null);
 select pg_temp.expect('type inconnu : pas de répartition, pas d''erreur', (select jsonb_array_length(public.{{P}}draw_odds(null, 999999) -> 'by_rarity') = 0));
 
 \echo '--- suppression : refusée tant que des joueurs en détiennent'
@@ -114,7 +114,7 @@ select pg_temp.expect('plus de détenteur : supprimé, répartitions et stocks a
 \echo '--- droits'
 select pg_temp.expect('joueur connecté : acheter, ouvrir, administrer (avec le mot de passe) ; anonyme : rien ; tables fermées',
   has_function_privilege('authenticated', 'public.{{P}}buy_booster(int, int, int)', 'execute') and has_function_privilege('authenticated', 'public.{{P}}open_booster_of_type(int, int)', 'execute')
-  and has_function_privilege('authenticated', 'public.{{P}}admin_save_booster_type(text, int, text, int, text, int, boolean, jsonb, text, text)', 'execute')
+  and has_function_privilege('authenticated', 'public.{{P}}admin_save_booster_type(text, int, text, int, text, int, boolean, jsonb, text, text, int)', 'execute')
   and not has_function_privilege('anon', 'public.{{P}}buy_booster(int, int, int)', 'execute') and not has_function_privilege('anon', 'public.{{P}}admin_grant_boosters(text, int, int, text)', 'execute')
   and not has_function_privilege('authenticated', 'public.{{P}}draw_booster_cards(uuid, int, int)', 'execute') and not has_function_privilege('authenticated', 'public.{{P}}pick_series(int, int, int, double precision, jsonb)', 'execute')
   and not has_table_privilege('authenticated', 'public.{{P}}booster_types', 'select') and not has_table_privilege('authenticated', 'public.{{P}}user_boosters', 'select') and not has_table_privilege('authenticated', 'public.{{P}}booster_type_slots', 'select'));

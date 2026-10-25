@@ -46,7 +46,7 @@ const ok = (name, cond) => { console.log(cond ? 'OK  ' : 'FAIL', name); if (!con
 const wait = (ms) => act(async () => { await new Promise((r) => setTimeout(r, ms)) })
 
 const sub = { enabled: true, name: 'OneMore', price_cents: 999, active: false, since: null, regen_minutes: 5, booster_name: 'OneMore', booster_color: '#7c3aed', gift_id: 7, gift_name: 'Art Rare assuré', gift_quantity: 1 }
-const base = { id: 'u1', username: 'Tsuba', boosters: 7, bonus_boosters: 0, coins: 0, coins_locked: 0, golden_packs: 0, gold_rewards: [], unseen_rewards: [], max_boosters: 10, regen_minutes: 10, regen_amount: 10,
+const base = { id: 'u1', username: 'Tsuba', boosters: 7, bonus_boosters: 0, coins: 0, coins_locked: 0, gold_rewards: [], max_boosters: 10, regen_minutes: 10, regen_amount: 10,
   active_category_id: 5, next_refill_at: null, cards_taken: 10, total_cards: 100, cgv_version: 3, shop_enabled: false, booster_types: [], standard_booster: { id: 1, name: 'Standard', glow: 'none' }, server_now: new Date().toISOString(), subscription: sub }
 const activeStatus = { ...base, standard_booster: { id: 9, name: 'OneMore', color: '#7c3aed', glow: 'gold' }, regen_minutes: 5, subscription: { ...sub, active: true, since: '2026-10-19T10:00:00+00:00' },
   booster_types: [{ id: 7, name: 'Art Rare assuré', cards: 5, color: '#f59e0b', price: null, quantity: 1 }] }

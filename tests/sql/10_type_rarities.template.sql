@@ -107,18 +107,6 @@ select coalesce(type_name, '(carte secrète)') as carte, count(*) as emplacement
 from public.{{P}}album_view(:cat) group by type_name, type_id order by bool_and(secret), type_id;   -- le Chat Iny est dévoilé : Légende + Unique + Alpha + Omega = 4, toujours en dernier
 delete from public.{{P}}cards where type_id = :tb;
 
-\echo '=== tirage doré par rareté : chaque rareté a SES séries ; hors des séries numérotées, la 1re et la dernière carte sont de la rareté de base'
-create temp table dl as select (d).o_type as t, (d).o_base as b, (d).o_series as s, (d).o_number as n from (select public.{{P}}draw_rarity('legende', :cat) as d from generate_series(1, 400) offset 0) q;
-select count(*) filter (where t is not null) as tirages,
-       count(*) filter (where b <> 'legende') as base_autre_que_legende,
-       count(*) filter (where (t = :ta and s > 20) or (t = :tb and s > 100) or (t = :tc and s > 20) or s < 2) as hors_des_series_de_la_rarete,
-       count(*) filter (where t = :ta) > 0 as type_a_tire, count(*) filter (where t = :tb) > 0 as type_b_tire, count(*) filter (where t = :tc) > 0 as type_c_tire,
-       count(*) filter (where t = :ta and s <= 10 and (n = 1 or n = s)) as extremites_de_series_visibles_jamais_legende,
-       count(*) filter (where t = :ta and s > 10 and (n = 1 or n = s)) > 0 as extremites_de_series_masquees_parfois_legende
-from dl;
-create temp table du as select (d).o_type as t, (d).o_base as b, (d).o_series as s from (select public.{{P}}draw_rarity('unique', :cat) as d from generate_series(1, 300) offset 0) q;
-select count(*) filter (where t is not null) as uniques_tirees, count(distinct (t, b)) as couples_type_rarete_differents, count(*) filter (where s <> 1) as pas_serie_1 from du;
-
 \echo '=== vrais boosters : chaque carte reste dans les séries de SA rareté ; le type B ne donne que de la Légende'
 update public.{{P}}categories set enabled = false where id <> :cat;
 update public.{{P}}profiles set boosters = 60, bonus_boosters = 0 where id = :A;
