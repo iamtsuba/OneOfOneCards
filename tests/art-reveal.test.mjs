@@ -44,7 +44,7 @@ ART_TIMING.hold = 400; ART_TIMING.shrink = 500   // durées raccourcies pour le 
 const until = async (fn, ms = 4000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (fn()) return true; await wait(15) } return fn() }
 
 const R = (id, name, kind = 'range', order = 5) => ({ id, name, kind, sort_order: order, color: '#e8c', color2: '#a4a', text_color: '#fff' })
-const rarityMap = { common: R('common', 'Commune', 'range', 7), art: R('art', 'Art Rare', 'range', 4), alpha: R('alpha', 'Alpha', 'alpha', 2), rare: R('rare', 'Rare', 'range', 6) }
+const rarityMap = { common: R('common', 'Commune', 'range', 7), art: R('art', 'Art Rare', 'range', 4), alpha: R('alpha', 'Alpha', 'alpha', 2), rare: R('rare', 'Rare', 'range', 6), fullart: R('fullart', 'Full Art Rare', 'range', 3) }
 const types = [{ id: 1, category_id: 1, name: 'Chat va ?', image: 'https://exemple.test/chat.png' }, { id: 2, category_id: 1, name: 'Chat noir', image: '🐈‍⬛' }]
 const catalog = { typeMap: Object.fromEntries(types.map((t) => [t.id, t])), categoryMap: { 1: { id: 1, name: 'Chats' } }, types, rarities: Object.values(rarityMap), numberHidden: () => false, cardRef: () => '', cardStyle: () => 'fullart', checklist: (id) => ({ no: id, total: 2, secret: false }) }
 const artCard = { type_id: 1, base_rarity: 'art', series: 50, number: 17, rarity_id: 'art', is_new: false }
@@ -53,9 +53,9 @@ const alphaArt = { type_id: 1, base_rarity: 'art', series: 50, number: 1, rarity
 const plain = { type_id: 1, base_rarity: 'common', series: 40, number: 7, rarity_id: 'common', is_new: false }
 
 // ---------- reconnaissance de l'Art Rare : par le NOM, jamais par l'identifiant ----------
-ok('Art Rare reconnue par son nom (majuscules, accents, espaces, tirets ou sans espace)', ['Art Rare', 'art rare', 'ART RARE', '  Art   Rare ', 'Art-Rare', 'ArtRare', 'Árt Rare', 'art_rare'].every((n) => isArtRare({ kind: 'range', name: n })))
-ok('les autres raretés ne la déclenchent pas', ['Rare', 'Super Rare', 'Ultra Rare', 'Commune', 'Peu Commune', 'Art', 'Art Rarement', 'Rare Art', '', null, undefined].every((n) => !isArtRare({ kind: 'range', name: n })) && !isArtRare(null) && !isArtRare(undefined))
-ok('seule une rareté ordinaire peut l\'être (pas une rareté spéciale qui s\'appellerait ainsi)', !isArtRare({ kind: 'alpha', name: 'Art Rare' }) && !isArtRare({ kind: 'unique', name: 'Art Rare' }))
+ok('Art Rare et Full Art Rare reconnues par leur nom (majuscules, accents, espaces, tirets ou sans espace)', ['Art Rare', 'art rare', 'ART RARE', '  Art   Rare ', 'Art-Rare', 'ArtRare', 'Árt Rare', 'art_rare', 'Full Art Rare', 'full art rare', 'FULL-ART RARE', 'FullArtRare', '  Full   Art  Rare '].every((n) => isArtRare({ kind: 'range', name: n })))
+ok('les autres raretés ne la déclenchent pas', ['Rare', 'Super Rare', 'Ultra Rare', 'Commune', 'Peu Commune', 'Art', 'Art Rarement', 'Rare Art', 'Full Art', 'Super Full Art Rare', 'Full Art Rare Plus', '', null, undefined].every((n) => !isArtRare({ kind: 'range', name: n })) && !isArtRare(null) && !isArtRare(undefined))
+ok('seule une rareté ordinaire peut l\'être (pas une rareté spéciale qui s\'appellerait ainsi)', !isArtRare({ kind: 'alpha', name: 'Art Rare' }) && !isArtRare({ kind: 'unique', name: 'Art Rare' }) && !isArtRare({ kind: 'unique', name: 'Full Art Rare' }))
 ok('l\'identifiant ne compte pas : un identifiant « common » nommé Art Rare est reconnue', isArtRare({ id: 'common', kind: 'range', name: 'Art Rare' }) && !isArtRare({ id: 'artrare', kind: 'range', name: 'Commune' }))
 
 // ---------- l'ouverture réelle ----------
@@ -128,6 +128,16 @@ const fireworks = (h) => h.querySelectorAll('canvas.fireworks').length
   const m = await mountReveal([plain, artCard], 1)
   ok('l\'Art Rare est animée même si elle n\'est pas la première carte du booster (carte 2 sur 2)', !!intro() && /carte 2 sur 2/.test(m.host.textContent))
   await until(() => !intro())
+  await m.unmount()
+}
+{
+  // La carte 1/1 d'une Full Art Rare reste une Full Art Rare (rareté affichée « fullart » : jamais Unique) et joue la même animation que l'Art Rare
+  const fullart11 = { type_id: 1, base_rarity: 'fullart', series: 1, number: 1, rarity_id: 'fullart', is_new: true }
+  const m = await mountReveal([fullart11])
+  ok('Full Art Rare 1/1 : la même animation plein écran que l\'Art Rare (illustration plein écran, carte cachée, pas de feux d\'artifice encore)', !!intro() && cardEl(m.host).style.visibility === 'hidden' && fireworks(m.host) === 0)
+  await until(() => !intro())
+  ok('puis la carte apparaît (éclat doré) et les feux d\'artifice DORÉS partent', cardEl(m.host).className.includes('art-landed') && fireworks(m.host) === 1)
+  ok('la carte est annoncée « Full Art Rare » (pas Unique) avec son numéro 1 sur 1', /Full Art Rare 1 sur 1/.test(cardEl(m.host).querySelector('.card').getAttribute('aria-label')) && !/Unique/.test(cardEl(m.host).querySelector('.card').getAttribute('aria-label')))
   await m.unmount()
 }
 {

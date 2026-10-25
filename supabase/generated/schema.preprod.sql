@@ -305,7 +305,7 @@ create index if not exists pp_o1ocards_unique_wins_user_idx on public.pp_o1ocard
 create or replace function public.pp_o1ocards_log_unique_win()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
-  if new.series = 1 and public.pp_o1ocards_number_visible(new.type_id, new.base_rarity, 1) then   -- une série de 1 carte à numéro visible : la 1/1 (rareté Unique)
+  if new.series = 1 and public.pp_o1ocards_number_visible(new.type_id, new.base_rarity, 1) and not public.pp_o1ocards_is_fullart_rarity(new.base_rarity) then   -- une série de 1 carte à numéro visible : la 1/1 (rareté Unique)
     insert into public.pp_o1ocards_unique_wins (user_id, type_id, base_rarity) values (new.owner_id, new.type_id, new.base_rarity);
   end if;
   return new;
@@ -773,12 +773,20 @@ $$;
 -- Rareté AFFICHÉE de la carte n/m de la rareté de base p_base du type p_type. Priorité :
 -- Unique (série 1) > Alpha (1/m) > Omega (m/m) > rareté de base. Unique, Alpha et Omega n'existent que pour les séries dont le numéro
 -- est visible : sinon la carte 1/1, 1/m ou m/m garde la rareté de base, comme les autres (une rareté sans numéros visibles n'a jamais d'Unique).
+-- « Full Art Rare » : reconnue par son NOM (majuscules, espaces, tirets ignorés), rareté ordinaire seulement. Sa carte 1/1 est une Full Art Rare, jamais une Unique.
+create or replace function public.pp_o1ocards_is_fullart_rarity(p_id text)
+returns boolean language sql stable set search_path = public as $$
+  select exists (select 1 from public.pp_o1ocards_rarities r where r.id = p_id and r.kind = 'range' and lower(regexp_replace(r.name, '[^A-Za-z]', '', 'g')) = 'fullartrare')
+$$;
+
 create or replace function public.pp_o1ocards_rarity_id(n int, m int, p_type int, p_base text)
 returns text language plpgsql stable set search_path = public as $$
 declare v text;
 begin
-  if m = 1 and public.pp_o1ocards_number_visible(p_type, p_base, 1) then
-    select id into v from public.pp_o1ocards_rarities where kind = 'unique' limit 1;
+  if m = 1 then   -- série de 1 carte : Unique si son numéro est visible, sauf pour une Full Art Rare (exception) ; sinon la carte garde sa rareté de base
+    if public.pp_o1ocards_number_visible(p_type, p_base, 1) and not public.pp_o1ocards_is_fullart_rarity(p_base) then
+      select id into v from public.pp_o1ocards_rarities where kind = 'unique' limit 1;
+    end if;
   elsif n = 1 and public.pp_o1ocards_number_visible(p_type, p_base, m) then
     select id into v from public.pp_o1ocards_rarities where kind = 'alpha' limit 1;
   elsif n = m and public.pp_o1ocards_number_visible(p_type, p_base, m) then
@@ -865,12 +873,12 @@ begin
   --  (1/m = Alpha et m/m = Omega), soit toutes (1..m) dans une série à numéro masqué.
   g_lo := case when rar.kind in ('alpha', 'omega') then 2 else 1 end;   -- une rareté ordinaire commence à la série 1 : la 1/1 d'une rareté à numéro masqué est une carte ordinaire
   with cf as materialized (
-    select ty.id as type_id, c.rarity_id as base, c.smax, c.numbered
+    select ty.id as type_id, c.rarity_id as base, c.smax, c.numbered, public.pp_o1ocards_is_fullart_rarity(c.rarity_id) as fa
     from public.pp_o1ocards_types ty
     cross join lateral public.pp_o1ocards_type_config(ty.id) c
     where ty.category_id = p_category
       and (rar.kind in ('unique', 'alpha', 'omega') or c.rarity_id = p_rarity)
-      and (rar.kind <> 'unique' or c.numbered >= 1)   -- pas d'Unique sur une rareté sans numéro visible
+      and (rar.kind <> 'unique' or (c.numbered >= 1 and not public.pp_o1ocards_is_fullart_rarity(c.rarity_id)))   -- pas d'Unique sur une rareté sans numéro visible ni sur une Full Art Rare
       and not (ty.id = any(coalesce(p_exclude, '{}'::int[])))   -- jamais un type déjà tiré dans ce booster
   )
   select array_agg(q.type_id order by q.type_id, q.base, q.m), array_agg(q.base order by q.type_id, q.base, q.m),
@@ -879,7 +887,7 @@ begin
          array_agg(q.avail * power(q.m::double precision, e) order by q.type_id, q.base, q.m)
   into ts, bs, ms, av, hs, ws
   from (
-    select cf.type_id, cf.base, g as m, (g > cf.numbered) as hid,
+    select cf.type_id, cf.base, g as m, (g > cf.numbered or (g = 1 and cf.fa)) as hid,   -- la 1/1 d'une Full Art Rare est une carte ordinaire de sa rareté
       case
         when rar.kind = 'unique' then
           case when not exists (select 1 from public.pp_o1ocards_cards c where c.type_id = cf.type_id and c.base_rarity = cf.base and c.series = 1 and c.number = 1) then 1 else 0 end
@@ -888,7 +896,7 @@ begin
         when rar.kind = 'omega' then
           case when not exists (select 1 from public.pp_o1ocards_cards c where c.type_id = cf.type_id and c.base_rarity = cf.base and c.series = g and c.number = g) then 1 else 0 end
         else
-          case when g <= cf.numbered
+          case when not (g > cf.numbered or (g = 1 and cf.fa))
                then greatest(g - 2 - (select count(*)::int from public.pp_o1ocards_cards c where c.type_id = cf.type_id and c.base_rarity = cf.base and c.series = g and c.number between 2 and g - 1), 0)
                else g - (select count(*)::int from public.pp_o1ocards_cards c where c.type_id = cf.type_id and c.base_rarity = cf.base and c.series = g)
           end
@@ -1386,7 +1394,7 @@ returns table (type_id int, base text, g int, remaining int, w double precision,
 language sql stable security definer set search_path = public as $$
   select ty.id, cf.rarity_id, g, (g - coalesce(t.taken, 0))::int,
          (g - coalesce(t.taken, 0)) * power(g::double precision, p_e),
-         (g = 1 and cf.numbered >= 1)   -- la 1/1 d'une rareté à numéro VISIBLE est une Unique ; sinon une carte ordinaire
+         (g = 1 and cf.numbered >= 1 and public.pp_o1ocards_is_fullart_rarity(cf.rarity_id) is not true)   -- la 1/1 d'une rareté à numéro VISIBLE est une Unique (sauf Full Art Rare) ; sinon une carte ordinaire
   from public.pp_o1ocards_types ty
   cross join lateral public.pp_o1ocards_type_config(ty.id) cf
   cross join lateral generate_series(1, cf.smax) g
@@ -1452,10 +1460,10 @@ create or replace function public.pp_o1ocards_pick_cfg(p_cat int)
 returns table (tid int, base text, smax int, uniq_free int, base_free bigint)
 language sql stable security definer set search_path = public as $$
   select c.tid, c.base, c.smax,
-         (case when c.numbered >= 1 and 1 > coalesce(t1.taken, 0) then 1 else 0 end),
+         (case when c.numbered >= 1 and not c.fa and 1 > coalesce(t1.taken, 0) then 1 else 0 end),
          c.smax::bigint * (c.smax + 1) / 2 - coalesce(tt.total, 0)
-           - (case when c.numbered >= 1 and 1 > coalesce(t1.taken, 0) then 1 else 0 end)
-  from (select ty.id as tid, cf.rarity_id as base, cf.smax, cf.numbered
+           - (case when c.numbered >= 1 and not c.fa and 1 > coalesce(t1.taken, 0) then 1 else 0 end)
+  from (select ty.id as tid, cf.rarity_id as base, cf.smax, cf.numbered, public.pp_o1ocards_is_fullart_rarity(cf.rarity_id) as fa
         from public.pp_o1ocards_types ty cross join lateral public.pp_o1ocards_type_config(ty.id) cf where ty.category_id = p_cat) c
   left join (select st.type_id, st.base_rarity, sum(st.taken) as total from public.pp_o1ocards_series_taken st group by st.type_id, st.base_rarity) tt
          on tt.type_id = c.tid and tt.base_rarity = c.base
@@ -1605,7 +1613,7 @@ begin
     got := got + 1;
     v_drawn := v_drawn || to_jsonb(tid);
     v_seen := (select coalesce(jsonb_object_agg(r.id, v_drawn), '{}'::jsonb) from public.pp_o1ocards_rarities r);
-    v_key := coalesce(case when m = 1 and public.pp_o1ocards_number_visible(tid, v_base, 1) then v_uid else v_base end, '');
+    v_key := coalesce(case when m = 1 and public.pp_o1ocards_number_visible(tid, v_base, 1) and not public.pp_o1ocards_is_fullart_rarity(v_base) then v_uid else v_base end, '');
     v_seen_r := jsonb_set(v_seen_r, array[v_key], coalesce(v_seen_r -> v_key, '[]'::jsonb) || to_jsonb(tid), true);
     res := res || jsonb_build_array(jsonb_build_object(
       'type_id', tid, 'base_rarity', v_base, 'series', m, 'number', num, 'rarity_id', public.pp_o1ocards_rarity_id(num, m, tid, v_base), 'is_new', v_new));
@@ -1968,7 +1976,7 @@ begin
   ),
   cr0 as (
     select m.type_id, m.base_rarity, m.series, m.number, m.obtained_at, m.tpos, pi.hidden,
-           case when m.series = 1 and not pi.hidden then v_unique
+           case when m.series = 1 then (case when not pi.hidden and not public.pp_o1ocards_is_fullart_rarity(m.base_rarity) then v_unique else m.base_rarity end)   -- 1/1 : Unique, sauf Full Art Rare ou numéro masqué
                 when not pi.hidden and m.number = 1 then v_alpha
                 when not pi.hidden and m.number = m.series then v_omega
                 else m.base_rarity end as rid,
@@ -2040,7 +2048,7 @@ begin
   --   rareté de base : les cartes 2..m-1 des séries visibles (somme de m-2 pour m = 2..kk) + toutes les cartes des séries
   --   masquées (somme de m pour m = kk+1..sm, la série 1 comprise quand aucune n'est visible). La somme des raretés égale toujours le nombre de cartes.
   with cf as materialized (
-    select ty.id as type_id, c.rarity_id as base, c.smax as sm, least(c.numbered::bigint, c.smax)::int as kk
+    select ty.id as type_id, c.rarity_id as base, c.smax as sm, least(c.numbered::bigint, c.smax)::int as kk, public.pp_o1ocards_is_fullart_rarity(c.rarity_id) as fa
     from public.pp_o1ocards_types ty
     cross join lateral public.pp_o1ocards_type_config(ty.id) c
     where ty.category_id = v_cat
@@ -2048,11 +2056,12 @@ begin
   totals as (
     select base as id,
            (case when kk >= 2 then ((kk - 2)::bigint * (kk - 1)) / 2 else 0 end
+            + case when fa and kk >= 1 then 1 else 0 end   -- la 1/1 d'une Full Art Rare est une carte de sa rareté
             + case when sm >= kk + 1
                    then (sm::bigint * (sm + 1)) / 2 - (kk::bigint * (kk + 1)) / 2
                    else 0 end)::bigint as n
     from cf
-    union all select v_unique, 1::bigint from cf where v_unique is not null and kk >= 1
+    union all select v_unique, 1::bigint from cf where v_unique is not null and kk >= 1 and not fa
     union all select v_alpha,  greatest(kk - 1, 0)::bigint from cf where v_alpha is not null
     union all select v_omega,  greatest(kk - 1, 0)::bigint from cf where v_omega is not null
   ),
@@ -2151,12 +2160,13 @@ begin
   -- s = une ligne par (type, rareté de base, série) avec le nombre de cartes restantes ; vis = numéro visible (séries 1..numbered) :
   -- Alpha (1/m) et Omega (m/m) existent seulement alors. parts = les cartes par rareté AFFICHÉE ; is_first = carte 1/1 (rareté Unique).
   with cf as materialized (
-    select ty.id as type_id, c.rarity_id as base, c.smax, c.numbered
+    select ty.id as type_id, c.rarity_id as base, c.smax, c.numbered, public.pp_o1ocards_is_fullart_rarity(c.rarity_id) as fa
     from public.pp_o1ocards_types ty cross join lateral public.pp_o1ocards_type_config(ty.id) c
     where ty.category_id = v_cat
   ),
+  -- vis : numéro visible ; la 1/1 d'une Full Art Rare est une carte ordinaire (jamais Unique), donc non « visible » ici
   s as (
-    select cf.type_id, cf.base as rid, g as m, (g <= cf.numbered) as vis, (g - coalesce(t.taken, 0)) as avail,
+    select cf.type_id, cf.base as rid, g as m, (g <= cf.numbered and not (g = 1 and cf.fa)) as vis, (g - coalesce(t.taken, 0)) as avail,
            (case when a.type_id is not null then 1 else 0 end) as a_taken,
            (case when o.type_id is not null then 1 else 0 end) as o_taken
     from cf
@@ -2784,10 +2794,10 @@ begin
       -- numéro masqué de 2 cartes ou plus (dont toutes les cartes gardent la rareté de base)
       select ts.id as type_id, c.rarity_id
       from ts cross join lateral public.pp_o1ocards_type_config(ts.id) c
-      where ts.revealed and (c.smax >= 3 or c.numbered < c.smax)
+      where ts.revealed and (c.smax >= 3 or c.numbered < c.smax or (c.numbered >= 1 and public.pp_o1ocards_is_fullart_rarity(c.rarity_id)))
       union
       select ts.id, r.id from ts join public.pp_o1ocards_rarities r on r.kind = 'unique'
-      where ts.revealed and exists (select 1 from public.pp_o1ocards_type_config(ts.id) c where c.numbered >= 1)
+      where ts.revealed and exists (select 1 from public.pp_o1ocards_type_config(ts.id) c where c.numbered >= 1 and not public.pp_o1ocards_is_fullart_rarity(c.rarity_id))
       union
       -- Alpha et Omega n'existent que sur les séries à numéro visible (au moins une série visible de 2 cartes ou plus)
       select ts.id, r.id from ts join public.pp_o1ocards_rarities r on r.kind in ('alpha', 'omega')
@@ -3032,9 +3042,9 @@ $$;
 create or replace function public.pp_o1ocards_type_album_slots(p_type int)
 returns table (rid text)
 language sql stable security definer set search_path = public as $$
-  select c.rarity_id from public.pp_o1ocards_type_config(p_type) c where c.smax >= 3 or c.numbered < c.smax
+  select c.rarity_id from public.pp_o1ocards_type_config(p_type) c where c.smax >= 3 or c.numbered < c.smax or (c.numbered >= 1 and public.pp_o1ocards_is_fullart_rarity(c.rarity_id))
   union
-  select r.id from public.pp_o1ocards_rarities r where r.kind = 'unique' and exists (select 1 from public.pp_o1ocards_type_config(p_type) c where c.numbered >= 1)
+  select r.id from public.pp_o1ocards_rarities r where r.kind = 'unique' and exists (select 1 from public.pp_o1ocards_type_config(p_type) c where c.numbered >= 1 and not public.pp_o1ocards_is_fullart_rarity(c.rarity_id))
   union
   select r.id from public.pp_o1ocards_rarities r
   where r.kind in ('alpha', 'omega') and exists (select 1 from public.pp_o1ocards_type_config(p_type) c where least(c.numbered::bigint, c.smax) >= 2)
@@ -3073,7 +3083,7 @@ language sql stable security definer set search_path = public as $$
          case when z.g = 1 and z.vis then 0 when z.vis then greatest(z.avail - z.a_free - z.o_free, 0) else z.avail end,
          z.avail
   from (
-    select ty.id as type_id, cf.rarity_id as base, g, (g <= cf.numbered) as vis, (g - coalesce(t.taken, 0))::int as avail,
+    select ty.id as type_id, cf.rarity_id as base, g, (g <= cf.numbered and not (g = 1 and public.pp_o1ocards_is_fullart_rarity(cf.rarity_id))) as vis, (g - coalesce(t.taken, 0))::int as avail,
            (case when g > 1 and g <= cf.numbered and a.type_id is null then 1 else 0 end) as a_free,
            (case when g > 1 and g <= cf.numbered and o.type_id is null then 1 else 0 end) as o_free
     from public.pp_o1ocards_types ty
