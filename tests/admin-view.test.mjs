@@ -104,7 +104,9 @@ ok('onglet Raretés : plus de mention des seuils par collection', rar !== null &
 ok('onglet Réglages : s’affiche', clean(show(M.ConfigTab, { data })))
 ok('onglet Infos légales : s’affiche', clean(show(M.LegalTab, { data })))
 const uw = show(M.UniqueWinsTab, { data })
-ok('onglet 1/1 gagnées : s’affiche avec l’email du joueur', clean(uw) && /joueur@example\.com/.test(uw))
+ok('onglet 1/1 gagnées : le pseudo en titre, puis l’email d’un ancien compte (s’il existe), la carte et la date', clean(uw) && /<strong>Tom<\/strong>/.test(uw) && /joueur@example\.com · Chat va \?/.test(uw))
+const uwP = show(M.UniqueWinsTab, { data: { ...data, unique_wins: [{ id: 2, email: 'bea@pseudo.1o1cards.cc', won_at: '2026-10-19T10:00:00+00:00', type_id: 17, username: 'Bea', type_name: 'Chat va ?', category_id: 3 }, { id: 3, email: null, won_at: '2026-10-19T11:00:00+00:00', type_id: 17, username: null, type_name: 'Chat va ?', category_id: 3 }] } })
+ok('onglet 1/1 gagnées : un compte par pseudo n\'affiche jamais son adresse technique (pseudo seul), un pseudo inconnu reste lisible', /<strong>Bea<\/strong>/.test(uwP) && !/pseudo\.1o1cards\.cc|bea@/.test(uwP) && /<strong>pseudo inconnu<\/strong>/.test(uwP) && !/null|undefined/.test(uwP))
 ok('onglet Sécurité : s’affiche', clean(show(M.SecurityTab, { onChange: async () => true })))
 
 // ---------- Console pour PC (≥ 1100 px) : navigation à gauche, liste à gauche, détail en haut à droite, raretés dessous ----------

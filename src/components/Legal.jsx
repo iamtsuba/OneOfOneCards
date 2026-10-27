@@ -92,8 +92,9 @@ export function LegalDocument({ legal = {}, config = {} }) {
 
       <h3>10. Données personnelles</h3>
       <p>
-        Les données nécessaires (adresse email, pseudo, historique des cartes et des achats, preuve d’acceptation des présentes
-        conditions) sont utilisées pour fournir le jeu et gérer les achats. Les données de paiement sont traitées par Stripe :
+        Les données nécessaires (pseudo, historique des cartes et des achats, preuve d’acceptation des présentes conditions et, pour
+        les comptes créés avec un email, cette adresse) sont utilisées pour fournir le jeu et gérer les achats. Le compte se crée et
+        se connecte avec un pseudo et un mot de passe, sans adresse email. Les données de paiement sont traitées par Stripe :
         l’éditeur n’a pas accès au numéro de carte. Pour exercer tes droits d’accès, de rectification ou d’effacement :
         <V value={mail}> {mail}</V>.
       </p>

@@ -19,7 +19,7 @@ let totalBad = 0
 const waitUp = async (port) => { for (let i = 0; i < 160; i++) { try { await fetch(`http://127.0.0.1:${port}/`, { method: 'OPTIONS' }); return } catch { await new Promise((r) => setTimeout(r, 500)) } } throw new Error('fonction non démarrée ' + port) }
 
 async function runEnv(E) {
-  const state = { confirmSession: null, stripeGets: [], subName: 'OneMore', proMember: false, proCalls: [], revokeCalls: [], cfg: { shop_enabled: 1, stripe_pack_boosters: 10, stripe_pack_price_cents: 199, cgv_version: 1, subscription_enabled: 0, subscription_price_cents: 999 }, legal: { seller_name: 'Thomas Test', seller_address: '1 rue du Test, 69000 Lyon', seller_email: 'contact@example.com', consent_cgv_text: 'CGV OK', consent_withdrawal_text: 'Je renonce' }, consents: [], consentFail: false, rpcCalls: [], paths: [], stripeCalls: [], seen: new Set(), stripeFail: false, rpcFail: false }
+  const state = { userEmail: 'thomas@example.com', confirmSession: null, stripeGets: [], subName: 'OneMore', proMember: false, proCalls: [], revokeCalls: [], cfg: { shop_enabled: 1, stripe_pack_boosters: 10, stripe_pack_price_cents: 199, cgv_version: 1, subscription_enabled: 0, subscription_price_cents: 999 }, legal: { seller_name: 'Thomas Test', seller_address: '1 rue du Test, 69000 Lyon', seller_email: 'contact@example.com', consent_cgv_text: 'CGV OK', consent_withdrawal_text: 'Je renonce' }, consents: [], consentFail: false, rpcCalls: [], paths: [], stripeCalls: [], seen: new Set(), stripeFail: false, rpcFail: false }
 
   // ---- faux Supabase + faux Stripe
   const mock = http.createServer((req, res) => {
@@ -30,7 +30,7 @@ async function runEnv(E) {
       const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)) }
       if (req.url.startsWith('/auth/v1/user')) {
         if (req.headers.authorization === 'Bearer good-token')
-          return send(200, { id: 'aaaaaaaa-1111-2222-3333-444444444444', email: 'thomas@example.com', aud: 'authenticated', role: 'authenticated', app_metadata: {}, user_metadata: {}, created_at: new Date().toISOString() })
+          return send(200, { id: 'aaaaaaaa-1111-2222-3333-444444444444', email: state.userEmail, aud: 'authenticated', role: 'authenticated', app_metadata: {}, user_metadata: {}, created_at: new Date().toISOString() })
         return send(401, { msg: 'invalid JWT' })
       }
       if (req.url.startsWith(`/rest/v1/${E.prefix}config`)) return send(200, Object.entries(state.cfg).map(([key, value]) => ({ key, value })))
@@ -121,6 +121,12 @@ async function runEnv(E) {
   ok('code fiscal envoyé par défaut (txcd_10201000)', call.form['line_items[0][price_data][product_data][tax_code]'] === 'txcd_10201000')
   ok('Managed Payments laissé au réglage du compte par défaut', !('managed_payments[enabled]' in call.form))
   ok('email prérempli + mode paiement', call.form.customer_email === 'thomas@example.com' && call.form.mode === 'payment')
+  // compte créé avec un pseudo (adresse technique) : elle n'est PAS donnée à Stripe, qui demandera le vrai email à l'acheteur
+  state.userEmail = 'Tom@Pseudo.1o1cards.cc'
+  await post(CO, { Authorization: 'Bearer good-token' })
+  const callP = state.stripeCalls.at(-1)
+  ok('boutique, compte par pseudo : aucune adresse prérenseignée chez Stripe, le reste de la commande est identique (paiement, 199 centimes, joueur identifié)', !('customer_email' in callP.form) && callP.form.mode === 'payment' && callP.form['line_items[0][price_data][unit_amount]'] === '199' && callP.form['metadata[user_id]'] === 'aaaaaaaa-1111-2222-3333-444444444444')
+  state.userEmail = 'thomas@example.com'
   await post(`http://127.0.0.1:${E.port + 2}/`, { Authorization: 'Bearer good-token' })
   const alt = state.stripeCalls.at(-1)
   ok('STRIPE_MANAGED_PAYMENTS=false -> managed_payments[enabled]=false', alt.form['managed_payments[enabled]'] === 'false')
@@ -229,6 +235,12 @@ async function runEnv(E) {
   const rec2 = state.consents.at(-1)
   ok('preuve de consentement enregistrée (une de plus), liée à la session Stripe', state.consents.length === ncs + 1 && rec2.stripe_session_id === 'cs_test_abc' && rec2.cgv_version === 1 && rec2.user_id === UID)
   ok('preuve : textes acceptés dont « achat unique, à vie, sans renouvellement », IP, navigateur, prix, aucun booster', /CGV OK\nJe renonce\nAchat unique du pass OneMore : avantages à vie, sans abonnement ni renouvellement\./.test(rec2.statement) && rec2.ip === '203.0.113.9' && rec2.user_agent === 'ProAgent/2.0' && rec2.amount_cents === 999 && rec2.boosters === null && rec2.currency === 'eur')
+  // pass Pro, compte par pseudo : même règle (aucune adresse technique donnée à Stripe)
+  state.userEmail = 'tom@pseudo.1o1cards.cc'; await subPost()
+  const scP = state.stripeCalls.at(-1)
+  ok('pass Pro, compte par pseudo : aucune adresse prérenseignée chez Stripe, achat unique et joueur identifiés comme d\'habitude', !('customer_email' in scP.form) && scP.form.mode === 'payment' && scP.form['metadata[kind]'] === 'lifetime' && scP.form['metadata[user_id]'] === UID)
+  state.userEmail = 'thomas@example.com'; await subPost()
+  ok('pass Pro, ancien compte (vrai email) : l\'adresse reste prérenseignée', state.stripeCalls.at(-1).form.customer_email === 'thomas@example.com')
   state.subName = 'Premium'; await subPost()
   ok('le nom vient du réglage texte de l\'admin (« Premium »)', state.stripeCalls.at(-1).form['line_items[0][price_data][product_data][name]'].includes('Pass Premium à vie'))
   state.subName = 'OneMore'

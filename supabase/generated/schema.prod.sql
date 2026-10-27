@@ -806,7 +806,10 @@ create unique index if not exists o1ocards_profiles_username_uq on public.o1ocar
 -- Le pseudo d'un compte en cours de création est déjà réservé (inscription non encore confirmée par email)
 create or replace function public.o1ocards_username_available(p_username text)
 returns boolean language sql stable security definer set search_path = public as $$
+  -- Pseudo d'un NOUVEAU compte : 2 à 24 caractères, lettres sans accent, chiffres et _ - . (le point ni au début, ni à la fin, ni doublé) : c'est ce qui permet la connexion par pseudo sans email
   select char_length(trim(coalesce(p_username, ''))) between 2 and 24
+     and trim(p_username) ~ '^[A-Za-z0-9_.-]+$'
+     and trim(p_username) !~ '^\.|\.$|\.\.'
      and not exists (select 1 from public.o1ocards_profiles pr where lower(pr.username) = lower(trim(p_username)))
      and not exists (select 1 from auth.users a where lower(trim(a.raw_user_meta_data ->> 'username')) = lower(trim(p_username))
                        and not exists (select 1 from public.o1ocards_profiles pr2 where pr2.id = a.id))

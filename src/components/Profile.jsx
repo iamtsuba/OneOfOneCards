@@ -7,18 +7,73 @@ import Card from './Card'
 import LegalSheet from './Legal'
 import Admin from './Admin'
 import { ProPanel, ProConsent } from './Pro'
+import { isPseudoEmail } from '../pseudo'
 
-// Carte d'identité : le pseudo est unique et définitif, il n'y a donc pas de bouton pour le changer
+// Carte d'identité : le pseudo est unique et définitif, il n'y a donc pas de bouton pour le changer.
+// L'adresse technique d'un compte par pseudo n'est jamais montrée ; l'email d'un ancien compte l'est encore.
 export function IdentityCard({ username, email }) {
   return (
     <div className="panel">
       <div className="identity">
         <div>
           <p className="identity-name">{username}</p>
-          <p className="muted">{email}</p>
+          {email && !isPseudoEmail(email) && <p className="muted">{email}</p>}
           <p className="fine">Ton pseudo est unique et définitif.</p>
         </div>
       </div>
+    </div>
+  )
+}
+
+// Changer son mot de passe (sans email, il n'y a pas de « mot de passe oublié » : c'est le seul moyen de le renouveler)
+export function PasswordCard() {
+  const [open, setOpen] = useState(false)
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [done, setDone] = useState(false)
+  async function save(e) {
+    e.preventDefault()
+    setError(''); setDone(false)
+    if (password.length < 6) { setError('Le mot de passe doit contenir au moins 6 caractères.'); return }
+    if (password !== confirm) { setError('Les deux mots de passe ne sont pas identiques.'); return }
+    setBusy(true)
+    try {
+      const { error: err } = await supabase.auth.updateUser({ password })
+      if (err) throw err
+      setPassword(''); setConfirm(''); setDone(true); setOpen(false)
+    } catch (err) {
+      setError(explain(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="panel password-card">
+      {!open ? (
+        <>
+          <button type="button" className="btn ghost" onClick={() => { setOpen(true); setDone(false) }}>Changer mon mot de passe</button>
+          {done && <p className="msg info" role="status">Mot de passe modifié.</p>}
+        </>
+      ) : (
+        <form className="form" onSubmit={save}>
+          <label>
+            Nouveau mot de passe
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={6} autoComplete="new-password" required />
+          </label>
+          <label>
+            Confirme le mot de passe
+            <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} minLength={6} autoComplete="new-password" required />
+            <small className="field-hint">Pas d’email : un mot de passe oublié ne peut pas être récupéré. Note-le bien.</small>
+          </label>
+          {error && <p className="msg error" role="alert">{error}</p>}
+          <div className="row">
+            <button className="btn accent" disabled={busy}>{busy ? 'Un instant…' : 'Enregistrer'}</button>
+            <button type="button" className="btn ghost" onClick={() => { setOpen(false); setError(''); setPassword(''); setConfirm('') }}>Annuler</button>
+          </div>
+        </form>
+      )}
     </div>
   )
 }
@@ -87,6 +142,7 @@ export default function Profile({ session }) {
       <h1 className="page-title">Profil</h1>
 
       <IdentityCard username={status?.username} email={session.user.email} />
+      <PasswordCard />
       {error && <p className="msg error" role="alert">{error}</p>}
       {notice && <p className="msg info" role="status">{notice}</p>}
 

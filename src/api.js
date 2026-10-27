@@ -291,12 +291,11 @@ export function explain(e) {
   if (m.includes('offer_unavailable')) return 'Cette offre n’est plus disponible.'
   if (/Could not find the function|schema cache|does not exist|relation .* not/i.test(m))
     return 'La base de données n’est pas à jour : exécute supabase/schema.sql dans le SQL Editor de Supabase.'
-  if (/Invalid login credentials/i.test(m)) return 'Email ou mot de passe incorrect.'
-  if (/already registered|already been registered/i.test(m)) return 'Un compte existe déjà avec cet email.'
-  if (/Email not confirmed/i.test(m)) return 'Confirme ton adresse email avant de te connecter.'
+  if (/Invalid login credentials/i.test(m)) return 'Pseudo ou mot de passe incorrect.'
+  if (/already registered|already been registered/i.test(m)) return 'Ce pseudo est déjà pris : choisis-en un autre.'
   if (/at least \d+ characters/i.test(m)) return 'Le mot de passe doit contenir au moins 6 caractères.'
   if (/rate limit|too many/i.test(m)) return 'Trop de tentatives : réessaie dans quelques minutes.'
-  if (/valid email|invalid email/i.test(m)) return 'Adresse email invalide.'
+  if (/Email address .* is invalid|valid email|invalid email|email_address_invalid/i.test(m)) return 'Ce pseudo n’est pas accepté : utilise des lettres sans accent, des chiffres et _ - .'
   if (/Failed to fetch|NetworkError/i.test(m)) return 'Connexion impossible : vérifie ton réseau.'
   return m
 }

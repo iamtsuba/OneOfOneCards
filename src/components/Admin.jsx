@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import * as api from '../api'
+import { isPseudoEmail } from '../pseudo'
 import { explain } from '../api'
 import { useGame, fmt, fmtDate } from '../game'
 import { IS_PREPROD } from '../env'
@@ -1437,8 +1438,8 @@ export function UniqueWinsTab({ data }) {
         wins.map((w) => (
           <div key={w.id} className="admin-card slim">
             <div>
-              <strong>{w.email}</strong>
-              <p className="fine">{w.username ?? 'pseudo inconnu'} · {w.type_name} · {fmtDate(w.won_at)}</p>
+              <strong>{w.username ?? 'pseudo inconnu'}</strong>
+              <p className="fine">{w.email && !isPseudoEmail(w.email) ? `${w.email} · ` : ''}{w.type_name} · {fmtDate(w.won_at)}</p>
             </div>
           </div>
         ))

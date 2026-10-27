@@ -120,7 +120,8 @@ Deno.serve(async (req) => {
       'metadata[user_id]': user.id,
       'metadata[boosters]': String(boosters),
     })
-    if (user.email) form.set('customer_email', user.email)
+    // Un compte par pseudo n'a qu'une adresse technique (qui ne reçoit rien) : on ne la donne pas à Stripe, qui demande alors le vrai email à l'acheteur (reçu du paiement)
+    if (user.email && !user.email.toLowerCase().endsWith('@pseudo.1o1cards.cc')) form.set('customer_email', user.email)
     if (setting('STRIPE_MANAGED_PAYMENTS') === 'false') form.set('managed_payments[enabled]', 'false')
 
     const base = secret('STRIPE_API_BASE') ?? 'https://api.stripe.com'
