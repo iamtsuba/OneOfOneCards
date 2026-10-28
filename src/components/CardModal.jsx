@@ -67,7 +67,7 @@ export default function CardModal({ sel, rarity, onClose, onChanged, onRefresh, 
     }
   }
 
-  const sellPrice = status?.direct_sell_price ?? 1
+  const sellPrice = status?.sell_prices?.[rarity?.id ?? sel.rarityId] ?? status?.direct_sell_price ?? 1   // prix de revente rapide de la rareté de cette carte (sinon le prix général)
   const toneMsg = {
     taken: 'Cette carte a déjà été tirée par un autre joueur. Tu peux peut-être l’acheter sur le marché.',
     free: category?.closed

@@ -429,7 +429,8 @@
       "color2": "#cfc8b8",
       "max_series": null,
       "sort_order": 8,
-      "text_color": "#3a3630"
+      "text_color": "#3a3630",
+      "sell_price": 3
     }
   ],
   "categories": [

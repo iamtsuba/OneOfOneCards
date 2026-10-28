@@ -9,6 +9,7 @@ import Brand from './components/Brand'
 import TabBar from './components/TabBar'
 import Friends from './components/Friends'
 import GoldRewardModal from './components/GoldRewardModal'
+import { CguGate } from './components/Terms'
 import Boosters from './components/Boosters'
 import Collection from './components/Collection'
 import Market from './components/Market'
@@ -160,7 +161,8 @@ function Game({ session }) {
         {tab === 'friends' && <Friends />}
         {tab === 'profile' && <Profile session={session} />}
       </main>
-      {!revealing && (status.reward_notices ?? []).length > 0 && (
+      {status.cgu_accepted === false && <CguGate />}   {/* conditions d'utilisation à accepter (nouvelle version ou joueur existant) : rien d'autre tant que ce n'est pas fait */}
+      {!revealing && status.cgu_accepted !== false && (status.reward_notices ?? []).length > 0 && (
         <GoldRewardModal
           rewards={status.reward_notices}
           onClose={async (openNow) => {
@@ -170,7 +172,7 @@ function Game({ session }) {
           }}
         />
       )}
-      {!revealing && (status.reward_notices ?? []).length === 0 && (status.gold_rewards ?? []).some((g) => !g.seen) && (
+      {!revealing && status.cgu_accepted !== false && (status.reward_notices ?? []).length === 0 && (status.gold_rewards ?? []).some((g) => !g.seen) && (
         <GoldRewardModal
           rewards={status.gold_rewards.filter((g) => !g.seen)}
           onClose={async (openNow) => {

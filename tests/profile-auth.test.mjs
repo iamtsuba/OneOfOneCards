@@ -18,8 +18,10 @@ dom.window.matchMedia = dom.window.matchMedia || (() => ({ matches: false, addEv
 
 // Réseau simulé : seul username_available répond (« tomy » est pris, casse ignorée)
 const rpcCalls = []
+const termsCalls = []
 globalThis.fetch = async (url, init) => {
   const u = String(url)
+  if (u.includes('accept_terms')) { termsCalls.push(JSON.parse(init?.body ?? '{}')); return new Response(JSON.stringify({ status: {} }), { status: 200, headers: { 'content-type': 'application/json' } }) }
   if (u.includes('username_available')) {   // l'appel porte le préfixe de l'environnement (pp_o1ocards_username_available)
     const name = JSON.parse(init?.body ?? '{}').p_username
     rpcCalls.push(name)
@@ -76,9 +78,10 @@ await act(async () => { reactRoot.render(React.createElement(Auth)) })
 const setValue = async (el, v) => { await act(async () => { Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(el, v); el.dispatchEvent(new window.Event('input', { bubbles: true })) }) }
 const clickTab = async (label) => { await act(async () => { [...host.querySelectorAll('[role="tab"]')].find((b) => b.textContent === label).dispatchEvent(new window.MouseEvent('click', { bubbles: true })) }) }
 const submit = async () => { await act(async () => { host.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); await new Promise((r) => setTimeout(r, 30)) }) }
-const fields = () => [...host.querySelectorAll('form input')]
+const fields = () => [...host.querySelectorAll('form input:not([type="checkbox"])')]
+const tick = async (on = true) => { const cb = host.querySelector('form input[type="checkbox"]'); if (cb && cb.checked !== on) await act(async () => { cb.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true })) }) }
 const labelOf = (i) => (i.closest('label')?.firstChild?.textContent ?? '').trim()
-const fillSignup = async (pseudo, pw = 'motdepasse', pw2 = pw) => { const f = fields(); await setValue(f[0], pseudo); await setValue(f[1], pw); await setValue(f[2], pw2) }
+const fillSignup = async (pseudo, pw = 'motdepasse', pw2 = pw, accept = true) => { const f = fields(); await setValue(f[0], pseudo); await setValue(f[1], pw); await setValue(f[2], pw2); await tick(accept) }
 const alertText = () => host.querySelector('[role="alert"]')?.textContent ?? ''
 
 // -- connexion
@@ -104,6 +107,8 @@ signInReply = () => ({ data: {}, error: null })
 await clickTab('Créer un compte')
 ok('inscription : Pseudo, Mot de passe, Confirme le mot de passe ; aucun champ email', fields().length === 3 && labelOf(fields()[0]) === 'Pseudo' && labelOf(fields()[1]) === 'Mot de passe' && labelOf(fields()[2]).startsWith('Confirme le mot de passe') && !host.querySelector('input[type="email"]'))
 ok('inscription : le pseudo prévient qu\'il est unique et définitif et précise les caractères permis', /Unique et définitif : tu ne pourras pas le changer\./.test(host.querySelector('form').textContent) && /2 à 24 caractères/.test(host.querySelector('form').textContent))
+ok('inscription : une case « J\'ai lu et j\'accepte les conditions générales d\'utilisation » avec un lien pour les lire', !!host.querySelector('form input[type="checkbox"]') && /J’ai lu et j’accepte les conditions générales d’utilisation\./.test(host.querySelector('form label.check')?.textContent ?? '') && !!host.querySelector('form label.check button.link'))
+ok('en bas : deux liens, conditions de vente et conditions d\'utilisation', /Conditions de vente et mentions légales/.test(host.textContent) && /Conditions d’utilisation/.test(host.textContent))
 ok('inscription : prévient qu\'il n\'y a pas de récupération de mot de passe (pas d\'email)', /Pas d’email : un mot de passe oublié ne peut pas être récupéré\./.test(host.querySelector('form').textContent))
 
 const checks0 = rpcCalls.length
@@ -115,6 +120,8 @@ await fillSignup('x'); await submit()
 ok('pseudo trop court : « entre 2 et 24 caractères »', /entre 2 et 24 caractères/.test(alertText()) && signUps.length === 0)
 await fillSignup('tom', 'abc', 'abc'); await submit()
 ok('mot de passe de moins de 6 caractères : message, aucun compte', /au moins 6 caractères/.test(alertText()) && signUps.length === 0)
+await fillSignup('tomtom', 'motdepasse', 'motdepasse', false); await submit()
+ok('conditions d\'utilisation non acceptées : message précis, aucune vérification serveur, AUCUN compte créé', /accepte les conditions générales d’utilisation\./.test(alertText()) && signUps.length === 0 && rpcCalls.length === checks0)
 await fillSignup('tom', 'motdepasse', 'autremotdepasse'); await submit()
 ok('mots de passe différents : message, aucun compte', /Les deux mots de passe ne sont pas identiques\./.test(alertText()) && signUps.length === 0 && rpcCalls.length === checks0)
 
@@ -126,11 +133,14 @@ ok('une réponse inattendue du serveur (ni vrai ni faux) n\'autorise pas l\'insc
 await fillSignup('  Nouveau  '); await submit()
 ok('pseudo libre : UN seul compte créé, avec l\'adresse technique (pseudo en minuscules), le pseudo tel que saisi dans les données du compte et aucune adresse de retour par email', signUps.length === 1 && signUps[0].email === 'nouveau@pseudo.1o1cards.cc' && signUps[0].password === 'motdepasse' && signUps[0].options.data.username === 'Nouveau' && !('emailRedirectTo' in signUps[0].options) && rpcCalls.at(-1) === 'Nouveau')
 ok('inscription réussie (connexion immédiate) : aucun message d\'email ni de confirmation à attendre', !/mail|confirmation/i.test(host.innerHTML.replace(/Pas d’email : un mot de passe oublié[^<]*/, '')))
+ok('inscription réussie avec connexion immédiate : l\'acceptation des conditions d\'utilisation est envoyée au serveur (version 1), une seule fois', termsCalls.length === 1 && termsCalls[0].p_version === 1)
 await fillSignup('NOUVEAU2'); await submit()
 ok('« NOUVEAU2 » donne la même adresse que « nouveau2 » : un pseudo ne peut exister qu\'une fois, quelle que soit la casse', signUps.at(-1).email === 'nouveau2@pseudo.1o1cards.cc' && signUps.at(-1).options.data.username === 'NOUVEAU2')
+const tn = termsCalls.length
 signUpReply = () => ({ data: { session: null }, error: null })
 await fillSignup('Sansession'); await submit()
 ok('si le projet exigeait une confirmation (pas de connexion immédiate) : message sobre sans parler d\'email, retour à la connexion', /Compte créé : connecte-toi avec ton pseudo et ton mot de passe\./.test(host.innerHTML) && host.querySelectorAll('[role="tab"]')[0].getAttribute('aria-selected') === 'true')
+ok('sans connexion immédiate ou en cas d\'erreur d\'inscription : aucune acceptation envoyée (la fenêtre des conditions les redemandera)', termsCalls.length === tn)
 await clickTab('Créer un compte')
 signUpReply = () => ({ data: {}, error: { message: 'User already registered' } })
 await fillSignup('Existe'); await submit()

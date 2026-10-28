@@ -9,6 +9,9 @@ const KIND_ICON = {
   offer_received: '💰',
   offer_accepted: '✅',
   offer_declined: '✖',
+  offer_countered: '↔',
+  offer_sold: '🪙',
+  offer_counter_declined: '✖',
 }
 
 function describe(n, catalog) {
@@ -25,6 +28,12 @@ function describe(n, catalog) {
       return `Ton offre de ${fmtCoins(n.amount)} pour ${card} a été acceptée : la carte est à toi.`
     case 'offer_declined':
       return `Ton offre de ${fmtCoins(n.amount)} pour ${card} a été refusée.`
+    case 'offer_countered':
+      return `${who} te fait une contre-offre de ${fmtCoins(n.amount)} pour ${card}.`
+    case 'offer_sold':
+      return `${who} a accepté ta contre-offre de ${fmtCoins(n.amount)} pour ${card} : la carte est vendue.`
+    case 'offer_counter_declined':
+      return `${who} a refusé ta contre-offre de ${fmtCoins(n.amount)} pour ${card}.`
     default:
       return ''
   }

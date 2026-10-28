@@ -1350,9 +1350,10 @@ export function RaritiesTab({ data, run, busy }) {
       <p className="muted">
         Nom, couleurs et seuils. « Taille de série maximale » : une rareté à seuil concerne les séries jusqu’à cette taille (vide = toutes les
         autres). Ce sont les seuils par défaut des cartes qui n’ont pas de raretés propres ; chaque carte peut les personnaliser (tranches, numéros
-        visibles) dans l’onglet « Cartes ».
+        visibles) dans l’onglet « Cartes ». « Prix de revente rapide » : les pièces reçues quand un joueur revend une carte de cette rareté à la banque (la carte est alors retirée du jeu) ;
+        vide = le prix général (réglage « direct_sell_price »).
       </p>
-      {data.rarities.map((r) => <RarityForm key={r.id} rarity={r} run={run} busy={busy} />)}
+      {data.rarities.map((r) => <RarityForm key={r.id} rarity={r} general={(data.config ?? []).find((c) => c.key === 'direct_sell_price')?.value} run={run} busy={busy} />)}
       <h3>Nouvelle rareté</h3>
       <p className="muted">
         Unique, Alpha et Omega sont fixes (1/1, 1/m, m/m) ; Alpha et Omega ne concernent que les séries dont le numéro est visible (ailleurs, ces cartes ont la rareté de leur tranche). On ne peut ajouter qu’une rareté « à seuil », entre les raretés existantes. Elle
@@ -1363,9 +1364,10 @@ export function RaritiesTab({ data, run, busy }) {
   )
 }
 
-function RarityForm({ rarity, run, busy }) {
-  const [f, setF] = useState({ name: rarity.name, max_series: rarity.max_series ?? '', color: rarity.color, color2: rarity.color2, text_color: rarity.text_color })
+function RarityForm({ rarity, general, run, busy }) {
+  const [f, setF] = useState({ name: rarity.name, max_series: rarity.max_series ?? '', color: rarity.color, color2: rarity.color2, text_color: rarity.text_color, sell_price: rarity.sell_price == null ? '' : String(rarity.sell_price) })
   const set = (k) => (v) => setF((cur) => ({ ...cur, [k]: v }))
+  const badPrice = f.sell_price !== '' && !(Number.isInteger(Number(f.sell_price)) && Number(f.sell_price) >= 0 && Number(f.sell_price) <= 1000000)
   return (
     <div className="admin-card" style={{ '--cat1': f.color, '--cat2': f.color2 }}>
       <div className="admin-card-head"><i className="cat-dot" /><strong>{rarity.name}</strong><span className="badge">{rarity.kind}</span></div>
@@ -1374,14 +1376,16 @@ function RarityForm({ rarity, run, busy }) {
         {rarity.kind === 'range' && (
           <label>Taille de série maximale<input type="number" value={f.max_series} onChange={(e) => set('max_series')(e.target.value)} placeholder="toutes" /></label>
         )}
+        <label>Prix de revente rapide (pièces)<input type="number" inputMode="numeric" min="0" max="1000000" step="1" value={f.sell_price} onChange={(e) => set('sell_price')(e.target.value)} placeholder={general != null ? `prix général (${general})` : 'prix général'} /></label>
       </div>
+      {badPrice && <p className="msg error" role="alert">Le prix de revente est un nombre entier de pièces, de 0 à 1 000 000 (ou vide).</p>}
       <div className="admin-colors">
         <Color label="Couleur" value={f.color} onChange={set('color')} />
         <Color label="Couleur 2" value={f.color2} onChange={set('color2')} />
         <Color label="Texte" value={f.text_color} onChange={set('text_color')} />
       </div>
       <div className="row">
-        <button className="btn" disabled={busy || !f.name.trim()} onClick={() => run((pw) => api.adminSaveRarity(pw, { id: rarity.id, ...f }), 'Rareté enregistrée.')}>Enregistrer</button>
+        <button className="btn" disabled={busy || !f.name.trim() || badPrice} onClick={() => run((pw) => api.adminSaveRarity(pw, { id: rarity.id, ...f }), 'Rareté enregistrée.')}>Enregistrer</button>
         {rarity.kind === 'range' && (
           <button className="btn ghost danger" disabled={busy} onClick={() => window.confirm(`Supprimer la rareté « ${rarity.name} » ? Impossible si elle est déjà utilisée.`) && run((pw) => api.adminDeleteRarity(pw, rarity.id), 'Rareté supprimée.')}>
             Supprimer

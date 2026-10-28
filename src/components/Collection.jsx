@@ -448,7 +448,7 @@ export function StackModal({ stack, catalog, rarityMap, onClose, onChanged, onLi
   const type = catalog.typeMap[stack.typeId]
   const category = type ? catalog.categoryMap[type.category_id] : null
   const closed = !!category && (status?.closed_categories ?? []).includes(category.id)
-  const price = status?.direct_sell_price ?? 1
+  const price = status?.sell_prices?.[stack.rarityId] ?? status?.direct_sell_price ?? 1   // prix de revente rapide de CETTE rareté (sinon le prix général)
 
   useEffect(() => {
     if (initialCards) return undefined

@@ -141,6 +141,10 @@ ok('pile : nombre total de cartes dans le rond (10) et dans le texte', /card-cou
 ok('pile : détail vendables / en vente / dans l’album (7 · 2 · 1)', /7 vendables · 2 en vente · 1 dans l’album/.test(sm))
 ok('pile : vente rapide d’une carte au prix du jeu (1 carte pour 2 pièces), choix du nombre, tout vendre', /Vendre 1 carte pour 2 pièces/.test(sm) && /max="7"/.test(sm) && /Tout \(7\)/.test(sm))
 ok('pile : mise en vente sur le marché, une carte à la fois', /Une carte à la fois/.test(sm) && !/disabled=""[^>]*>Mettre une carte en vente/.test(sm))
+const smPrice = stackOf(stackCards, { direct_sell_price: 2, sell_prices: { common: 5, rare: 9 }, closed_categories: [] })
+ok('pile : la revente rapide se fait au prix DE LA RARETÉ de la pile (Commune 5 pièces), ni le prix général ni celui d\'une autre rareté', /Vendre 1 carte pour 5 pièces/.test(smPrice) && /Tu reçois 5 pièces par carte/.test(smPrice) && !/pour 9 pièces/.test(smPrice) && !/pour 2 pièces/.test(smPrice))
+ok('pile : une rareté sans prix propre (absente de sell_prices) garde le prix général (2 pièces) ; un ancien serveur sans sell_prices aussi', /Vendre 1 carte pour 2 pièces/.test(stackOf(stackCards, { direct_sell_price: 2, sell_prices: { rare: 9 }, closed_categories: [] })) && /Vendre 1 carte pour 2 pièces/.test(stackOf(stackCards, { direct_sell_price: 2, closed_categories: [] })))
+ok('pile : prix à 0 pièce (revente gratuite) annoncé sans erreur', /Vendre 1 carte pour 0 pièce/.test(stackOf(stackCards, { direct_sell_price: 2, sell_prices: { common: 0 }, closed_categories: [] })))
 const catalogClosed = { ...catalog2, typeMap: { ...catalog2.typeMap, 1: { ...catalog2.typeMap[1], category_id: 1 } }, categoryMap: { 1: { id: 1, name: 'Chats', closed: true } } }
 const closedHtml = stackOf(stackCards, { direct_sell_price: 2, closed_categories: [1] }, { catalog: catalogClosed })
 ok('pile : collection terminée → vente rapide indisponible (plus de bouton Vendre), marché toujours possible', /Indisponible : la collection « Chats » est terminée/.test(closedHtml) && !/Vendre \d+ carte/.test(closedHtml) && /Mettre une carte en vente/.test(closedHtml))

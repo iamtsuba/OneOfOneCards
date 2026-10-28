@@ -71,6 +71,10 @@ export const makeOffer = (type, base, series, number, amount) =>
   rpc('make_offer', { p_type: type, p_base: base, p_series: series, p_number: number, p_amount: amount })
 export const cancelOffer = (id) => rpc('cancel_offer', { p_id: id })
 export const respondOffer = (id, accept) => rpc('respond_offer', { p_id: id, p_accept: accept })
+// Contre-offre : le destinataire d'une proposition en propose une autre (l'autre partie peut alors accepter, refuser ou contre-proposer)
+export const counterOffer = (id, amount) => rpc('counter_offer', { p_id: id, p_amount: amount })
+// Conditions générales d'utilisation : le joueur accepte la version en vigueur (preuve datée par le serveur)
+export const acceptTerms = (version) => rpc('accept_terms', { p_version: version, p_user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : null })
 export const myOffers = () => rpc('my_offers')
 
 // Notifications
@@ -118,7 +122,7 @@ export async function confirmSubscription(sessionId) {
 export async function getLegal() {
   const [legal, config] = await Promise.all([
     supabase.from(table('legal')).select('key,value'),
-    supabase.from(table('config')).select('key,value').in('key', ['stripe_pack_boosters', 'stripe_pack_price_cents', 'cgv_version']),
+    supabase.from(table('config')).select('key,value').in('key', ['stripe_pack_boosters', 'stripe_pack_price_cents', 'cgv_version', 'cgu_version']),
   ])
   if (legal.error) throw legal.error
   if (config.error) throw config.error
@@ -170,6 +174,8 @@ export const adminSaveRarity = (pw, r) =>
   rpc('admin_save_rarity', {
     p_password: pw, p_id: r.id, p_name: r.name, p_max_series: r.max_series === null || r.max_series === '' ? null : Number(r.max_series),
     p_color: r.color, p_color2: r.color2, p_text_color: r.text_color,
+    // prix de la revente rapide de cette rareté (vide = prix général) : envoyé seulement s'il est renseigné dans le formulaire (un ancien serveur ne le connaît pas)
+    ...('sell_price' in r ? { p_sell_price: r.sell_price === '' || r.sell_price == null ? null : Number(r.sell_price) } : {}),
   })
 // Types de boosters (admin) : créer ou modifier (id nul = création), supprimer, offrir (pseudo vide = tous les joueurs)
 export const adminSaveBoosterType = (pw, id, b) =>
@@ -247,6 +253,7 @@ export function explain(e) {
   if (m.includes('invalid_username')) return 'Le pseudo doit contenir entre 2 et 24 caractères.'
   if (m.includes('card_listed')) return 'Cette carte est en vente sur le marché : retire d’abord l’annonce.'
   if (m.includes('not_owner')) return 'Cette carte ne t’appartient pas (ou plus).'
+  if (m.includes('buyer_insufficient_coins')) return 'L’acheteur n’a plus assez de pièces pour cette offre.'   // avant le message général : il contient « insufficient_coins »
   if (m.includes('insufficient_coins')) return 'Tu n’as pas assez de pièces.'
   if (m.includes('auction_ended')) return 'Cette enchère est terminée.'
   if (m.includes('own_listing')) return 'Tu ne peux pas acheter ni enchérir sur ta propre annonce.'
@@ -289,6 +296,10 @@ export function explain(e) {
   if (m.includes('buyer_insufficient_coins')) return 'L’acheteur n’a plus assez de pièces pour cette offre.'
   if (m.includes('card_in_auction')) return 'Cette carte est aux enchères avec des offres en cours : accepte d’abord l’issue de l’enchère.'
   if (m.includes('offer_unavailable')) return 'Cette offre n’est plus disponible.'
+  if (m.includes('own_offer')) return 'C’est ta proposition : attends la réponse de l’autre joueur (ou retire-la).'
+  if (m.includes('same_price')) return 'Propose un prix différent de la proposition en cours.'
+  if (m.includes('too_many_counters')) return 'Trop de contre-offres échangées : accepte ou refuse cette proposition.'
+  if (m.includes('terms_outdated')) return 'Les conditions d’utilisation viennent de changer : recharge la page puis accepte-les.'
   if (/Could not find the function|schema cache|does not exist|relation .* not/i.test(m))
     return 'La base de données n’est pas à jour : exécute supabase/schema.sql dans le SQL Editor de Supabase.'
   if (/Invalid login credentials/i.test(m)) return 'Pseudo ou mot de passe incorrect.'

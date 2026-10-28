@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../supabase'
-import { explain, usernameAvailable, friendInvitePreview } from '../api'
+import { explain, usernameAvailable, friendInvitePreview, acceptTerms } from '../api'
 import { loadPendingInvite } from '../invite'
 import { loginEmail, pseudoProblem, pseudoToEmail } from '../pseudo'
+import { CGU_VERSION } from '../terms'
 import Brand from './Brand'
 import LegalSheet from './Legal'
 import Landing from './Landing'
@@ -15,7 +16,8 @@ export default function Auth() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
-  const [terms, setTerms] = useState(false)
+  const [terms, setTerms] = useState(false)   // fenêtre des conditions : false, 'cgv' (vente) ou 'cgu' (utilisation)
+  const [accept, setAccept] = useState(false)   // conditions générales d'utilisation acceptées (inscription)
   const [inviter, setInviter] = useState('')   // pseudo de l'ami dont on a ouvert le lien d'invitation
 
   // Lien d'invitation ouvert avant de se connecter : on dit qui invite, l'amitié se fera toute seule une fois connecté
@@ -43,15 +45,18 @@ export default function Auth() {
         if (problem) { setError(problem); return }
         if (password.length < 6) { setError('Le mot de passe doit contenir au moins 6 caractères.'); return }
         if (password !== confirm) { setError('Les deux mots de passe ne sont pas identiques.'); return }
+        if (!accept) { setError('Pour créer un compte, accepte les conditions générales d’utilisation.'); return }
         // Le pseudo est unique et définitif : on s'assure qu'il est libre avant de créer le compte
         if ((await usernameAvailable(pseudo)) !== true) throw new Error('username_taken')   // seule une réponse « vrai » autorise l'inscription
         const { data, error } = await supabase.auth.signUp({ email: pseudoToEmail(pseudo), password, options: { data: { username: pseudo } } })
         if (error) throw error
+        if (data.session) acceptTerms(CGU_VERSION).catch(() => {})   // preuve d'acceptation datée par le serveur (si elle échoue, la fenêtre des conditions les redemandera à la connexion suivante)
         if (!data.session) {   // le projet doit confirmer les comptes automatiquement : sinon on n'est pas connecté tout de suite
           setInfo('Compte créé : connecte-toi avec ton pseudo et ton mot de passe.')
           setMode('login')
           setPassword('')
           setConfirm('')
+          setAccept(false)
         }
       }
     } catch (err) {
@@ -98,6 +103,12 @@ export default function Auth() {
               <small className="field-hint">Pas d’email : un mot de passe oublié ne peut pas être récupéré. Note-le bien.</small>
             </label>
           )}
+          {signup && (
+            <label className="check">
+              <input type="checkbox" checked={accept} onChange={(e) => setAccept(e.target.checked)} />
+              <span>J’ai lu et j’accepte les <button type="button" className="link" onClick={() => setTerms('cgu')}>conditions générales d’utilisation</button>.</span>
+            </label>
+          )}
           {error && <p className="msg error" role="alert">{error}</p>}
           {info && <p className="msg info" role="status">{info}</p>}
           <button className="btn accent" disabled={busy}>
@@ -105,8 +116,8 @@ export default function Auth() {
           </button>
         </form>
         {signup && <p className="fine">Tu reçois 10 boosters à l’arrivée, puis 10 de plus toutes les 10 minutes.</p>}
-        <p className="fine"><button type="button" className="link" onClick={() => setTerms(true)}>Conditions de vente et mentions légales</button></p>
-        {terms && <LegalSheet onClose={() => setTerms(false)} />}
+        <p className="fine"><button type="button" className="link" onClick={() => setTerms('cgv')}>Conditions de vente et mentions légales</button> · <button type="button" className="link" onClick={() => setTerms('cgu')}>Conditions d’utilisation</button></p>
+        {terms && <LegalSheet initial={terms} onClose={() => setTerms(false)} />}
       </div>
     </main>
     <Landing />

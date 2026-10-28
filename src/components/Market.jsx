@@ -251,9 +251,11 @@ export function BrowsePanel({ rows, loading, kind, setKind, sort, setSort, rarit
   )
 }
 
-function OffersPanel({ rows, loading, rarityMap, catalog, status, setStatus, reload }) {
+// Offres reçues et envoyées. À chaque proposition, l'AUTRE partie répond : accepter, refuser ou faire une CONTRE-OFFRE (qui lui renvoie la balle) ; l'auteur d'une proposition peut la retirer.
+export function OffersPanel({ rows, loading, rarityMap, catalog, status, setStatus, reload }) {
   const [busyId, setBusyId] = useState(null)
   const [error, setError] = useState('')
+  const [counter, setCounter] = useState(null)   // contre-offre en préparation : { id, value }
 
   async function act(id, fn) {
     setBusyId(id)
@@ -261,6 +263,7 @@ function OffersPanel({ rows, loading, rarityMap, catalog, status, setStatus, rel
     try {
       const res = await fn()
       if (res?.status) setStatus(res.status)
+      setCounter(null)
       await reload()
     } catch (e) {
       setError(explain(e))
@@ -282,31 +285,59 @@ function OffersPanel({ rows, loading, rarityMap, catalog, status, setStatus, rel
     <>
       {error && <p className="msg error" role="alert">{error}</p>}
       <ul className="mine-list">
-        {rows.map((r) => (
-          <li key={r.offer_id}>
-            <div className="mine-row offer-row">
-              <div className="mine-card"><Card typeId={r.card_type} base={r.card_base} series={r.card_series} number={r.card_number} rarity={rarityMap[r.rarity_id]} size="sm" /></div>
-              <div className="mine-text">
-                <strong>{catalog.typeMap[r.card_type]?.name}{catalog.cardRef(r.card_type, r.card_base, r.card_number, r.card_series)}</strong>
-                <span>
-                  {r.role === 'buyer' ? `Ton offre à ${r.counterpart_name} : ` : `Offre de ${r.counterpart_name} : `}
-                  {fmtCoins(r.amount)} · {OFFER_STATUS_LABEL[r.status] ?? r.status} · {fmtAgo(r.created_at)}
-                </span>
-                {r.status === 'pending' && r.role === 'seller' && (
-                  <div className="row">
-                    <button className="btn accent sm" disabled={busyId === r.offer_id} onClick={() => act(r.offer_id, () => api.respondOffer(r.offer_id, true))}>Accepter</button>
-                    <button className="btn ghost sm" disabled={busyId === r.offer_id} onClick={() => act(r.offer_id, () => api.respondOffer(r.offer_id, false))}>Refuser</button>
-                  </div>
-                )}
-                {r.status === 'pending' && r.role === 'buyer' && (
-                  <div className="row">
-                    <button className="btn ghost sm" disabled={busyId === r.offer_id} onClick={() => act(r.offer_id, () => api.cancelOffer(r.offer_id))}>Retirer l’offre</button>
-                  </div>
-                )}
+        {rows.map((r) => {
+          // Serveur à jour : il dit à qui de répondre. Sinon : comme avant (le vendeur répond, l'acheteur retire).
+          const known = r.waiting_on_me !== undefined
+          const mustReply = r.status === 'pending' && (known ? r.waiting_on_me : r.role === 'seller')
+          const mine = r.status === 'pending' && (known ? r.proposed_by_me : r.role === 'buyer')
+          const negotiated = (r.rounds ?? 0) > 0
+          const busy = busyId === r.offer_id
+          const open = counter?.id === r.offer_id
+          const value = open ? counter.value : ''
+          const valid = Number.isInteger(Number(value)) && Number(value) >= 1 && Number(value) !== r.amount
+          let line
+          if (mustReply) line = `${negotiated ? 'Contre-offre' : 'Offre'} de ${r.counterpart_name} : `
+          else if (mine) line = `${negotiated ? 'Ta contre-offre' : 'Ton offre'} à ${r.counterpart_name} : `
+          else line = r.role === 'buyer' ? `Ton offre à ${r.counterpart_name} : ` : `Offre de ${r.counterpart_name} : `
+          return (
+            <li key={r.offer_id}>
+              <div className="mine-row offer-row">
+                <div className="mine-card"><Card typeId={r.card_type} base={r.card_base} series={r.card_series} number={r.card_number} rarity={rarityMap[r.rarity_id]} size="sm" /></div>
+                <div className="mine-text">
+                  <strong>{catalog.typeMap[r.card_type]?.name}{catalog.cardRef(r.card_type, r.card_base, r.card_number, r.card_series)}</strong>
+                  <span>
+                    {line}{fmtCoins(r.amount)} · {OFFER_STATUS_LABEL[r.status] ?? r.status} · {fmtAgo(r.created_at)}
+                  </span>
+                  {mustReply && !open && (
+                    <div className="row">
+                      <button className="btn accent sm" disabled={busy} onClick={() => act(r.offer_id, () => api.respondOffer(r.offer_id, true))}>Accepter</button>
+                      <button className="btn ghost sm" disabled={busy} onClick={() => act(r.offer_id, () => api.respondOffer(r.offer_id, false))}>Refuser</button>
+                      {known && <button className="btn ghost sm" disabled={busy} onClick={() => setCounter({ id: r.offer_id, value: String(r.amount) })}>Contre-offre</button>}
+                    </div>
+                  )}
+                  {mustReply && open && (
+                    <form className="row counter-form" onSubmit={(e) => { e.preventDefault(); if (valid) act(r.offer_id, () => api.counterOffer(r.offer_id, Number(value))) }}>
+                      <label>
+                        <span className="sr">Ta contre-offre en pièces</span>
+                        <input type="number" inputMode="numeric" min="1" step="1" value={value} onChange={(e) => setCounter({ id: r.offer_id, value: e.target.value })} aria-label="Ta contre-offre en pièces" />
+                      </label>
+                      <button className="btn accent sm" disabled={busy || !valid}>Envoyer la contre-offre</button>
+                      <button type="button" className="btn ghost sm" disabled={busy} onClick={() => setCounter(null)}>Annuler</button>
+                    </form>
+                  )}
+                  {mine && (
+                    <>
+                      <small className="fine">En attente de la réponse de {r.counterpart_name}.</small>
+                      <div className="row">
+                        <button className="btn ghost sm" disabled={busy} onClick={() => act(r.offer_id, () => api.cancelOffer(r.offer_id))}>{negotiated ? 'Retirer ma contre-offre' : 'Retirer l’offre'}</button>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
-          </li>
-        ))}
+            </li>
+          )
+        })}
       </ul>
     </>
   )

@@ -99,6 +99,10 @@ if (typesTab) {
 
 // Raretés, réglages, mentions légales, 1/1, sécurité
 const rar = show(M.RaritiesTab, { data })
+const priceInputs = [...rar.matchAll(/<label>Prix de revente rapide \(pièces\)<input[^>]*>/g)].map((m) => m[0])
+ok('raretés : un champ « Prix de revente rapide (pièces) » par rareté, vide = prix général indiqué en grisé (1)', priceInputs.length === data.rarities.length && priceInputs.every((h) => /min="0" max="1000000"/.test(h)) && priceInputs.filter((h) => /placeholder="prix général \(1\)"/.test(h) && /value=""/.test(h)).length === data.rarities.length - 1)
+ok('raretés : la Commune affiche son prix propre (3)', priceInputs.some((h) => /value="3"/.test(h)))
+ok('raretés : l\'explication du prix de revente rapide est donnée', /Prix de revente rapide » : les pièces reçues quand un joueur revend une carte de cette rareté à la banque/.test(rar) && /vide = le prix général/.test(rar))
 ok('onglet Raretés : s’affiche avec « placer avant »', rar !== null && clean(rar) && /Place dans l’ordre d’affichage/.test(rar) && /Avant « Ultra Rare »/.test(rar))
 ok('onglet Raretés : plus de mention des seuils par collection', rar !== null && !/collection par collection|collections qui ont/.test(rar))
 ok('onglet Réglages : s’affiche', clean(show(M.ConfigTab, { data })))

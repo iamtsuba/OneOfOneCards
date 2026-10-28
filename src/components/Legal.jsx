@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api'
 import { explain } from '../api'
+import { TermsDocument } from './TermsText'
 
 const euro = (cents) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(cents / 100)
 
@@ -120,10 +121,11 @@ export function LegalDocument({ legal = {}, config = {} }) {
   )
 }
 
-// Fenêtre qui charge et affiche les conditions
-export default function LegalSheet({ onClose }) {
+// Fenêtre qui charge et affiche les conditions : conditions de vente (par défaut) ou conditions d'utilisation (initial = 'cgu'), avec un interrupteur entre les deux
+export default function LegalSheet({ onClose, initial = 'cgv' }) {
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
+  const [doc, setDoc] = useState(initial === 'cgu' ? 'cgu' : 'cgv')
 
   useEffect(() => {
     api.getLegal().then(setData).catch((e) => setError(explain(e)))
@@ -136,11 +138,16 @@ export default function LegalSheet({ onClose }) {
   }, [onClose])
 
   return (
-    <div className="legal-overlay" role="dialog" aria-modal="true" aria-label="Conditions de vente" onClick={onClose}>
+    <div className="legal-overlay" role="dialog" aria-modal="true" aria-label={doc === 'cgu' ? 'Conditions d’utilisation' : 'Conditions de vente'} onClick={onClose}>
       <div className="legal-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="segmented" role="tablist" aria-label="Document">
+          <button type="button" role="tab" aria-selected={doc === 'cgv'} className={doc === 'cgv' ? 'on' : ''} onClick={() => setDoc('cgv')}>Conditions de vente</button>
+          <button type="button" role="tab" aria-selected={doc === 'cgu'} className={doc === 'cgu' ? 'on' : ''} onClick={() => setDoc('cgu')}>Conditions d’utilisation</button>
+        </div>
         {error && <p className="msg error" role="alert">{error}</p>}
         {!data && !error && <p className="muted">Chargement…</p>}
-        {data && <LegalDocument legal={data.legal} config={data.config} />}
+        {data && doc === 'cgv' && <LegalDocument legal={data.legal} config={data.config} />}
+        {data && doc === 'cgu' && <TermsDocument legal={data.legal} version={data.config?.cgu_version ?? 1} />}
         <button className="btn" onClick={onClose}>Fermer</button>
       </div>
     </div>

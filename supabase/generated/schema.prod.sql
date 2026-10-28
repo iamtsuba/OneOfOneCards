@@ -39,6 +39,7 @@ insert into public.o1ocards_config (key, value, description) values
   ('subscriber_regen_minutes',    5,   'Pass Pro : délai entre deux recharges de boosters pour les membres Pro (minutes)'),
   ('subscription_gift_quantity',  1,   'Pass Pro : boosters « cadeau Pro » offerts une seule fois, à l''achat'),
   ('golden_booster_chance',  0.00000001, 'Chance qu''un booster ouvert devienne un booster Gold (0.00000001 = 0,000001 %). Contenu : celui du booster Gold du module Boosters'),
+  ('cgu_version',           1,    'Version des conditions générales d''utilisation : en la montant, chaque joueur doit les accepter de nouveau avant de rejouer'),
   ('shop_enabled',           0,    'Boutique Stripe : 1 = visible dans l''application, 0 = masquée (à passer à 1 une fois Stripe configuré). Activée par défaut en préproduction pour pouvoir tester les achats'),
   ('stripe_pack_boosters',   10,   'Boosters bonus ajoutés par achat'),
   ('stripe_pack_price_cents', 99,  'Prix d''un pack en centimes d''euro (99 = 0,99 EUR)'),
@@ -66,6 +67,8 @@ create table if not exists public.o1ocards_rarities (
   color2     text not null,
   text_color text not null
 );
+-- Prix de la revente rapide à la banque, par rareté (en pièces) ; vide = le prix général (réglage direct_sell_price)
+alter table public.o1ocards_rarities add column if not exists sell_price int check (sell_price is null or (sell_price >= 0 and sell_price <= 1000000));
 
 insert into public.o1ocards_rarities (id, name, kind, max_series, sort_order, color, color2, text_color) values
   ('unique', 'Unique',     'unique', null, 1, '#8b5cf6', '#4c1d95', '#ffffff'),
@@ -408,6 +411,9 @@ create table if not exists public.o1ocards_offers (
   responded_at timestamptz
 );
 alter table public.o1ocards_offers add column if not exists base_rarity text;
+-- Négociation : qui a fait la proposition en cours (vide = l'acheteur, offre d'origine) et combien de contre-offres ont été échangées
+alter table public.o1ocards_offers add column if not exists proposed_by uuid references auth.users (id) on delete set null;
+alter table public.o1ocards_offers add column if not exists rounds int not null default 0;
 create index if not exists o1ocards_offers_seller_idx on public.o1ocards_offers (seller_id, status, created_at desc);
 create index if not exists o1ocards_offers_buyer_idx on public.o1ocards_offers (buyer_id, status, created_at desc);
 
@@ -427,6 +433,9 @@ create table if not exists public.o1ocards_notifications (
   read       boolean not null default false,
   created_at timestamptz not null default now()
 );
+-- types de notification (la négociation des offres en ajoute trois)
+alter table public.o1ocards_notifications drop constraint if exists o1ocards_notifications_kind_check;
+alter table public.o1ocards_notifications add constraint o1ocards_notifications_kind_check check (kind in ('favorite_listed', 'offer_received', 'offer_accepted', 'offer_declined', 'offer_countered', 'offer_sold', 'offer_counter_declined'));
 alter table public.o1ocards_notifications add column if not exists card_base text;
 create index if not exists o1ocards_notifications_user_idx on public.o1ocards_notifications (user_id, read, created_at desc);
 
@@ -958,6 +967,9 @@ begin
     'cards_taken',         v_taken,
     'total_cards',         v_total,
     'direct_sell_price',   public.o1ocards_cfg('direct_sell_price')::int,
+    'cgu_version',         coalesce(public.o1ocards_cfg('cgu_version'), 1)::int,
+    'cgu_accepted',        exists (select 1 from public.o1ocards_terms_acceptances t where t.user_id = p.id and t.version = coalesce(public.o1ocards_cfg('cgu_version'), 1)::int),
+    'sell_prices',         (select coalesce(jsonb_object_agg(r.id, public.o1ocards_sell_price_of(r.id)), '{}'::jsonb) from public.o1ocards_rarities r),
     'auction_minutes',     public.o1ocards_cfg('auction_minutes')::int,
     'auction_start_price', public.o1ocards_cfg('auction_start_price')::int,
     'server_now',          now()
@@ -1982,12 +1994,19 @@ end $$;
 -- Revente directe : la carte est retirée du jeu pour de bon, tu reçois des pièces.
 -- Refusée pour une catégorie terminée : la progression est définitive.
 drop function if exists public.o1ocards_sell_direct(int, int, int);
+-- Pièces reçues pour la revente rapide d'une carte de la rareté AFFICHÉE p_rarity : le prix de cette rareté, sinon le prix général
+create or replace function public.o1ocards_sell_price_of(p_rarity text)
+returns int language sql stable security definer set search_path = public as $$
+  select coalesce((select r.sell_price from public.o1ocards_rarities r where r.id = p_rarity), public.o1ocards_cfg('direct_sell_price')::int, 1)
+$$;
+revoke all on function public.o1ocards_sell_price_of(text) from public, anon, authenticated;
+
 create or replace function public.o1ocards_sell_direct(p_type int, p_base text, p_series int, p_number int)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   uid     uuid := auth.uid();
   v_owner uuid;
-  v_price int  := public.o1ocards_cfg('direct_sell_price')::int;
+  v_price int;
   p       public.o1ocards_profiles;
 begin
   if uid is null then raise exception 'not_authenticated'; end if;
@@ -2007,6 +2026,7 @@ begin
              where t.id = p_type and c.closed) then
     raise exception 'category_closed';
   end if;
+  v_price := public.o1ocards_sell_price_of(public.o1ocards_rarity_id(p_number, p_series, p_type, p_base));   -- le prix de la rareté de cette carte
   -- La carte est retirée du jeu pour de bon : on garde sa ligne, sans propriétaire, donc elle reste « tirée » et ne peut plus
   -- jamais être redonnée par un booster. Favoris et offres en attente sur cette carte n'ont plus d'objet.
   update public.o1ocards_cards set owner_id = null, retired_at = now()
@@ -2342,10 +2362,10 @@ begin
   if v_owner is null then raise exception 'card_not_taken'; end if;
   if v_owner = uid then raise exception 'own_card'; end if;
 
-  insert into public.o1ocards_offers (type_id, base_rarity, series, number, buyer_id, seller_id, amount)
-  values (p_type, p_base, p_series, p_number, uid, v_owner, p_amount)
+  insert into public.o1ocards_offers (type_id, base_rarity, series, number, buyer_id, seller_id, amount, proposed_by)
+  values (p_type, p_base, p_series, p_number, uid, v_owner, p_amount, uid)
   on conflict (type_id, base_rarity, series, number, buyer_id) where status = 'pending'
-  do update set amount = excluded.amount, created_at = now()
+  do update set amount = excluded.amount, proposed_by = excluded.proposed_by, created_at = now()
   returning id into v_id;
 
   select username into v_buyer_name from public.o1ocards_profiles where id = uid;
@@ -2363,32 +2383,60 @@ begin
   if uid is null then raise exception 'not_authenticated'; end if;
   select * into o from public.o1ocards_offers where id = p_id for update;
   if not found or o.status <> 'pending' then raise exception 'offer_unavailable'; end if;
-  if o.buyer_id <> uid then raise exception 'not_owner'; end if;
+  if coalesce(o.proposed_by, o.buyer_id) <> uid then raise exception 'not_owner'; end if;   -- seul l'auteur de la proposition en cours peut la retirer
   update public.o1ocards_offers set status = 'cancelled', responded_at = now() where id = p_id;
   return jsonb_build_object('ok', true);
+end $$;
+
+-- Contre-offre : le destinataire d'une proposition en propose une autre au lieu de l'accepter ou de la refuser ; l'autre partie peut alors accepter, refuser ou contre-proposer à son tour (6 échanges au plus)
+create or replace function public.o1ocards_counter_offer(p_id bigint, p_amount int)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); o public.o1ocards_offers; v_prop uuid; v_other uuid; v_owner uuid; v_name text; p public.o1ocards_profiles;
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  if p_amount is null or p_amount < 1 or p_amount > 100000000 then raise exception 'invalid_price'; end if;
+  select * into o from public.o1ocards_offers where id = p_id for update;
+  if not found or o.status <> 'pending' then raise exception 'offer_unavailable'; end if;
+  if uid not in (o.buyer_id, o.seller_id) then raise exception 'not_owner'; end if;
+  v_prop := coalesce(o.proposed_by, o.buyer_id);
+  if uid = v_prop then raise exception 'own_offer'; end if;   -- on ne contre-propose pas à sa propre proposition
+  if p_amount = o.amount then raise exception 'same_price'; end if;
+  if o.rounds >= 6 then raise exception 'too_many_counters'; end if;
+  select owner_id into v_owner from public.o1ocards_cards where type_id = o.type_id and base_rarity = o.base_rarity and series = o.series and number = o.number;
+  if v_owner is distinct from o.seller_id then raise exception 'offer_unavailable'; end if;   -- la carte a changé de main : plus rien à négocier
+  v_other := v_prop;
+  select username into v_name from public.o1ocards_profiles where id = uid;
+  update public.o1ocards_offers set amount = p_amount, proposed_by = uid, rounds = rounds + 1, created_at = now() where id = p_id;
+  insert into public.o1ocards_notifications (user_id, kind, type_id, card_base, series, number, offer_id, amount, actor_name)
+  values (v_other, 'offer_countered', o.type_id, o.base_rarity, o.series, o.number, o.id, p_amount, v_name);
+  p := public.o1ocards_sync(uid);
+  return jsonb_build_object('status', public.o1ocards_status_json(p));
 end $$;
 
 -- Le propriétaire répond à une offre reçue. Les pièces de l'acheteur ne sont débitées que s'il accepte.
 -- Toute annonce active sur la carte est retirée (la propriété change) ; une enchère déjà surenchérie bloque l'acceptation.
 create or replace function public.o1ocards_respond_offer(p_id bigint, p_accept boolean)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare uid uuid := auth.uid(); o public.o1ocards_offers; v_owner uuid; bal bigint; p public.o1ocards_profiles; v_auto boolean;
+declare uid uuid := auth.uid(); o public.o1ocards_offers; v_prop uuid; v_owner uuid; bal bigint; p public.o1ocards_profiles; v_auto boolean; v_name text;
 begin
   if uid is null then raise exception 'not_authenticated'; end if;
   select * into o from public.o1ocards_offers where id = p_id for update;
   if not found or o.status <> 'pending' then raise exception 'offer_unavailable'; end if;
-  if o.seller_id <> uid then raise exception 'not_owner'; end if;
+  if uid not in (o.buyer_id, o.seller_id) then raise exception 'not_owner'; end if;
+  v_prop := coalesce(o.proposed_by, o.buyer_id);   -- qui a fait la proposition en cours : l'autre partie y répond
+  if uid = v_prop then raise exception 'own_offer'; end if;
+  select username into v_name from public.o1ocards_profiles where id = uid;
 
   if not p_accept then
     update public.o1ocards_offers set status = 'declined', responded_at = now() where id = p_id;
-    insert into public.o1ocards_notifications (user_id, kind, type_id, card_base, series, number, offer_id, amount)
-    values (o.buyer_id, 'offer_declined', o.type_id, o.base_rarity, o.series, o.number, o.id, o.amount);
+    insert into public.o1ocards_notifications (user_id, kind, type_id, card_base, series, number, offer_id, amount, actor_name)
+    values (v_prop, case when v_prop = o.buyer_id then 'offer_declined' else 'offer_counter_declined' end, o.type_id, o.base_rarity, o.series, o.number, o.id, o.amount, v_name);
     p := public.o1ocards_sync(uid);
     return jsonb_build_object('status', public.o1ocards_status_json(p));
   end if;
 
   if exists (select 1 from public.o1ocards_album_picks
-             where user_id = uid and type_id = o.type_id and base_rarity = o.base_rarity and series = o.series and number = o.number) then
+             where user_id = o.seller_id and type_id = o.type_id and base_rarity = o.base_rarity and series = o.series and number = o.number) then
     raise exception 'card_in_album';   -- une carte placée dans l'album ne peut pas être vendue
   end if;
   perform 1 from public.o1ocards_listings
@@ -2398,23 +2446,23 @@ begin
 
   select owner_id into v_owner from public.o1ocards_cards
   where type_id = o.type_id and base_rarity = o.base_rarity and series = o.series and number = o.number for update;
-  if v_owner is distinct from uid then
+  if v_owner is distinct from o.seller_id then
     update public.o1ocards_offers set status = 'cancelled', responded_at = now() where id = p_id;
     raise exception 'not_owner';
   end if;
 
-  perform 1 from public.o1ocards_profiles where id in (uid, o.buyer_id) order by id for update;
+  perform 1 from public.o1ocards_profiles where id in (o.seller_id, o.buyer_id) order by id for update;
   select coins into bal from public.o1ocards_profiles where id = o.buyer_id;
-  if bal < o.amount then raise exception 'buyer_insufficient_coins'; end if;
+  if bal < o.amount then raise exception '%', case when uid = o.buyer_id then 'not_enough_coins' else 'buyer_insufficient_coins' end; end if;
 
-  -- Offre acceptée par un AMI de l'acheteur, pour une carte qui lui manquait (rien dans cet emplacement de son album) : elle va directement dans son album
+  -- Offre acceptée entre AMIS, pour une carte qui manquait à l'acheteur (rien dans cet emplacement de son album) : elle va directement dans son album
   v_auto := exists (select 1 from public.o1ocards_friendships f
                      where f.status = 'accepted'
-                       and least(f.requester_id, f.addressee_id) = least(uid, o.buyer_id) and greatest(f.requester_id, f.addressee_id) = greatest(uid, o.buyer_id))
+                       and least(f.requester_id, f.addressee_id) = least(o.seller_id, o.buyer_id) and greatest(f.requester_id, f.addressee_id) = greatest(o.seller_id, o.buyer_id))
             and not public.o1ocards_owns_card_rarity(o.buyer_id, o.type_id, public.o1ocards_rarity_id(o.number, o.series, o.type_id, o.base_rarity));
 
   update public.o1ocards_profiles set coins = coins - o.amount where id = o.buyer_id;
-  update public.o1ocards_profiles set coins = coins + o.amount where id = uid returning * into p;
+  update public.o1ocards_profiles set coins = coins + o.amount where id = o.seller_id;
   update public.o1ocards_cards set owner_id = o.buyer_id, obtained_at = now()
   where type_id = o.type_id and base_rarity = o.base_rarity and series = o.series and number = o.number;
   if v_auto then perform public.o1ocards_auto_place_album(o.buyer_id, o.type_id, o.base_rarity, o.series, o.number); end if;
@@ -2428,13 +2476,15 @@ begin
   update public.o1ocards_offers set status = 'cancelled', responded_at = now()
   where type_id = o.type_id and base_rarity = o.base_rarity and series = o.series and number = o.number and status = 'pending' and id <> p_id;
 
-  insert into public.o1ocards_notifications (user_id, kind, type_id, card_base, series, number, offer_id, amount)
-  values (o.buyer_id, 'offer_accepted', o.type_id, o.base_rarity, o.series, o.number, o.id, o.amount);
+  insert into public.o1ocards_notifications (user_id, kind, type_id, card_base, series, number, offer_id, amount, actor_name)
+  values (v_prop, case when v_prop = o.buyer_id then 'offer_accepted' else 'offer_sold' end, o.type_id, o.base_rarity, o.series, o.number, o.id, o.amount, v_name);
 
+  p := public.o1ocards_sync(uid);
   return jsonb_build_object('status', public.o1ocards_status_json(p));
 end $$;
 
 -- Mes offres envoyées et reçues (en cours + 7 derniers jours)
+drop function if exists public.o1ocards_my_offers();
 drop function if exists public.o1ocards_my_offers();
 create or replace function public.o1ocards_my_offers()
 returns table (
@@ -2449,7 +2499,10 @@ returns table (
   amount           int,
   status           text,
   created_at       timestamptz,
-  responded_at     timestamptz
+  responded_at     timestamptz,
+  proposed_by_me   boolean,
+  waiting_on_me    boolean,
+  rounds           int
 )
 language plpgsql security definer set search_path = public as $$
 declare uid uuid := auth.uid();
@@ -2458,12 +2511,15 @@ begin
   return query
   select o.id, o.type_id, o.base_rarity, o.series, o.number, public.o1ocards_rarity_id(o.number, o.series, o.type_id, o.base_rarity),
          case when o.buyer_id = uid then 'buyer' else 'seller' end,
-         p.username, o.amount, o.status, o.created_at, o.responded_at
+         p.username, o.amount, o.status, o.created_at, o.responded_at,
+         coalesce(o.proposed_by, o.buyer_id) = uid,
+         o.status = 'pending' and coalesce(o.proposed_by, o.buyer_id) <> uid,
+         o.rounds
   from public.o1ocards_offers o
   join public.o1ocards_profiles p on p.id = (case when o.buyer_id = uid then o.seller_id else o.buyer_id end)
   where (o.buyer_id = uid or o.seller_id = uid)
     and (o.status = 'pending' or o.responded_at > now() - interval '7 days')
-  order by case when o.status = 'pending' then 0 else 1 end, o.created_at desc
+  order by case when o.status = 'pending' and coalesce(o.proposed_by, o.buyer_id) <> uid then 0 when o.status = 'pending' then 1 else 2 end, o.created_at desc
   limit 100;
 end $$;
 
@@ -3036,6 +3092,32 @@ drop table if exists public.o1ocards_golden_contents;
 delete from public.o1ocards_config where key in ('series_reward_min_size', 'golden_unique_chance');
 update public.o1ocards_config set description = 'Chance qu''un booster ouvert devienne un booster Gold (0.00000001 = 0,000001 %). Contenu : celui du booster Gold du module Boosters' where key = 'golden_booster_chance';
 
+-- ---------- Conditions générales d'utilisation : preuve d'acceptation (une ligne par joueur et par version) ----------
+create table if not exists public.o1ocards_terms_acceptances (
+  user_id     uuid not null references auth.users (id) on delete cascade,
+  version     int  not null,
+  accepted_at timestamptz not null default now(),
+  user_agent  text,
+  primary key (user_id, version)
+);
+alter table public.o1ocards_terms_acceptances enable row level security;
+revoke all on public.o1ocards_terms_acceptances from anon, authenticated;
+
+-- Le joueur accepte la version EN VIGUEUR des conditions d'utilisation (la date vient du serveur ; une version périmée est refusée)
+create or replace function public.o1ocards_accept_terms(p_version int, p_user_agent text default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); p public.o1ocards_profiles;
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  if p_version is distinct from coalesce(public.o1ocards_cfg('cgu_version'), 1)::int then raise exception 'terms_outdated'; end if;
+  insert into public.o1ocards_terms_acceptances (user_id, version, user_agent) values (uid, p_version, left(coalesce(p_user_agent, ''), 300))
+  on conflict (user_id, version) do nothing;
+  p := public.o1ocards_sync(uid);
+  return jsonb_build_object('status', public.o1ocards_status_json(p));
+end $$;
+revoke all on function public.o1ocards_accept_terms(int, text) from public, anon;
+grant execute on function public.o1ocards_accept_terms(int, text) to authenticated;
+
 -- ---------- Lien d'invitation : devenir ami en ouvrant un lien ----------
 -- Chaque joueur a UN code d'invitation (20 caractères hexadécimaux au hasard). Celui qui ouvre le lien, une fois connecté, devient ami tout de suite avec son propriétaire
 -- (sans demande à accepter). Le propriétaire peut générer un nouveau code : l'ancien lien ne marche plus.
@@ -3366,7 +3448,7 @@ create or replace function public.o1ocards_sell_direct_many(p_type int, p_rarity
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   uid uuid := auth.uid();
-  v_price int := public.o1ocards_cfg('direct_sell_price')::int;
+  v_price int := public.o1ocards_sell_price_of(p_rarity);   -- le prix de cette rareté
   v_base text[]; v_series int[]; v_number int[]; v_rows int;
   p public.o1ocards_profiles;
 begin
@@ -3826,8 +3908,9 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
+drop function if exists public.o1ocards_admin_save_rarity(text, text, text, int, text, text, text);
 create or replace function public.o1ocards_admin_save_rarity(
-  p_password text, p_id text, p_name text, p_max_series int, p_color text, p_color2 text, p_text_color text
+  p_password text, p_id text, p_name text, p_max_series int, p_color text, p_color2 text, p_text_color text, p_sell_price int default null
 )
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare err text := public.o1ocards_admin_guard(p_password);
@@ -3837,8 +3920,9 @@ begin
   if p_color !~ '^#[0-9a-fA-F]{6}$' or p_color2 !~ '^#[0-9a-fA-F]{6}$' or p_text_color !~ '^#[0-9a-fA-F]{6}$' then
     raise exception 'invalid_color';
   end if;
+  if p_sell_price is not null and (p_sell_price < 0 or p_sell_price > 1000000) then raise exception 'invalid_price'; end if;   -- prix de la revente rapide (vide = prix général)
   update public.o1ocards_rarities
-  set name = trim(p_name), color = p_color, color2 = p_color2, text_color = p_text_color,
+  set name = trim(p_name), color = p_color, color2 = p_color2, text_color = p_text_color, sell_price = p_sell_price,
       max_series = case when kind = 'range' then p_max_series else max_series end
   where id = p_id;
   if not found then raise exception 'not_found'; end if;
@@ -4034,7 +4118,7 @@ revoke all on function public.o1ocards_admin_save_type(text, int, int, text, tex
 revoke all on function public.o1ocards_admin_import_types(text, int, jsonb)          from public, anon;
 revoke all on function public.o1ocards_admin_delete_type(text, int)                      from public, anon;
 revoke all on function public.o1ocards_admin_set_config(text, text, numeric)             from public, anon;
-revoke all on function public.o1ocards_admin_save_rarity(text, text, text, int, text, text, text) from public, anon;
+revoke all on function public.o1ocards_admin_save_rarity(text, text, text, int, text, text, text, int) from public, anon;
 revoke all on function public.o1ocards_admin_create_rarity(text, text, text, int, text, text, text, text) from public, anon;
 revoke all on function public.o1ocards_admin_save_type_rarities(text, int, jsonb, boolean)             from public, anon;
 revoke all on function public.o1ocards_apply_type_rarities(int, jsonb, boolean)                           from public, anon, authenticated;
@@ -4050,6 +4134,7 @@ revoke all on function public.o1ocards_toggle_favorite(int, text, int, int)     
 revoke all on function public.o1ocards_list_favorites()                                  from public, anon;
 revoke all on function public.o1ocards_make_offer(int, text, int, int, int)                    from public, anon;
 revoke all on function public.o1ocards_cancel_offer(bigint)                              from public, anon;
+revoke all on function public.o1ocards_counter_offer(bigint, int) from public, anon;
 revoke all on function public.o1ocards_respond_offer(bigint, boolean)                    from public, anon;
 revoke all on function public.o1ocards_my_offers()                                       from public, anon;
 revoke all on function public.o1ocards_notifications_list(int)                           from public, anon;
@@ -4077,7 +4162,7 @@ grant execute on function public.o1ocards_admin_save_type(text, int, int, text, 
 grant execute on function public.o1ocards_admin_import_types(text, int, jsonb)          to authenticated;
 grant execute on function public.o1ocards_admin_delete_type(text, int)                      to authenticated;
 grant execute on function public.o1ocards_admin_set_config(text, text, numeric)             to authenticated;
-grant execute on function public.o1ocards_admin_save_rarity(text, text, text, int, text, text, text) to authenticated;
+grant execute on function public.o1ocards_admin_save_rarity(text, text, text, int, text, text, text, int) to authenticated;
 grant execute on function public.o1ocards_admin_create_rarity(text, text, text, int, text, text, text, text) to authenticated;
 grant execute on function public.o1ocards_admin_save_type_rarities(text, int, jsonb, boolean)             to authenticated;
 grant execute on function public.o1ocards_admin_delete_rarity(text, text)                                to authenticated;
@@ -4092,6 +4177,7 @@ grant execute on function public.o1ocards_toggle_favorite(int, text, int, int)  
 grant execute on function public.o1ocards_list_favorites()                                  to authenticated;
 grant execute on function public.o1ocards_make_offer(int, text, int, int, int)                    to authenticated;
 grant execute on function public.o1ocards_cancel_offer(bigint)                              to authenticated;
+grant execute on function public.o1ocards_counter_offer(bigint, int) to authenticated;
 grant execute on function public.o1ocards_respond_offer(bigint, boolean)                    to authenticated;
 grant execute on function public.o1ocards_my_offers()                                       to authenticated;
 grant execute on function public.o1ocards_notifications_list(int)                           to authenticated;

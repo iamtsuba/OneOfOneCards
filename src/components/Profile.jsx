@@ -94,7 +94,7 @@ export default function Profile({ session }) {
   const { status, rarityMap, catalog, refreshStatus } = useGame()
   const [stats, setStats] = useState(null)
   const [error, setError] = useState('')
-  const [terms, setTerms] = useState(false)
+  const [terms, setTerms] = useState(false)   // fenêtre des conditions : false, 'cgv' (vente) ou 'cgu' (utilisation)
   const [admin, setAdmin] = useState(false)
   const [proOpen, setProOpen] = useState(false)
   const [proPending, setProPending] = useState(false)   // retour de paiement : pass en cours d'activation
@@ -162,11 +162,12 @@ export default function Profile({ session }) {
         </div>
       )}
 
-      <button className="btn ghost wide" onClick={() => setTerms(true)}>Conditions de vente et mentions légales</button>
+      <button className="btn ghost wide" onClick={() => setTerms('cgv')}>Conditions de vente et mentions légales</button>
+      <button className="btn ghost wide" onClick={() => setTerms('cgu')}>Conditions générales d’utilisation</button>
       <button className="btn ghost wide" onClick={() => setAdmin(true)}>Console admin</button>
       <button className="btn ghost wide" onClick={() => supabase.auth.signOut()}>Se déconnecter</button>
       {admin && <Admin onClose={() => setAdmin(false)} />}
-      {terms && <LegalSheet onClose={() => setTerms(false)} />}
+      {terms && <LegalSheet initial={terms} onClose={() => setTerms(false)} />}
       {proOpen && <ProConsent status={status} onClose={() => setProOpen(false)} />}
     </section>
   )
