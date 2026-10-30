@@ -22,6 +22,7 @@ export default function Collection({ goMarket }) {
   const [view, setView] = useState('album')
   const [albumRows, setAlbumRows] = useState(null)
   const [stack, setStack] = useState(null)   // pile ouverte : { typeId, rarityId }
+  const [doublesOpen, setDoublesOpen] = useState(false)   // vente rapide des doubles (membres OneMore)
   const [stats, setStats] = useState(null)
   const [version, setVersion] = useState(0)
   const [selected, setSelected] = useState(null)
@@ -104,7 +105,12 @@ export default function Collection({ goMarket }) {
           version={version}
           onSelect={setSelected}
           onStack={setStack}
+          onSellDoubles={canSellDoubles(status) ? () => setDoublesOpen(true) : undefined}
         />
+      )}
+
+      {doublesOpen && category && (
+        <DuplicatesModal category={category} rarityMap={rarityMap} onClose={() => setDoublesOpen(false)} onChanged={refresh} />
       )}
 
       {stack && (
@@ -537,7 +543,96 @@ export function StackModal({ stack, catalog, rarityMap, onClose, onChanged, onLi
 }
 
 // « Mes cartes » : liste filtrable et triable ; tri « Plus de doublons » = les cartes que j'ai en plusieurs exemplaires d'abord (un badge indique le nombre d'exemplaires du même emplacement)
-export function MyCards({ catId, catTypes, rarities, rarityMap, stats, version, onSelect, onStack }) {
+// Le bouton « Vendre les doubles » n'existe que pour les membres du pass payant (OneMore) ; le serveur le revérifie à chaque appel
+export const canSellDoubles = (status) => status?.subscription?.active === true
+
+// Vente rapide des DOUBLES d'une rareté dans une collection (membres du pass OneMore) : on choisit une rareté, on voit ce que ça rapporte, on confirme.
+// On garde un exemplaire de chaque carte (celui de l'album s'il y en a un) ; les cartes en vente ne sont pas touchées ; les cartes vendues sont retirées du jeu.
+export function DuplicatesModal({ category, rarityMap, onClose, onChanged, initialRows }) {
+  const { status, setStatus } = useGame()
+  const [rows, setRows] = useState(initialRows ?? null)   // initialRows : aperçu déjà connu (tests de rendu)
+  const [rid, setRid] = useState('')
+  const [confirm, setConfirm] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [done, setDone] = useState(null)   // { sold, coins, rarity } après une vente
+  const closed = (status?.closed_categories ?? []).includes(category.id)
+
+  const load = useCallback(async () => {
+    try { setRows(await api.duplicatesSummary(category.id)) } catch (e) { setError(explain(e)); setRows([]) }
+  }, [category.id])
+  useEffect(() => { if (!initialRows && !closed) load() }, [initialRows, closed, load])
+
+  const plural = (n, one, many) => (n > 1 ? many : one)
+  const chosen = (rows ?? []).find((r) => r.rarity_id === rid)
+
+  async function sell() {
+    setBusy(true); setError('')
+    try {
+      const res = await api.sellDuplicates(category.id, rid)
+      if (res?.status) setStatus(res.status)
+      setDone({ sold: res.sold, coins: res.coins, rarity: rid })
+      setRid(''); setConfirm(false)
+      onChanged?.()
+      await load()
+    } catch (e) {
+      setError(explain(e)); setConfirm(false)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="overlay" role="dialog" aria-modal="true" aria-label="Vente rapide des doubles" onClick={onClose}>
+      <div className="detail doubles" onClick={(e) => e.stopPropagation()}>
+        <h3>Vente rapide des doubles</h3>
+        <p className="muted">Collection « {category.name} ». Pour chaque carte, on garde un exemplaire (celui de ton album s’il y en a un) et on vend les autres. Les cartes en vente ne sont pas touchées.</p>
+
+        {closed ? (
+          <p className="muted">Indisponible : la collection « {category.name} » est terminée. Tu peux vendre tes cartes sur le marché, une par une.</p>
+        ) : rows === null ? (
+          <p className="muted">Chargement…</p>
+        ) : rows.length === 0 ? (
+          <p className="muted">{done ? 'Plus aucun double à vendre dans cette collection.' : 'Aucun double à vendre dans cette collection.'}</p>
+        ) : (
+          <>
+            <label className="select doubles-select">
+              <span>Rareté</span>
+              <select value={rid} onChange={(e) => { setRid(e.target.value); setConfirm(false); setDone(null) }} disabled={busy}>
+                <option value="">Choisis une rareté</option>
+                {rows.map((r) => (
+                  <option key={r.rarity_id} value={r.rarity_id}>{rarityMap[r.rarity_id]?.name ?? r.rarity_id} : {r.doubles} double{plural(r.doubles, '', 's')}</option>
+                ))}
+              </select>
+            </label>
+            {chosen && (
+              <>
+                <p className="muted">
+                  {chosen.doubles} double{plural(chosen.doubles, '', 's')} ({chosen.type_count} carte{plural(chosen.type_count, '', 's')} différente{plural(chosen.type_count, '', 's')}) à {chosen.price} pièce{plural(chosen.price, '', 's')} chacun : tu reçois {fmt(chosen.coins)} pièce{plural(Number(chosen.coins), '', 's')}.
+                  Les cartes sont définitivement retirées du jeu : elles ne reviendront plus dans les boosters.
+                </p>
+                {confirm ? (
+                  <div className="row">
+                    <button className="btn accent" onClick={sell} disabled={busy}>Oui, vendre {chosen.doubles} double{plural(chosen.doubles, '', 's')}</button>
+                    <button className="btn ghost" onClick={() => setConfirm(false)} disabled={busy}>Annuler</button>
+                  </div>
+                ) : (
+                  <button className="btn" onClick={() => setConfirm(true)} disabled={busy}>Vendre {chosen.doubles} double{plural(chosen.doubles, '', 's')} pour {fmt(chosen.coins)} pièce{plural(Number(chosen.coins), '', 's')}</button>
+                )}
+              </>
+            )}
+          </>
+        )}
+
+        {done && <p className="msg info" role="status">{done.sold} carte{plural(done.sold, '', 's')} vendue{plural(done.sold, '', 's')} : +{fmt(done.coins)} pièce{plural(Number(done.coins), '', 's')}.</p>}
+        {error && <p className="msg error" role="alert">{error}</p>}
+        <button className="btn ghost-light" onClick={onClose}>Fermer</button>
+      </div>
+    </div>
+  )
+}
+
+export function MyCards({ catId, catTypes, rarities, rarityMap, stats, version, onSelect, onStack, onSellDoubles }) {
   const [rarity, setRarity] = useState(null)
   const [type, setType] = useState('')
   const [sort, setSort] = useState('series')
@@ -611,6 +706,8 @@ export function MyCards({ catId, catTypes, rarities, rarityMap, stats, version, 
               {SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </label>
+          {/* Réservé aux membres du pass payant (OneMore) : le serveur le revérifie à chaque appel */}
+          {onSellDoubles && <button type="button" className="btn ghost sm doubles-btn" onClick={onSellDoubles}>Vendre les doubles</button>}
         </div>
       </div>
 

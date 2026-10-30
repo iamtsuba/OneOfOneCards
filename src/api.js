@@ -28,6 +28,9 @@ export const listCollection = ({ category = null, type = null, rarity = null, so
 
 // Vente rapide de plusieurs cartes d'une pile (cartes à numéro masqué d'un type et d'une rareté), tout ou rien
 export const sellDirectMany = (type, rarity, count) => rpc('sell_direct_many', { p_type: type, p_rarity: rarity, p_count: count })
+// Pass OneMore : vente rapide de TOUS les doubles d'une rareté dans une collection (aperçu par rareté, puis vente)
+export const duplicatesSummary = (category) => rpc('duplicates_summary', { p_category: category })
+export const sellDuplicates = (category, rarity) => rpc('sell_duplicates', { p_category: category, p_rarity: rarity })
 export const sellDirect = (type, base, series, number) => rpc('sell_direct', { p_type: type, p_base: base, p_series: series, p_number: number })
 export const listCard = ({ type, base, series, number, kind, price = null }) =>
   rpc('list_card', { p_type: type, p_base: base, p_series: series, p_number: number, p_kind: kind, p_price: price })
@@ -296,6 +299,8 @@ export function explain(e) {
   if (m.includes('buyer_insufficient_coins')) return 'L’acheteur n’a plus assez de pièces pour cette offre.'
   if (m.includes('card_in_auction')) return 'Cette carte est aux enchères avec des offres en cours : accepte d’abord l’issue de l’enchère.'
   if (m.includes('offer_unavailable')) return 'Cette offre n’est plus disponible.'
+  if (m.includes('pro_required')) return 'Cette vente rapide des doubles est réservée aux membres du pass OneMore.'
+  if (m.includes('nothing_to_sell')) return 'Il n’y a plus de double à vendre pour cette rareté.'
   if (m.includes('own_offer')) return 'C’est ta proposition : attends la réponse de l’autre joueur (ou retire-la).'
   if (m.includes('same_price')) return 'Propose un prix différent de la proposition en cours.'
   if (m.includes('too_many_counters')) return 'Trop de contre-offres échangées : accepte ou refuse cette proposition.'

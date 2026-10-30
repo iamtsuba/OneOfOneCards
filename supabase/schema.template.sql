@@ -3439,6 +3439,88 @@ language sql stable security definer set search_path = public as $$
     and public.{{P}}rarity_id(c.number, c.series, c.type_id, c.base_rarity) = p_rarity
 $$;
 
+-- ---------- Vente rapide des DOUBLES d'une rareté (membres Pro) ----------
+-- Pour chaque emplacement de la collection (même carte, même rareté affichée) on garde UN exemplaire et on propose tous les autres. L'exemplaire rangé dans l'album est « l'exemplaire gardé » ;
+-- une carte en vente n'est jamais proposée. Sans carte dans l'album, on garde l'exemplaire libre au plus petit numéro (série puis numéro) et on propose les autres.
+create or replace function public.{{P}}duplicates_plan(p_uid uuid, p_category int, p_rarity text default null)
+returns table (type_id int, base_rarity text, series int, number int, rid text)
+language sql stable security definer set search_path = public as $$
+  with mine as (
+    select c.type_id, c.base_rarity, c.series, c.number,
+           public.{{P}}rarity_id(c.number, c.series, c.type_id, c.base_rarity) as rid,
+           exists (select 1 from public.{{P}}album_picks a where a.user_id = p_uid and a.type_id = c.type_id and a.base_rarity = c.base_rarity and a.series = c.series and a.number = c.number) as in_album,
+           exists (select 1 from public.{{P}}listings l where l.type_id = c.type_id and l.base_rarity = c.base_rarity and l.series = c.series and l.number = c.number and l.status = 'active') as listed
+    from public.{{P}}cards c join public.{{P}}types ty on ty.id = c.type_id
+    where c.owner_id = p_uid and ty.category_id = p_category
+  ),
+  g as (
+    select m.*, bool_or(m.in_album) over (partition by m.type_id, m.rid) as grp_album,
+           row_number() over (partition by m.type_id, m.rid order by (m.in_album or m.listed), m.series, m.number, m.base_rarity) as rn   -- les cartes libres passent en premier
+    from mine m
+  )
+  select g.type_id, g.base_rarity, g.series, g.number, g.rid
+  from g
+  where not g.in_album and not g.listed and (p_rarity is null or g.rid = p_rarity)
+    and g.rn > case when g.grp_album then 0 else 1 end
+$$;
+revoke all on function public.{{P}}duplicates_plan(uuid, int, text) from public, anon, authenticated;
+
+-- Ce que la vente rapide des doubles rapporterait, par rareté, dans une collection (rien si elle est terminée)
+create or replace function public.{{P}}duplicates_summary(p_category int)
+returns table (rarity_id text, doubles int, type_count int, price int, coins bigint)
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid();
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  if not public.{{P}}is_subscriber(uid) then raise exception 'pro_required'; end if;
+  return query
+  select p.rid, count(*)::int, count(distinct p.type_id)::int, public.{{P}}sell_price_of(p.rid), public.{{P}}sell_price_of(p.rid)::bigint * count(*)
+  from public.{{P}}duplicates_plan(uid, p_category) p
+  join public.{{P}}rarities r on r.id = p.rid
+  where not exists (select 1 from public.{{P}}categories c where c.id = p_category and c.closed)
+  group by p.rid, r.sort_order
+  order by r.sort_order, p.rid;
+end $$;
+
+-- Vend à la banque tous les doubles de la rareté p_rarity dans la collection p_category, au prix de cette rareté. Tout ou rien. Réservée aux membres Pro (vérifié ici, pas seulement dans l'interface).
+create or replace function public.{{P}}sell_duplicates(p_category int, p_rarity text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  uid uuid := auth.uid(); v_price int; v_n int; v_rows int;
+  v_t int[]; v_b text[]; v_s int[]; v_nm int[];
+  p public.{{P}}profiles;
+begin
+  if uid is null then raise exception 'not_authenticated'; end if;
+  perform public.{{P}}ensure_profile(uid);
+  if not public.{{P}}is_subscriber(uid) then raise exception 'pro_required'; end if;
+  if not exists (select 1 from public.{{P}}categories where id = p_category) then raise exception 'invalid_category'; end if;
+  if exists (select 1 from public.{{P}}categories where id = p_category and closed) then raise exception 'category_closed'; end if;
+  if p_rarity is null or not exists (select 1 from public.{{P}}rarities where id = p_rarity) then raise exception 'invalid_rarity'; end if;
+  v_price := public.{{P}}sell_price_of(p_rarity);
+
+  -- on verrouille les cartes concernées, puis on recalcule la liste (rien n'a pu changer entre-temps)
+  perform 1 from public.{{P}}cards c
+  join public.{{P}}duplicates_plan(uid, p_category, p_rarity) d on d.type_id = c.type_id and d.base_rarity = c.base_rarity and d.series = c.series and d.number = c.number
+  where c.owner_id = uid for update of c;
+  select array_agg(d.type_id), array_agg(d.base_rarity), array_agg(d.series), array_agg(d.number) into v_t, v_b, v_s, v_nm
+  from public.{{P}}duplicates_plan(uid, p_category, p_rarity) d;
+  v_n := coalesce(array_length(v_t, 1), 0);
+  if v_n = 0 then raise exception 'nothing_to_sell'; end if;
+
+  -- Cartes retirées du jeu pour de bon (voir sell_direct) : jamais redonnées par un booster
+  update public.{{P}}cards c set owner_id = null, retired_at = now() from unnest(v_t, v_b, v_s, v_nm) u(t, b, s, n)
+  where c.type_id = u.t and c.base_rarity = u.b and c.series = u.s and c.number = u.n and c.owner_id = uid;
+  get diagnostics v_rows = row_count;
+  if v_rows <> v_n then raise exception 'not_enough_cards'; end if;
+  delete from public.{{P}}favorites f using unnest(v_t, v_b, v_s, v_nm) u(t, b, s, n)
+  where f.type_id = u.t and f.base_rarity = u.b and f.series = u.s and f.number = u.n;
+  update public.{{P}}offers o set status = 'cancelled', responded_at = now() from unnest(v_t, v_b, v_s, v_nm) u(t, b, s, n)
+  where o.type_id = u.t and o.base_rarity = u.b and o.series = u.s and o.number = u.n and o.status = 'pending';
+
+  update public.{{P}}profiles set coins = coins + v_price::bigint * v_n where id = uid returning * into p;
+  return jsonb_build_object('status', public.{{P}}status_json(p), 'sold', v_n, 'coins', v_price::bigint * v_n, 'rarity', p_rarity);
+end $$;
+
 -- Vente rapide de plusieurs cartes d'une pile à la banque, au même prix et aux mêmes règles que la revente d'une carte
 -- (refusée si la catégorie est terminée). Tout ou rien ; jamais la carte de l'album ni une carte en vente.
 create or replace function public.{{P}}sell_direct_many(p_type int, p_rarity text, p_count int)
@@ -4123,6 +4205,8 @@ revoke all on function public.{{P}}admin_delete_rarity(text, text)              
 revoke all on function public.{{P}}admin_set_legal(text, text, text)                 from public, anon;
 revoke all on function public.{{P}}album_view(int)                                   from public, anon;
 revoke all on function public.{{P}}sell_direct_many(int, text, int)                   from public, anon;
+revoke all on function public.{{P}}duplicates_summary(int) from public, anon;
+revoke all on function public.{{P}}sell_duplicates(int, text) from public, anon;
 revoke all on function public.{{P}}list_stack_card(int, text, text, int)              from public, anon;
 revoke all on function public.{{P}}my_type_cards(int, text)                          from public, anon;
 revoke all on function public.{{P}}set_album_pick(int, text, int, int)                     from public, anon;
@@ -4166,6 +4250,8 @@ grant execute on function public.{{P}}admin_delete_rarity(text, text)           
 grant execute on function public.{{P}}admin_set_legal(text, text, text)                 to authenticated;
 grant execute on function public.{{P}}album_view(int)                                   to authenticated;
 grant execute on function public.{{P}}sell_direct_many(int, text, int)                   to authenticated;
+grant execute on function public.{{P}}duplicates_summary(int) to authenticated;
+grant execute on function public.{{P}}sell_duplicates(int, text) to authenticated;
 grant execute on function public.{{P}}list_stack_card(int, text, text, int)              to authenticated;
 grant execute on function public.{{P}}my_type_cards(int, text)                          to authenticated;
 grant execute on function public.{{P}}set_album_pick(int, text, int, int)                     to authenticated;
