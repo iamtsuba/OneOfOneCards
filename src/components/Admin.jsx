@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import * as api from '../api'
 import { isPseudoEmail } from '../pseudo'
 import { explain } from '../api'
@@ -33,6 +33,7 @@ const TABS = [
   ['boosters', 'Boosters'],
   ['config', 'Réglages'],
   ['rarities', 'Raretés'],
+  ['users', 'Utilisateurs'],
   ['uniques', '1/1 gagnées'],
   ['legal', 'Infos légales'],
   ['security', 'Sécurité'],
@@ -81,6 +82,7 @@ export default function Admin({ onClose }) {
   const [pw, setPw] = useState('')
   const [data, setData] = useState(null)
   const [tab, setTab] = useState('categories')
+  const [users, setUsers] = useState(null)   // liste des joueurs (onglet Utilisateurs), chargée à la demande
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -118,14 +120,29 @@ export default function Admin({ onClose }) {
         setData(await api.adminData(pw))
         await Promise.all([refreshCatalog(), refreshStatus()])
         setNotice(typeof message === 'function' ? message(res) : message)
+        return true
       } catch (e) {
         setError(explain(e))
+        return false   // l'appelant peut ne pas recharger ses listes (sinon le message d'erreur serait effacé)
       } finally {
         setBusy(false)
       }
     },
     [pw, refreshCatalog, refreshStatus],
   )
+
+  // Liste des joueurs : chargée à l'ouverture de l'onglet, puis à chaque recherche ou après avoir offert / retiré un pass
+  const loadUsers = useCallback(async (search = '') => {
+    setBusy(true)
+    setError('')
+    try {
+      setUsers(await api.adminUsers(pw, search))
+    } catch (e) {
+      setError(explain(e))
+    } finally {
+      setBusy(false)
+    }
+  }, [pw])
 
   const changePassword = async (next) => {
     setBusy(true)
@@ -167,13 +184,13 @@ export default function Admin({ onClose }) {
   return (
     <AdminShell
       data={data} tab={tab} onTab={(id) => { setTab(id); setError(''); setNotice('') }} busy={busy} error={error} notice={notice}
-      run={run} onChangePassword={changePassword} onClose={onClose} wide={wide}
+      run={run} onChangePassword={changePassword} onClose={onClose} wide={wide} users={users} onLoadUsers={loadUsers}
     />
   )
 }
 
 // Coque de la console (sans connexion ni appels réseau : testable seule). wide : mise en page PC.
-export function AdminShell({ data, tab, onTab, busy, error, notice, run, onChangePassword, onClose, wide = false }) {
+export function AdminShell({ data, tab, onTab, busy, error, notice, run, onChangePassword, onClose, wide = false, users = null, onLoadUsers = () => {} }) {
   const fill = wide && (tab === 'types' || tab === 'categories' || tab === 'boosters')   // ces écrans gèrent eux-mêmes le défilement de leurs colonnes
   const count = { categories: data.categories.length, types: data.types.length, boosters: (data.booster_types ?? []).length }
   const players = `${fmt(data.players)} joueur${data.players > 1 ? 's' : ''} inscrit${data.players > 1 ? 's' : ''}.`
@@ -212,6 +229,7 @@ export function AdminShell({ data, tab, onTab, busy, error, notice, run, onChang
           {tab === 'boosters' && <BoostersTab data={data} run={run} busy={busy} wide={wide} />}
           {tab === 'config' && <ConfigTab data={data} run={run} busy={busy} />}
           {tab === 'rarities' && <RaritiesTab data={data} run={run} busy={busy} />}
+          {tab === 'users' && <UsersTab users={users} onLoad={onLoadUsers} run={run} busy={busy} />}
           {tab === 'uniques' && <UniqueWinsTab data={data} />}
           {tab === 'legal' && <LegalTab data={data} run={run} busy={busy} />}
           {tab === 'security' && <SecurityTab busy={busy} onChange={onChangePassword} />}
@@ -1447,6 +1465,107 @@ export function UniqueWinsTab({ data }) {
             </div>
           </div>
         ))
+      )}
+    </div>
+  )
+}
+
+// ---------- Utilisateurs : liste des joueurs, cartes et doublons par collection, OneMore offert ----------
+const USER_SORTS = [['cards', 'Plus de cartes'], ['doubles', 'Plus de doublons'], ['name', 'Pseudo (A → Z)']]
+const plural = (n, one, many) => (n > 1 ? many : one)
+export function UsersTab({ users, onLoad, run, busy }) {
+  const [search, setSearch] = useState('')
+  const [applied, setApplied] = useState('')     // recherche appliquée à la liste affichée
+  const [sort, setSort] = useState('cards')
+  const [open, setOpen] = useState(null)         // joueur dont le détail par collection est déplié
+  const [ask, setAsk] = useState(null)           // confirmation en cours : { id, action: 'grant' | 'revoke' }
+  const loaded = useRef(false)
+  useEffect(() => { if (users === null && !loaded.current) { loaded.current = true; onLoad('') } }, [users, onLoad])
+
+  const cats = Object.fromEntries((users?.categories ?? []).map((c) => [c.id, c]))
+  const list = [...(users?.users ?? [])].sort((a, b) => sort === 'name' ? a.username.localeCompare(b.username, 'fr', { sensitivity: 'base' }) : sort === 'doubles' ? (b.doubles - a.doubles) || (b.cards - a.cards) : (b.cards - a.cards) || (b.doubles - a.doubles))
+  const members = (users?.users ?? []).filter((u) => u.pro?.active).length
+
+  const find = (e) => { e.preventDefault(); setApplied(search.trim()); setAsk(null); onLoad(search.trim()) }
+  const act = async (u, action) => {
+    setAsk(null)
+    const done = action === 'grant'
+      ? await run((pw) => api.adminGrantPro(pw, u.id), (res) => `OneMore offert à ${u.username}${res?.gift_granted ? ' (booster cadeau Pro compris)' : ''}.`)
+      : await run((pw) => api.adminRevokePro(pw, u.id), `OneMore retiré à ${u.username}.`)
+    if (done !== false) onLoad(applied)   // liste relue pour montrer le nouvel état ; en cas d'erreur on la laisse (le message d'erreur reste affiché)
+  }
+
+  return (
+    <div className="admin-list users-tab">
+      <p className="muted">Tous les joueurs de cet environnement, avec leurs cartes et leurs doublons par collection. Tu peux offrir le pass OneMore à un joueur sans qu’il paie.</p>
+      <form className="row users-search" onSubmit={find} role="search">
+        <label className="sr" htmlFor="users-q">Rechercher un pseudo</label>
+        <input id="users-q" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher un pseudo" autoComplete="off" />
+        <button className="btn" disabled={busy}>Rechercher</button>
+        {applied && <button type="button" className="btn ghost" disabled={busy} onClick={() => { setSearch(''); setApplied(''); onLoad('') }}>Tout afficher</button>}
+        <label className="select users-sort"><span className="sr">Trier</span>
+          <select value={sort} onChange={(e) => setSort(e.target.value)}>{USER_SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+        </label>
+      </form>
+      {users === null ? (
+        <p className="muted">Chargement…</p>
+      ) : (
+        <>
+          <p className="fine users-count">
+            {users.shown} joueur{plural(users.shown, '', 's')} affiché{plural(users.shown, '', 's')}{users.total > users.shown ? ` sur ${users.total}` : ''}{applied ? ` pour « ${applied} »` : ''} · {members} avec OneMore
+          </p>
+          {list.length === 0 && <p className="muted">Aucun joueur trouvé.</p>}
+          <ul className="users-list">
+            {list.map((u) => {
+              const pro = u.pro?.active ? u.pro : null
+              const mine = (u.collections ?? []).filter((c) => c.cards > 0)
+              const expanded = open === u.id
+              const confirming = ask?.id === u.id ? ask.action : null
+              return (
+                <li key={u.id} className="admin-card user-card">
+                  <div className="user-head">
+                    <strong className="user-name">{u.username}</strong>
+                    {pro && <span className={`chip-pro ${pro.source}`}>OneMore · {pro.source === 'admin' ? 'offert' : 'payé'}</span>}
+                  </div>
+                  <p className="user-stats">
+                    <span><strong>{u.cards}</strong> carte{plural(u.cards, '', 's')}</span>
+                    <span><strong>{u.doubles}</strong> doublon{plural(u.doubles, '', 's')}</span>
+                  </p>
+                  {mine.length > 0 && (
+                    <button type="button" className="link" aria-expanded={expanded} onClick={() => setOpen(expanded ? null : u.id)}>
+                      {expanded ? 'Masquer le détail par collection' : 'Détail par collection'}
+                    </button>
+                  )}
+                  {expanded && (
+                    <ul className="user-collections">
+                      {mine.map((c) => (
+                        <li key={c.category_id}>
+                          <span>{cats[c.category_id]?.name ?? `Collection ${c.category_id}`}{cats[c.category_id]?.closed ? ' (terminée)' : ''}</span>
+                          <span>{c.cards} carte{plural(c.cards, '', 's')} · <strong>{c.doubles}</strong> doublon{plural(c.doubles, '', 's')}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="row user-actions">
+                    {confirming ? (
+                      <>
+                        <span className="fine">{confirming === 'grant' ? `Offrir OneMore à ${u.username} ?` : `Retirer OneMore à ${u.username} ?`}</span>
+                        <button type="button" className="btn accent" disabled={busy} onClick={() => act(u, confirming)}>{confirming === 'grant' ? 'Confirmer l’offre' : 'Confirmer le retrait'}</button>
+                        <button type="button" className="btn ghost" disabled={busy} onClick={() => setAsk(null)}>Annuler</button>
+                      </>
+                    ) : !pro ? (
+                      <button type="button" className="btn" disabled={busy} onClick={() => setAsk({ id: u.id, action: 'grant' })}>Offrir OneMore</button>
+                    ) : pro.source === 'admin' ? (
+                      <button type="button" className="btn ghost" disabled={busy} onClick={() => setAsk({ id: u.id, action: 'revoke' })}>Retirer OneMore</button>
+                    ) : (
+                      <span className="fine">Pass payé : remboursement dans Stripe pour le retirer.</span>
+                    )}
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        </>
       )}
     </div>
   )

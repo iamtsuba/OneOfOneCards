@@ -3097,6 +3097,80 @@ drop table if exists public.pp_o1ocards_golden_contents;
 delete from public.pp_o1ocards_config where key in ('series_reward_min_size', 'golden_unique_chance');
 update public.pp_o1ocards_config set description = 'Chance qu''un booster ouvert devienne un booster Gold (0.00000001 = 0,000001 %). Contenu : celui du booster Gold du module Boosters' where key = 'golden_booster_chance';
 
+-- ---------- Console admin : joueurs, doubles par collection, OneMore offert ----------
+-- Liste des joueurs de cet environnement (les plus riches en cartes d'abord) : pseudo, nombre de cartes, doubles par collection (un double = un exemplaire en plus d'une même carte de même rareté,
+-- comme dans « Mes cartes »), état du pass OneMore (payé ou offert). Recherche par morceau de pseudo ; p_limit : 1 à 1000 joueurs (300 par défaut).
+create or replace function public.pp_o1ocards_admin_users(p_password text, p_search text default null, p_limit int default 300)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare err text := public.pp_o1ocards_admin_guard(p_password);
+  v_limit int := least(greatest(coalesce(p_limit, 300), 1), 1000);
+  v_search text := nullif(trim(coalesce(p_search, '')), '');
+  v_total int; v_users jsonb; v_cats jsonb;
+begin
+  if err is not null then return jsonb_build_object('error', err); end if;
+  select count(*) into v_total from public.pp_o1ocards_profiles pr where v_search is null or position(lower(v_search) in lower(pr.username)) > 0;
+  with picked as (
+    select pr.id, pr.username, pr.created_at, (select count(*) from public.pp_o1ocards_cards c where c.owner_id = pr.id)::int as cards
+    from public.pp_o1ocards_profiles pr
+    where v_search is null or position(lower(v_search) in lower(pr.username)) > 0
+    order by 4 desc, lower(pr.username)
+    limit v_limit
+  ),
+  slots as (
+    select c.owner_id, ty.category_id, c.type_id, public.pp_o1ocards_rarity_id(c.number, c.series, c.type_id, c.base_rarity) as rid, count(*) as n
+    from public.pp_o1ocards_cards c join public.pp_o1ocards_types ty on ty.id = c.type_id
+    where c.owner_id in (select id from picked)
+    group by 1, 2, 3, 4
+  ),
+  per as (select owner_id, category_id, sum(n)::int as cards, (sum(n) - count(*))::int as doubles from slots group by 1, 2)
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'id', p.id, 'username', p.username, 'created_at', p.created_at, 'cards', p.cards,
+           'doubles', coalesce((select sum(per.doubles) from per where per.owner_id = p.id), 0),
+           'pro', (select case when pm.revoked_at is null
+                               then jsonb_build_object('active', true, 'source', case when pm.stripe_session_id like 'admin:%' then 'admin' else 'paid' end, 'since', pm.granted_at)
+                          end
+                   from public.pp_o1ocards_pro_members pm where pm.user_id = p.id),
+           'collections', coalesce((select jsonb_agg(jsonb_build_object('category_id', per.category_id, 'cards', per.cards, 'doubles', per.doubles)
+                                                    order by (select ca.position from public.pp_o1ocards_categories ca where ca.id = per.category_id), per.category_id)
+                                    from per where per.owner_id = p.id), '[]'::jsonb)
+         ) order by p.cards desc, lower(p.username)), '[]'::jsonb)
+  into v_users from picked p;
+  select coalesce(jsonb_agg(jsonb_build_object('id', ca.id, 'name', ca.name, 'closed', ca.closed) order by ca.position, ca.id), '[]'::jsonb) into v_cats from public.pp_o1ocards_categories ca;
+  return jsonb_build_object('total', v_total, 'shown', jsonb_array_length(v_users), 'categories', v_cats, 'users', v_users);
+end $$;
+
+-- Offre le pass OneMore à un joueur, sans paiement (mêmes avantages qu'un achat, y compris le booster cadeau). Un joueur déjà membre (payé ou offert) est refusé (already_member).
+create or replace function public.pp_o1ocards_admin_grant_pro(p_password text, p_user uuid)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare err text := public.pp_o1ocards_admin_guard(p_password); r jsonb;
+begin
+  if err is not null then return jsonb_build_object('error', err); end if;
+  if p_user is null or not exists (select 1 from public.pp_o1ocards_profiles where id = p_user) then raise exception 'user_not_found'; end if;
+  if public.pp_o1ocards_is_subscriber(p_user) then raise exception 'already_member'; end if;
+  r := public.pp_o1ocards_pro_grant(p_user, 'admin:' || p_user::text, null, 0, 'eur');   -- « admin: » = offert (aucun paiement Stripe derrière)
+  return jsonb_build_object('ok', true, 'gift_granted', coalesce((r ->> 'gift_granted')::boolean, false));
+end $$;
+
+-- Retire un OneMore OFFERT. Un pass payé ne se retire pas ici (paid_member) : il se rembourse dans Stripe, et le webhook le retire.
+create or replace function public.pp_o1ocards_admin_revoke_pro(p_password text, p_user uuid)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare err text := public.pp_o1ocards_admin_guard(p_password); pm public.pp_o1ocards_pro_members;
+begin
+  if err is not null then return jsonb_build_object('error', err); end if;
+  select * into pm from public.pp_o1ocards_pro_members where user_id = p_user and revoked_at is null for update;
+  if not found then raise exception 'not_member'; end if;
+  if pm.stripe_session_id is null or pm.stripe_session_id not like 'admin:%' then raise exception 'paid_member'; end if;
+  update public.pp_o1ocards_pro_members set revoked_at = now() where user_id = p_user;
+  return jsonb_build_object('ok', true);
+end $$;
+
+revoke all on function public.pp_o1ocards_admin_users(text, text, int) from public, anon;
+revoke all on function public.pp_o1ocards_admin_grant_pro(text, uuid) from public, anon;
+revoke all on function public.pp_o1ocards_admin_revoke_pro(text, uuid) from public, anon;
+grant execute on function public.pp_o1ocards_admin_users(text, text, int) to authenticated;
+grant execute on function public.pp_o1ocards_admin_grant_pro(text, uuid) to authenticated;
+grant execute on function public.pp_o1ocards_admin_revoke_pro(text, uuid) to authenticated;
+
 -- ---------- Conditions générales d'utilisation : preuve d'acceptation (une ligne par joueur et par version) ----------
 create table if not exists public.pp_o1ocards_terms_acceptances (
   user_id     uuid not null references auth.users (id) on delete cascade,

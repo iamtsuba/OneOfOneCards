@@ -173,6 +173,10 @@ export const adminImportTypes = (pw, categoryId, types) =>
 // Réglages texte (nom de l'abonnement…)
 export const adminSetTextConfig = (pw, key, value) => rpc('admin_set_text_config', { p_password: pw, p_key: key, p_value: value })
 export const adminSetConfig = (pw, key, value) => rpc('admin_set_config', { p_password: pw, p_key: key, p_value: Number(value) })
+// Joueurs (console admin) : liste avec cartes et doublons par collection ; offrir ou retirer le pass OneMore sans paiement
+export const adminUsers = (pw, search = '', limit = 300) => rpc('admin_users', { p_password: pw, p_search: search ? search : null, p_limit: limit })
+export const adminGrantPro = (pw, userId) => rpc('admin_grant_pro', { p_password: pw, p_user: userId })
+export const adminRevokePro = (pw, userId) => rpc('admin_revoke_pro', { p_password: pw, p_user: userId })
 export const adminSaveRarity = (pw, r) =>
   rpc('admin_save_rarity', {
     p_password: pw, p_id: r.id, p_name: r.name, p_max_series: r.max_series === null || r.max_series === '' ? null : Number(r.max_series),
@@ -291,6 +295,9 @@ export function explain(e) {
   if (m.includes('not_friends')) return 'Tu dois d’abord être ami avec ce joueur.'
   if (m.includes('cannot_friend_self')) return 'Tu ne peux pas t’ajouter toi-même.'
   if (m.includes('user_not_found')) return 'Ce joueur n’existe pas.'
+  if (m.includes('already_member')) return 'Ce joueur est déjà membre OneMore.'
+  if (m.includes('paid_member')) return 'Ce joueur a payé son pass : pour le retirer, rembourse-le dans Stripe (le retrait est alors automatique).'
+  if (m.includes('not_member')) return 'Ce joueur n’a pas de pass OneMore.'
   if (m.includes('already_friends')) return 'Vous êtes déjà amis.'
   if (m.includes('request_pending')) return 'Ta demande est déjà envoyée.'
   if (m.includes('too_many_friends')) return 'Tu as atteint la limite d’amis et de demandes (200).'

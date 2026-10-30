@@ -118,7 +118,7 @@ ok('onglet Sécurité : s’affiche', clean(show(M.SecurityTab, { onChange: asyn
   const shell = (props) => show(M.AdminShell, { data, tab: 'types', onTab: () => {}, error: '', notice: '', onChangePassword: async () => true, onClose: () => {}, ...props })
   const wideHtml = shell({ wide: true })
   const narrowHtml = shell({ wide: false })
-  ok('PC : le panneau passe en mise en page large avec une navigation verticale (un onglet par module : 8, Boosters compris)', wideHtml !== null && /legal-panel admin wide/.test(wideHtml) && /<nav class="admin-nav"[^>]*aria-orientation="vertical"/.test(wideHtml) && (wideHtml.match(/class="admin-nav-item/g) || []).length === 8)
+  ok('PC : le panneau passe en mise en page large avec une navigation verticale (un onglet par module : 9, Boosters et Utilisateurs compris)', wideHtml !== null && /legal-panel admin wide/.test(wideHtml) && /<nav class="admin-nav"[^>]*aria-orientation="vertical"/.test(wideHtml) && (wideHtml.match(/class="admin-nav-item/g) || []).length === 9)
   ok('PC : l’onglet actif est marqué et les compteurs (collections, cartes) sont affichés', /admin-nav-item on"[^>]*>Cartes<span class="nav-count">\d+<\/span>/.test(wideHtml) && /aria-selected="true"/.test(wideHtml) && /Collections<span class="nav-count">/.test(wideHtml))
   ok('PC : les écrans à deux colonnes gèrent eux-mêmes leur défilement (admin-main fill) ; les autres défilent d’un bloc', /admin-main fill/.test(wideHtml) && !/admin-main fill/.test(shell({ wide: true, tab: 'config' })))
   ok('mobile : inchangé (pastilles horizontales, pas de navigation verticale ni de panneau large)', /class="chips admin-tabs"/.test(narrowHtml) && !/admin-nav/.test(narrowHtml) && !/legal-panel admin wide/.test(narrowHtml) && !/class="admin-md /.test(narrowHtml))
