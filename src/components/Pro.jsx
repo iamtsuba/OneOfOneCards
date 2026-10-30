@@ -20,19 +20,34 @@ export function ProPanel({ sub, baseMinutes, onBuy, gift = null, pending = false
     )
   }
   const faster = baseMinutes && sub.regen_minutes < baseMinutes
-  const recharge = `Recharge de tes boosters toutes les ${sub.regen_minutes} minutes${faster && !sub.active ? ` au lieu de ${baseMinutes}` : ''}`
-  const perks = [
-    recharge,
-    sub.booster_name ? `Le booster ${sub.booster_name} (de meilleures cartes) remplace le booster Standard` : null,
-    sub.gift_name && sub.gift_quantity > 0 ? `${sub.gift_quantity} booster ${sub.gift_name} offert à l’achat` : null,
+  // Les avantages du pass, un par ligne avec une pastille : {key, icon, title, text}
+  const core = [
+    { key: 'regen', icon: '⏱', title: `Boosters toutes les ${sub.regen_minutes} minutes`, text: faster && !sub.active ? `au lieu de ${baseMinutes} minutes` : null },
+    sub.discount_percent > 0 ? { key: 'discount', icon: '🏷', title: `−${sub.discount_percent} % sur tous les boosters`, text: 'Dans « Autres boosters », le prix est barré puis réduit' } : null,
+    { key: 'doubles', icon: '💰', title: 'Bouton Vente rapide par rareté', text: 'Vends tous tes doubles d’une rareté d’un coup (Collection, Mes cartes)' },
   ].filter(Boolean)
+  const perks = sub.active ? core : [
+    ...core,
+    sub.booster_name ? { key: 'booster', icon: '⭐', title: `Le booster ${sub.booster_name} remplace le Standard`, text: 'de meilleures cartes' } : null,
+    sub.gift_name && sub.gift_quantity > 0 ? { key: 'gift', icon: '🎁', title: `${sub.gift_quantity} booster ${sub.gift_name} offert`, text: 'à l’achat' } : null,
+  ].filter(Boolean)
+  const perkList = (
+    <ul className="sub-perks">
+      {perks.map((p) => (
+        <li key={p.key}>
+          <span className="perk-ico" aria-hidden="true">{p.icon}</span>
+          <span className="perk-text"><strong>{p.title}</strong>{p.text && <small>{p.text}</small>}</span>
+        </li>
+      ))}
+    </ul>
+  )
   return (
     <section className={`subscription${sub.active ? ' on' : ''}`} aria-label={`Pass ${sub.name}`}>
       {sub.active ? (
         <>
           <strong className="sub-title">Membre {sub.name} à vie</strong>
           {sub.since && <p className="muted">Depuis le {dateFr(sub.since)}. Aucun renouvellement : c’est à toi pour toujours.</p>}
-          <ul className="sub-perks"><li>{recharge}</li></ul>
+          {perkList}
           <div className="sub-gifts">
             {sub.booster_name && (
               <div className="sub-gift" style={{ '--c': sub.booster_color || '#7c3aed' }}>
@@ -52,7 +67,7 @@ export function ProPanel({ sub, baseMinutes, onBuy, gift = null, pending = false
         <>
           <strong className="sub-title">{sub.name}</strong>
           <p className="sub-price"><strong>{euro(sub.price_cents)}</strong> une seule fois, avantages à vie, sans abonnement</p>
-          <ul className="sub-perks">{perks.map((p) => <li key={p}>{p}</li>)}</ul>
+          {perkList}
           <button type="button" className="btn accent" onClick={onBuy} disabled={busy}>Devenir {sub.name} à vie</button>
         </>
       )}

@@ -27,7 +27,7 @@ begin
 end $$;
 
 \echo '--- réglages de départ'
-select pg_temp.expect('pass Pro masqué par défaut, 9,99 € une seule fois, recharge de 5 minutes, 1 booster cadeau', (select string_agg(key || '=' || value::int, ',' order by key) from public.{{P}}config where key like 'subscri%') = 'subscriber_regen_minutes=5,subscription_enabled=0,subscription_gift_quantity=1,subscription_price_cents=999');
+select pg_temp.expect('pass Pro masqué par défaut, 9,99 € une seule fois, recharge de 5 minutes, 20 % de remise sur les boosters, 1 booster cadeau', (select string_agg(key || '=' || value::int, ',' order by key) from public.{{P}}config where key like 'subscri%') = 'subscriber_discount_percent=20,subscriber_regen_minutes=5,subscription_enabled=0,subscription_gift_quantity=1,subscription_price_cents=999');
 select pg_temp.expect('le nom du pass est un réglage texte, « OneMore » au départ', (select value from public.{{P}}text_config where key = 'subscription_name') = 'OneMore');
 select pg_temp.expect('les descriptions des réglages parlent du pass Pro (achat unique), plus d''abonnement mensuel', (select bool_and(description ~* 'pass pro') from public.{{P}}config where key like 'subscri%') and not exists (select 1 from public.{{P}}config where description ~* 'mensuel|facturation|abonnés déjà'));
 select pg_temp.expect('l''ancien abonnement mensuel a disparu de la base (tables, notification périodique)', to_regclass('public.{{P}}subscriptions') is null and to_regclass('public.{{P}}subscription_gifts') is null and not exists (select 1 from pg_proc where proname = '{{P}}subscription_sync'));

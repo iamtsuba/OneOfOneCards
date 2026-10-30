@@ -34,6 +34,7 @@ insert into public.{{P}}config (key, value, description) values
   ('subscription_enabled',       0,   'Pass Pro (achat unique, à vie) : 1 = proposé aux joueurs, 0 = masqué'),
   ('subscription_price_cents',    999, 'Pass Pro : prix de l''achat unique en centimes d''euro (999 = 9,99 €) ; ne change pas ce que les membres ont déjà payé'),
   ('subscriber_regen_minutes',    5,   'Pass Pro : délai entre deux recharges de boosters pour les membres Pro (minutes)'),
+  ('subscriber_discount_percent', 20,  'Pass Pro : remise (en %) sur le prix en pièces des boosters en vente, pour les membres Pro (0 = aucune remise)'),
   ('subscription_gift_quantity',  1,   'Pass Pro : boosters « cadeau Pro » offerts une seule fois, à l''achat'),
   ('golden_booster_chance',  0.00000001, 'Chance qu''un booster ouvert devienne un booster Gold (0.00000001 = 0,000001 %). Contenu : celui du booster Gold du module Boosters'),
   ('cgu_version',           1,    'Version des conditions générales d''utilisation : en la montant, chaque joueur doit les accepter de nouveau avant de rejouer'),
@@ -939,8 +940,9 @@ begin
                              'booster_color',        (select bt.color from public.{{P}}booster_types bt where bt.role = 'subscriber'),
                              'gift_id',              (select bt.id from public.{{P}}booster_types bt where bt.role = 'subscription_gift' and bt.enabled),
                              'gift_name',            (select bt.name from public.{{P}}booster_types bt where bt.role = 'subscription_gift' and bt.enabled),
+                             'discount_percent',     greatest(least(coalesce(public.{{P}}cfg('subscriber_discount_percent'), 0), 90), 0)::int,
                              'gift_quantity',        coalesce(public.{{P}}cfg('subscription_gift_quantity'), 0)::int),
-    'booster_types',       (select coalesce(jsonb_agg(jsonb_build_object('id', bt.id, 'name', bt.name, 'cards', bt.cards, 'color', bt.color, 'glow', bt.glow, 'position', bt.position, 'price', bt.price_coins,
+    'booster_types',       (select coalesce(jsonb_agg(jsonb_build_object('id', bt.id, 'name', bt.name, 'cards', bt.cards, 'color', bt.color, 'glow', bt.glow, 'position', bt.position, 'price', bt.price_coins, 'member_price', public.{{P}}booster_price_for(p.id, bt.price_coins),
                                                                           'quantity', coalesce(ub.quantity, 0) + coalesce((select sum(l.quantity) from public.{{P}}user_collection_boosters l join public.{{P}}categories c on c.id = l.category_id
                                                                                                                          where l.user_id = p.id and l.booster_type_id = bt.id and (c.closed or not c.enabled)), 0)) order by bt.position, bt.id), '[]'::jsonb)
                             from public.{{P}}booster_types bt
@@ -1532,7 +1534,7 @@ begin
   -- achat pour une collection : le booster y est lié (il ne s'ouvre que dans cette collection)
   if p_category is not null and not exists (select 1 from public.{{P}}categories c where c.id = p_category and c.enabled and not c.closed) then raise exception 'collection_closed'; end if;
   p := public.{{P}}sync(uid);
-  v_total := bt.price_coins::bigint * p_quantity;
+  v_total := public.{{P}}booster_price_for(uid, bt.price_coins)::bigint * p_quantity;   -- remise du pass Pro comprise
   select coalesce(sum(current_bid), 0) into v_locked from public.{{P}}listings where current_bidder = uid and status = 'active';
   if p.coins - v_locked < v_total then raise exception 'not_enough_coins'; end if;
   update public.{{P}}profiles set coins = coins - v_total where id = uid returning * into p;
@@ -3189,6 +3191,18 @@ returns text language sql stable set search_path = public as $$
 $$;
 
 -- Membre Pro (le pass à vie) : tant qu'il n'a pas été remboursé. (Le nom « abonné » reste dans la base : booster des abonnés, rôle « subscriber ».)
+-- Prix en pièces d'un booster pour CE joueur : le prix affiché, réduit du pourcentage du pass Pro pour un membre (arrondi à l'entier le plus proche, jamais en dessous d'1 pièce ; un booster gratuit reste gratuit)
+create or replace function public.{{P}}booster_price_for(p_uid uuid, p_price int)
+returns int language plpgsql stable security definer set search_path = public as $$
+begin
+  if p_price is null or p_price <= 0 then return p_price; end if;
+  if p_uid is not null and public.{{P}}is_subscriber(p_uid) then
+    return greatest(1, round(p_price * (100 - greatest(least(coalesce(public.{{P}}cfg('subscriber_discount_percent'), 0), 90), 0)) / 100.0))::int;
+  end if;
+  return p_price;
+end $$;
+revoke all on function public.{{P}}booster_price_for(uuid, int) from public, anon, authenticated;
+
 create or replace function public.{{P}}is_subscriber(p_uid uuid)
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.{{P}}pro_members pm where pm.user_id = p_uid and pm.revoked_at is null)

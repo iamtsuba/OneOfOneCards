@@ -167,6 +167,26 @@ const two = { ...base, active_categories: [c5, c6] }
   clearSaved()
 }
 
+// ---------- achat avec la remise du pass OneMore : prix barré, confirmation au prix réduit ----------
+{
+  const asked = []
+  dom.window.confirm = (msg) => { asked.push(msg); return true }
+  const norm = (t) => t.replace(/\u202f|\u00a0/g, ' ')
+  const mem = await mountPage({ ...two, coins: 1000, booster_types: [{ ...premium, price: 150, member_price: 120 }] })
+  const buyBtn = () => [...mem.host.querySelectorAll('.extra-boosters button')].find((b) => /Acheter/.test(b.textContent))
+  ok('membre : le bouton montre l\'ancien prix barré (150) puis le prix membre (120)', /Acheter · 150 120 🪙/.test(norm(buyBtn().textContent)) && !!buyBtn().querySelector('s.price-old') && buyBtn().querySelector('.price-new').textContent.replace(/\s/g, '') === '120')
+  await click(buyBtn())
+  ok('la confirmation annonce le prix réduit ET l\'ancien : « pour 120 pièces (au lieu de 150 : remise membre) »', asked.length === 1 && /pour 120 pièces \(au lieu de 150 : remise membre\) \?/.test(norm(asked[0])))
+  await mem.unmount(); clearSaved()
+  asked.length = 0
+  const non = await mountPage({ ...two, coins: 1000, booster_types: [{ ...premium, price: 150, member_price: 150 }] })
+  const buyBtn2 = () => [...non.host.querySelectorAll('.extra-boosters button')].find((b) => /Acheter/.test(b.textContent))
+  await click(buyBtn2())
+  ok('non-membre : prix unique, aucun prix barré, confirmation simple « pour 150 pièces ? »', !buyBtn2().querySelector('s') && asked.length === 1 && /pour 150 pièces \?/.test(norm(asked[0])) && !/remise/.test(asked[0]))
+  await non.unmount(); clearSaved()
+  dom.window.confirm = () => true
+}
+
 // ---------- collection terminée pendant l'ouverture ----------
 {
   openReply = { error: 'collection_closed', status: { ...two, active_categories: [c5], active_category_id: 5 } }

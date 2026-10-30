@@ -84,6 +84,8 @@ export function PackShelf({ packs, selected, category, disabled, onSelect }) {
 
 // Autres types de boosters (Silver, Gold, Légende…) : en stock et/ou en vente contre des pièces. Chacun est un PAQUET comme le booster principal (son nom sur la bande, son halo,
 // son stock en pastille) avec ses boutons dessous (Ouvrir, Acheter) ; « i » ouvre leurs chances. category = la collection en cours (titre du paquet).
+// Prix payé par CE joueur : le prix membre (remise du pass OneMore) quand il est plus bas que le prix affiché ; l'ancien prix est alors barré
+export const buyPrice = (it) => (it.member_price != null && it.price != null && it.member_price < it.price ? it.member_price : it.price)
 export function ExtraBoosters({ items, coins, disabled, onOpen, onBuy, onInfo, category = null }) {
   if (!items || items.length === 0) return null
   return (
@@ -104,8 +106,9 @@ export function ExtraBoosters({ items, coins, disabled, onOpen, onBuy, onInfo, c
               <InfoButton onClick={() => onInfo(it)} label={`Chances du booster ${it.name}`} />
               {it.quantity > 0 && <button type="button" className="btn small" disabled={disabled} onClick={() => onOpen(it)} aria-label={`Ouvrir un booster ${it.name}`}>Ouvrir</button>}
               {it.price != null && (
-                <button type="button" className="btn small ghost" disabled={disabled || coins < it.price} onClick={() => onBuy(it)} aria-label={`Acheter un booster ${it.name} pour ${it.price} pièces`}>
-                  Acheter · {fmt(it.price)} 🪙
+                <button type="button" className="btn small ghost" disabled={disabled || coins < buyPrice(it)} onClick={() => onBuy(it)}
+                  aria-label={`Acheter un booster ${it.name} pour ${buyPrice(it)} pièces${buyPrice(it) < it.price ? ` au lieu de ${it.price}, remise membre` : ''}`}>
+                  Acheter · {buyPrice(it) < it.price ? (<><s className="price-old">{fmt(it.price)}</s> <span className="price-new">{fmt(buyPrice(it))}</span></>) : fmt(it.price)} 🪙
                 </button>
               )}
             </span>
@@ -226,7 +229,8 @@ export default function Boosters({ goCollection, initialCategory = null }) {
   const coinsFree = Math.max(0, (status?.coins ?? 0) - (status?.coins_locked ?? 0))
 
   async function buy(it) {
-    if (!window.confirm(`Acheter un booster ${it.name} pour ${it.price} pièces ?`)) return
+    const pay = buyPrice(it)
+    if (!window.confirm(`Acheter un booster ${it.name} pour ${pay} pièces${pay < it.price ? ` (au lieu de ${it.price} : remise membre)` : ''} ?`)) return
     setError('')
     setNotice('')
     try {

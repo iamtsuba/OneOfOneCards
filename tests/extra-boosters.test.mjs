@@ -10,14 +10,14 @@ const require = createRequire(import.meta.url)
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const out = mkdtempSync(path.join(root, 'tests', '.out-extra-'))
 await build({
-  stdin: { contents: "export { ExtraBoosters } from './src/components/Boosters.jsx'", resolveDir: root, loader: 'js' },
+  stdin: { contents: "export { ExtraBoosters, buyPrice } from './src/components/Boosters.jsx'", resolveDir: root, loader: 'js' },
   bundle: true, format: 'esm', platform: 'node', jsx: 'automatic', outfile: path.join(out, 'bundle.mjs'),
   external: ['react', 'react-dom', 'react/jsx-runtime', '@supabase/supabase-js'],
   define: { 'import.meta.env': JSON.stringify({ MODE: 'preprod', VITE_APP_ENV: 'preprod' }) }, logLevel: 'silent',
 })
 const React = require('react')
 const { renderToStaticMarkup } = require('react-dom/server')
-const { ExtraBoosters } = await import(pathToFileURL(path.join(out, 'bundle.mjs')).href)
+const { ExtraBoosters, buyPrice } = await import(pathToFileURL(path.join(out, 'bundle.mjs')).href)
 rmSync(out, { recursive: true, force: true })
 
 let bad = 0
@@ -55,6 +55,28 @@ ok('le stock en pastille sur le paquet (×2, ×1) seulement quand il y en a', /s
 ok('les boutons sont DESSOUS le paquet : le paquet vient avant le nom, le nom avant les boutons (Acheter, Ouvrir, « i »)', (() => { const t = tile(html, 'Silver'); return t.indexOf('pack-wrap') < t.indexOf('<strong>Silver') && t.indexOf('<strong>Silver') < t.indexOf('extra-actions') && t.indexOf('extra-actions') < t.indexOf('Acheter') })())
 ok('avec la collection en cours, le titre du paquet est le sien ; sans collection, pas de plantage', /Chat’trapez les tous !/.test(tile(withCat, 'Silver')) && !/undefined|NaN/.test(html))
 ok('texte court et sans donnée parasite', !/undefined|NaN|null/.test(html) && html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').length < 420)
+
+// ---------- remise du pass OneMore : l'ancien prix est barré, le prix membre en évidence ----------
+{
+  const norm = (h) => h.replace(/\u202f|\u00a0/g, ' ')
+  const memberItems = [
+    { id: 1, name: 'Silver', cards: 5, color: '#c0c0c0', price: 100, member_price: 80, quantity: 0 },
+    { id: 2, name: 'Bronze', cards: 3, color: '#cd7f32', price: 100, member_price: 100, quantity: 0 },
+    { id: 3, name: 'Mini', cards: 1, color: '#10b981', price: 1, member_price: 1, quantity: 0 },
+    { id: 4, name: 'Vieux', cards: 2, color: '#111111', price: 40, quantity: 0 },
+    { id: 5, name: 'Offert', cards: 2, color: '#222222', price: null, member_price: null, quantity: 1 },
+  ]
+  const mh = (coins = 500) => norm(renderToStaticMarkup(React.createElement(ExtraBoosters, { items: memberItems, coins, disabled: false, onOpen: noop, onBuy: noop, onInfo: noop })))
+  const mt = (h, name) => h.split('<li ').slice(1).find((x) => x.includes(`<strong>${name}</strong>`)) ?? ''
+  const h1 = mh()
+  ok('membre : un booster à 100 est affiché « Acheter · 100 barré 80 🪙 » (ancien prix barré, prix membre en évidence)', /Acheter · <s class="price-old">100<\/s> <span class="price-new">80<\/span> 🪙/.test(mt(h1, 'Silver')))
+  ok('membre : la description pour les lecteurs d\'écran donne le prix payé ET l\'ancien prix', /aria-label="Acheter un booster Silver pour 80 pièces au lieu de 100, remise membre"/.test(mt(h1, 'Silver')))
+  ok('sans remise (prix membre = prix, ou absent chez un ancien serveur) : aucun prix barré, texte inchangé', !/<s |price-old|price-new/.test(mt(h1, 'Bronze')) && /Acheter · 100 🪙/.test(mt(h1, 'Bronze')) && !/<s |price-old/.test(mt(h1, 'Vieux')) && /Acheter · 40 🪙/.test(mt(h1, 'Vieux')) && /aria-label="Acheter un booster Bronze pour 100 pièces"/.test(mt(h1, 'Bronze')))
+  ok('un booster à 1 pièce reste à 1 (jamais de prix barré inutile) ; un booster hors vente n\'a pas de bouton Acheter', !/price-old/.test(mt(h1, 'Mini')) && /Acheter · 1 🪙/.test(mt(h1, 'Mini')) && !/Acheter/.test(mt(h1, 'Offert')))
+  const btnOf = (h, name) => (mt(h, name).match(/<button[^>]*aria-label="Acheter[^>]*>/) || [''])[0]
+  ok('solde : le bouton se règle sur le prix MEMBRE (79 pièces : désactivé ; 80 : actif) et non sur l\'ancien prix', /disabled=""/.test(btnOf(mh(79), 'Silver')) && !/disabled=""/.test(btnOf(mh(80), 'Silver')) && /disabled=""/.test(btnOf(mh(99), 'Bronze')) && !/disabled=""/.test(btnOf(mh(100), 'Bronze')))
+  ok('buyPrice : le prix membre quand il est plus bas, sinon le prix affiché ; jamais plus cher ni absent', buyPrice({ price: 100, member_price: 80 }) === 80 && buyPrice({ price: 100, member_price: 100 }) === 100 && buyPrice({ price: 100 }) === 100 && buyPrice({ price: 100, member_price: 150 }) === 100 && buyPrice({ price: null, member_price: null }) === null)
+}
 
 if (bad) { console.error(`\n${bad} ÉCHEC(S)`); process.exit(1) }
 console.log('\nAutres boosters (rendu) : tous les contrôles sont passés.')
