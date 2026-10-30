@@ -874,7 +874,7 @@ ul.odds-slots li span { color: var(--ink-soft); }
 .price-old { text-decoration: line-through; opacity: .6; font-weight: 600; }
 .price-new { font-weight: 800; color: #16794b; }
 .subscription { text-align: left; }
-.subscription .btn { justify-self: start; }
+.subscription .btn { justify-self: center; }   /* bouton d'achat du pass centré sous les avantages */
 
 
 /* Abonné : fond doré clair à la place du gris clair ; booster et cadeau en évidence */

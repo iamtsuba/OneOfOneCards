@@ -19,12 +19,13 @@ dom.window.confirm = () => true
 const json = (v, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
 const calls = []        // appels serveur : [nom, corps]
 let openReply = null    // réponse simulée à une ouverture (null : erreur 400)
+let buyFail = null      // message d'erreur simulé pour un achat (null : achat réussi)
 globalThis.fetch = async (url, init) => {
   const u = String(url); const body = init?.body ? JSON.parse(init.body) : {}
   const name = ['open_booster_of_type', 'open_booster', 'open_golden_pack', 'buy_booster', 'open_gold_reward'].find((n) => u.includes(n))
   if (name) {
     calls.push([name, body])
-    if (name === 'buy_booster') return json({ ok: true, status: { ...currentStatus, coins: 350 } })
+    if (name === 'buy_booster') return buyFail ? json({ message: buyFail }, 400) : json({ ok: true, status: { ...currentStatus, coins: 350 } })
     return openReply ? json(openReply) : json({ message: 'ouverture simulée' }, 400)
   }
   return json([])
@@ -155,16 +156,97 @@ const two = { ...base, active_categories: [c5, c6] }
   clearSaved()
 }
 
-// ---------- achat : lié à la collection choisie ----------
+// ---------- achat : le booster s'ouvre tout de suite, dans la collection choisie ----------
+const waitFor = async (fn, ms = 5000) => { const t0 = Date.now(); while (Date.now() - t0 < ms && !fn()) await wait(50); return fn() }
+const boughtCard = { type_id: 1, base_rarity: 'rare', series: 5, number: 3, rarity_id: 'rare', is_new: true }
+const premiumReply = (cat = 6) => ({ cards: [boughtCard], category_id: cat, booster: { id: 30, name: 'Premium', color: '#9ca3af', glow: 'none' }, status: { ...base, active_category_id: cat } })
+const buyBtnOf = (h) => [...h.querySelectorAll('.extra-boosters button')].find((b) => /Acheter/.test(b.textContent))
+const toSummary = async (h) => { await waitFor(() => !!h.querySelector('.reveal-card')); await wait(300); await click(h.querySelector('.reveal-card')); return waitFor(() => !!h.querySelector('[aria-label="Résumé du booster"]')) }
 {
+  openReply = premiumReply(6)
   const m = await mountPage({ ...two, booster_types: [premium] })
   await change(select(m.host), '6')
   calls.length = 0
-  await click([...m.host.querySelectorAll('.extra-boosters button')].find((b) => /Acheter/.test(b.textContent)))
-  ok('acheter un Premium : p_category = la collection choisie (6)', calls.length === 1 && calls[0][0] === 'buy_booster' && calls[0][1].p_type === 30 && calls[0][1].p_category === 6)
-  ok('le message dit pour quelle collection il est acheté', /ajouté à ton stock pour la collection « Rat’trapez les tous ! »/.test(text(m.host)))
+  await click(buyBtnOf(m.host))
+  await waitFor(() => calls.length >= 2)
+  ok('acheter un Premium : p_category = la collection choisie (6)', calls[0][0] === 'buy_booster' && calls[0][1].p_type === 30 && calls[0][1].p_category === 6)
+  ok('le booster acheté s\'ouvre AUSSITÔT : open_booster_of_type du Premium dans la même collection (6), sans passer par le stock', calls.length === 2 && calls[1][0] === 'open_booster_of_type' && calls[1][1].p_type === 30 && calls[1][1].p_category === 6)
+  ok('la fenêtre d\'ouverture est là (le paquet s\'ouvre), plus aucun message « ajouté à ton stock »', !!m.host.querySelector('[aria-label="Ouverture du booster"], [aria-label="Cartes du booster"]') && !/ajouté à ton stock/.test(text(m.host)))
   await m.unmount()
   clearSaved()
+}
+{
+  // fin d'ouverture d'un booster PAYANT : « Acheter un nouveau booster · prix »
+  openReply = premiumReply(5)
+  const m = await mountPage({ ...base, coins: 500, booster_types: [{ ...premium, quantity: 0 }] })
+  await click(buyBtnOf(m.host))
+  ok('résumé de l\'ouverture atteint', await toSummary(m.host))
+  const again = btn(m.host, /Acheter un nouveau booster/)
+  ok('booster payant : le bouton « Acheter un nouveau booster · 150 🪙 » apparaît à la fin, actif (500 pièces)', !!again && /Acheter un nouveau booster · 150 🪙/.test(text(again)) && again.disabled === false && /pour 150 pièces/.test(again.getAttribute('aria-label')))
+  ok('le bouton est dans les actions du résumé, avant « Voir ma collection » et « Fermer »', (() => { const names = [...m.host.querySelectorAll('.overlay-actions button')].map((b) => b.textContent); return /Acheter un nouveau booster/.test(names[0]) && /Voir ma collection/.test(names.at(-2)) && /Fermer/.test(names.at(-1)) })())
+  calls.length = 0
+  await click(again)
+  await waitFor(() => calls.length >= 2)
+  ok('cliquer : achat du même booster (collection choisie 5) puis ouverture immédiate d\'un nouveau, sans quitter la fenêtre', calls[0][0] === 'buy_booster' && calls[0][1].p_type === 30 && calls[0][1].p_category === 5 && calls[1][0] === 'open_booster_of_type' && calls[1][1].p_type === 30 && !!m.host.querySelector('.overlay'))
+  await toSummary(m.host)
+  ok('et la fin de ce nouveau booster propose de nouveau d\'en acheter un', !!btn(m.host, /Acheter un nouveau booster/))
+  await m.unmount()
+  clearSaved()
+}
+{
+  // solde insuffisant : bouton désactivé (le prix MEMBRE compte), aucun appel
+  openReply = premiumReply(5)
+  const m = await mountPage({ ...base, coins: 500, booster_types: [{ ...premium, price: 150, member_price: 120, quantity: 0 }] })
+  await click(buyBtnOf(m.host))
+  await toSummary(m.host)
+  const norm2 = (t) => t.replace(/\u202f|\u00a0/g, ' ')
+  const again = btn(m.host, /Acheter un nouveau booster/)
+  ok('membre : le bouton montre l\'ancien prix barré puis le prix membre (150 → 120)', /Acheter un nouveau booster · 150 120 🪙/.test(norm2(again.textContent)) && !!again.querySelector('s.price-old') && /pour 120 pièces/.test(again.getAttribute('aria-label')))
+  await m.unmount(); clearSaved()
+}
+{
+  // pas de bouton d'achat pour un booster qui n'est pas en vente : stock gratuit, booster hors vente
+  openReply = { cards: [boughtCard], category_id: 5, booster: { id: 1, name: 'Standard', color: '#e8452e', glow: 'none' }, status: { ...base } }
+  const free = await mountPage({ ...base, boosters: 3 })
+  await click(btn(free.host, /^Ouvrir un booster/))
+  await toSummary(free.host)
+  ok('booster du stock gratuit : aucun bouton d\'achat à la fin', !btn(free.host, /Acheter un nouveau booster/))
+  await free.unmount(); clearSaved()
+  const gift = { id: 31, name: 'Légende', cards: 7, color: '#7c3aed', glow: 'none', price: null, quantity: 1 }
+  openReply = { cards: [boughtCard], category_id: 5, booster: { id: 31, name: 'Légende', color: '#7c3aed', glow: 'none' }, status: { ...base } }
+  const hors = await mountPage({ ...base, booster_types: [gift] })
+  await click([...hors.host.querySelectorAll('.shelf-pack')].find((b) => /Légende/.test(b.getAttribute('aria-label'))))
+  await click(btn(hors.host, /^Ouvrir un booster Légende/))
+  await toSummary(hors.host)
+  ok('booster hors vente (cadeau, récompense) : aucun bouton d\'achat à la fin', !btn(hors.host, /Acheter un nouveau booster/))
+  await hors.unmount(); clearSaved()
+}
+{
+  // erreurs
+  buyFail = 'not_enough_coins'
+  const m = await mountPage({ ...base, coins: 500, booster_types: [{ ...premium, quantity: 0 }] })
+  calls.length = 0
+  await click(buyBtnOf(m.host)); await wait(200)
+  ok('achat refusé (pas assez de pièces) : aucune ouverture n\'est tentée, le message s\'affiche', calls.length === 1 && calls[0][0] === 'buy_booster' && /Tu n’as pas assez de pièces/.test(text(m.host)) && !m.host.querySelector('.overlay'))
+  buyFail = null
+  await m.unmount(); clearSaved()
+  // achat réussi mais ouverture impossible (collection terminée...) : le booster reste en stock, l'erreur est montrée
+  openReply = null
+  const m2 = await mountPage({ ...base, coins: 500, booster_types: [{ ...premium, quantity: 0 }] })
+  calls.length = 0
+  await click(buyBtnOf(m2.host)); await waitFor(() => calls.length >= 2); await wait(300)
+  ok('achat réussi mais ouverture impossible : le message d\'erreur s\'affiche et la fenêtre se referme (le booster acheté est dans le stock)', calls.length === 2 && calls[1][0] === 'open_booster_of_type' && !m2.host.querySelector('.overlay') && !!m2.host.querySelector('[role="alert"]'))
+  await m2.unmount(); clearSaved()
+  // échec de l'achat DEPUIS le résumé : message dans la fenêtre, le résumé reste
+  openReply = premiumReply(5)
+  const m3 = await mountPage({ ...base, coins: 500, booster_types: [{ ...premium, quantity: 0 }] })
+  await click(buyBtnOf(m3.host)); await toSummary(m3.host)
+  buyFail = 'not_enough_coins'
+  await click(btn(m3.host, /Acheter un nouveau booster/)); await wait(150)
+  ok('échec d\'un nouvel achat depuis le résumé : message « pas assez de pièces » dans la fenêtre, le résumé reste affiché', /Tu n’as pas assez de pièces/.test(text(m3.host.querySelector('.overlay'))) && !!m3.host.querySelector('[aria-label="Résumé du booster"]'))
+  buyFail = null
+  await m3.unmount(); clearSaved()
+  openReply = null
 }
 
 // ---------- achat avec la remise du pass OneMore : prix barré, confirmation au prix réduit ----------

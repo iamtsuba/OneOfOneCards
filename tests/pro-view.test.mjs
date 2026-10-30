@@ -75,6 +75,7 @@ ok('erreur affichée en alerte ; bouton d\'achat désactivé pendant une action'
 {
   const { readFileSync } = await import('node:fs')
   const css = readFileSync(path.join(root, 'src/styles.css'), 'utf8')
+  ok('bouton d\'achat du pass centré sous les avantages (plus aligné à gauche)', /\.subscription \.btn \{ justify-self: center; \}/.test(css) && !/\.subscription \.btn \{ justify-self: start; \}/.test(css))
   ok('fond du jeu : doré clair pour un membre (html.subscriber), gris clair sinon', /html\.subscriber \{ --bg: #fbf1d3; \}/.test(css) && /:root \{\s*--bg: #e9ebf4;/.test(css))
 }
 

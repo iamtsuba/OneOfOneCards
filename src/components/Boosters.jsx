@@ -228,28 +228,53 @@ export default function Boosters({ goCollection, initialCategory = null }) {
   const [oddsFor, setOddsFor] = useState(null)
   const coinsFree = Math.max(0, (status?.coins ?? 0) - (status?.coins_locked ?? 0))
 
-  async function buy(it) {
+  // Un booster acheté s'ouvre TOUT DE SUITE (il n'attend pas dans le stock). S'il ne peut pas s'ouvrir (collection terminée, réseau), il reste dans le stock et l'erreur est affichée.
+  const [buying, setBuying] = useState(false)
+  const confirmBuy = (it) => {
     const pay = buyPrice(it)
-    if (!window.confirm(`Acheter un booster ${it.name} pour ${pay} pièces${pay < it.price ? ` (au lieu de ${it.price} : remise membre)` : ''} ?`)) return
+    return window.confirm(`Acheter un booster ${it.name} pour ${pay} pièces${pay < it.price ? ` (au lieu de ${it.price} : remise membre)` : ''} ?`)
+  }
+  async function buy(it) {
+    if (buying || !confirmBuy(it)) return
     setError('')
     setNotice('')
+    setBuying(true)
     try {
       const res = await api.buyBooster(it.id, 1, selectedCat?.id)
       setStatus(res.status)
-      setNotice(`Un booster ${it.name} a été ajouté à ton stock${selectedCat ? ` pour la collection « ${selectedCat.name} »` : ''}.`)
+      await open(false, 'type', it.id, { bought: it })
     } catch (e) {
       setError(explain(e))
+    } finally {
+      setBuying(false)
+    }
+  }
+  // « Acheter un nouveau booster » à la fin de l'ouverture d'un booster payant : achat puis ouverture immédiate, sans quitter la fenêtre
+  async function buyAgain(paid) {
+    if (buying || !confirmBuy(paid)) return
+    setBuying(true)
+    try {
+      const res = await api.buyBooster(paid.id, 1, selectedCat?.id)
+      setStatus(res.status)
+      await open(true, 'type', paid.id, { bought: paid })
+    } catch (e) {
+      setOverlay((o) => (o ? { ...o, buyError: explain(e) } : o))
+    } finally {
+      setBuying(false)
     }
   }
 
   // kind : 'normal' (un booster : le stock gratuit), 'type' (un booster d'un type du module Boosters) ou 'gold' (un booster Gold gagné en complétant une carte : rewardId)
-  async function open(fromSummary = false, kind = 'normal', rewardId = null) {
+  // ctx.bought : le booster payant qui vient d'être acheté (on l'ouvre sans attendre que le stock soit relu)
+  async function open(fromSummary = false, kind = 'normal', rewardId = null, ctx = {}) {
     const isGold = kind === 'gold'
     const isType = kind === 'type'
-    const typeInfo = isType ? boosterTypes.find((x) => x.id === rewardId) : null
+    const typeInfo = isType ? (ctx.bought ?? boosterTypes.find((x) => x.id === rewardId)) : null
+    // booster en vente contre des pièces : la fenêtre de résumé propose d'en racheter un
+    const paid = isType && typeInfo?.price != null ? { id: typeInfo.id, name: typeInfo.name, glow: typeInfo.glow, color: typeInfo.color, price: typeInfo.price, member_price: typeInfo.member_price } : null
     const goldType = isGold ? catalog?.typeMap?.[goldRewards.find((g) => g.id === rewardId)?.type_id] : null
     const goldCategory = goldType ? catalog?.categoryMap?.[goldType.category_id] : null
-    if (!(status && (isGold ? goldCategory : category) && (isGold ? true : isType ? typeInfo?.quantity > 0 : total > 0) && (fromSummary === true || !overlay))) return
+    if (!(status && (isGold ? goldCategory : category) && (isGold ? true : isType ? (!!ctx.bought || typeInfo?.quantity > 0) : total > 0) && (fromSummary === true || !overlay))) return
     setError('')
     // nom du booster pendant l'ouverture : celui du module Boosters (Gold, type choisi, booster des abonnés pour un abonné)
     const shakeBooster = isGold ? status?.reward_booster : isType ? typeInfo : status?.standard_booster
@@ -274,7 +299,7 @@ export default function Boosters({ goCollection, initialCategory = null }) {
       }
       setOverlay((o) => ({ ...o, phase: 'tear', golden }))
       await wait(700)
-      setOverlay({ phase: 'reveal', cards, idx: 0, golden, gold: isGold || golden, label: res.booster?.name, categoryId: res.category_id, nextCategoryId: res.status.active_category_id })
+      setOverlay({ phase: 'reveal', cards, idx: 0, golden, gold: isGold || golden, label: res.booster?.name, categoryId: res.category_id, nextCategoryId: res.status.active_category_id, paid })
     } catch (e) {
       setOverlay(null)
       setError(explain(e))
@@ -335,7 +360,7 @@ export default function Boosters({ goCollection, initialCategory = null }) {
           Ouvrir un booster{selGold ? ` ${goldName}` : selType ? ` ${selType.name}` : boosterName ? ` ${boosterName}` : ''}
         </button>
 
-        <ExtraBoosters category={category} items={boosterTypes.filter((b) => !shelfTypes.some((s) => s.id === b.id))} coins={coinsFree} disabled={!!overlay} onOpen={(it) => open(false, 'type', it.id)} onBuy={buy} onInfo={setOddsFor} />
+        <ExtraBoosters category={category} items={boosterTypes.filter((b) => !shelfTypes.some((s) => s.id === b.id))} coins={coinsFree} disabled={!!overlay || buying} onOpen={(it) => open(false, 'type', it.id)} onBuy={buy} onInfo={setOddsFor} />
         {oddsFor && category && <BoosterOddsSheet category={category} boosterType={oddsFor} rarityMap={rarityMap} onClose={() => setOddsFor(null)} />}
         {notice && <p className="msg info" role="status">{notice}</p>}
         {error && <p className="msg error" role="alert">{error}</p>}
@@ -397,6 +422,8 @@ export default function Boosters({ goCollection, initialCategory = null }) {
           catalog={catalog}
           boosters={total}
           onAgain={() => open(true)}
+          coins={coinsFree}
+          onBuyAgain={buyAgain}
           onCollection={() => { setOverlay(null); goCollection() }}
         />
       )}
@@ -404,7 +431,7 @@ export default function Boosters({ goCollection, initialCategory = null }) {
   )
 }
 
-export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onAgain, onCollection }) {
+export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onAgain, onCollection, coins = 0, onBuyAgain }) {
   const shownAt = useRef(Date.now())
   const close = () => setOverlay(null)
   const [zoom, setZoom] = useState(null)   // index de la carte ouverte en grand dans le résumé
@@ -461,7 +488,14 @@ export function Overlay({ overlay, setOverlay, rarityMap, catalog, boosters, onA
         <p className="overlay-hint">
           {cards.length} carte{cards.length > 1 ? 's' : ''} ajoutée{cards.length > 1 ? 's' : ''} à ta collection{cards.filter((x) => x.is_new).length > 0 ? ` (dont ${cards.filter((x) => x.is_new).length} nouvelle${cards.filter((x) => x.is_new).length > 1 ? 's, placées' : ', placée'} dans ton album)` : ''}. Meilleure carte : {rarityMap[rarest.rarity_id]?.name}, {catalog?.typeMap?.[rarest.type_id]?.name}{catalog?.cardRef?.(rarest.type_id, rarest.base_rarity, rarest.number, rarest.series)}.
         </p>
+        {overlay.buyError && <p className="msg error" role="alert">{overlay.buyError}</p>}
         <div className="overlay-actions">
+          {overlay.paid && onBuyAgain && (
+            <button className="btn accent buy-again" onClick={() => onBuyAgain(overlay.paid)} disabled={coins < buyPrice(overlay.paid)}
+              aria-label={`Acheter un nouveau booster ${overlay.paid.name} pour ${buyPrice(overlay.paid)} pièces`}>
+              Acheter un nouveau booster · {buyPrice(overlay.paid) < overlay.paid.price ? (<><s className="price-old">{fmt(overlay.paid.price)}</s> <span className="price-new">{fmt(buyPrice(overlay.paid))}</span></>) : fmt(overlay.paid.price)} 🪙
+            </button>
+          )}
           {boosters > 0 && <button className="btn accent" onClick={onAgain}>Ouvrir un autre booster</button>}
           <button className="btn light" onClick={onCollection}>Voir ma collection</button>
           <button className="btn ghost-light" onClick={close}>Fermer</button>
