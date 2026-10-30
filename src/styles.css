@@ -873,6 +873,20 @@ ul.odds-slots li span { color: var(--ink-soft); }
 /* Boosters en vente : ancien prix barré, prix membre en évidence */
 .price-old { text-decoration: line-through; opacity: .6; font-weight: 600; }
 .price-new { font-weight: 800; color: #16794b; }
+/* Fenêtre de validation d'un achat de booster : panneau clair (comme les autres fenêtres), au-dessus du reste */
+.buy-confirm { z-index: 60; }
+.buy-confirm .sheet { text-align: center; }
+.buy-confirm .sheet h3 { font-size: 21px; }
+.confirm-pack { display: flex; justify-content: center; margin: 2px 0 4px; }
+.confirm-pack .pack-wrap { width: 104px; }
+.confirm-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; text-align: left; }
+.confirm-lines li { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; padding: 9px 12px; border-radius: 12px; background: rgba(20, 23, 63, .05); }
+.confirm-lines li > span { color: var(--ink-soft); }
+.confirm-lines li > strong { text-align: right; }
+.confirm-lines .confirm-note { background: rgba(22, 121, 75, .1); }
+.confirm-lines .confirm-note > strong { color: #16794b; }
+.confirm-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.buy-confirm .sheet .muted { margin: 0; }
 .subscription { text-align: left; }
 .subscription .btn { justify-self: center; }   /* bouton d'achat du pass centré sous les avantages */
 

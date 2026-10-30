@@ -14,10 +14,11 @@ globalThis.document = dom.window.document
 Object.defineProperty(globalThis, 'navigator', { value: dom.window.navigator, configurable: true })
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} }
-dom.window.confirm = () => true
+dom.window.confirm = (m) => { confirmAsked.push(m); return true }
 
 const json = (v, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } })
 const calls = []        // appels serveur : [nom, corps]
+const confirmAsked = []  // appels à la boîte de dialogue du navigateur (il ne doit plus y en avoir)
 let openReply = null    // réponse simulée à une ouverture (null : erreur 400)
 let buyFail = null      // message d'erreur simulé pour un achat (null : achat réussi)
 globalThis.fetch = async (url, init) => {
@@ -161,13 +162,21 @@ const waitFor = async (fn, ms = 5000) => { const t0 = Date.now(); while (Date.no
 const boughtCard = { type_id: 1, base_rarity: 'rare', series: 5, number: 3, rarity_id: 'rare', is_new: true }
 const premiumReply = (cat = 6) => ({ cards: [boughtCard], category_id: cat, booster: { id: 30, name: 'Premium', color: '#9ca3af', glow: 'none' }, status: { ...base, active_category_id: cat } })
 const buyBtnOf = (h) => [...h.querySelectorAll('.extra-boosters button')].find((b) => /Acheter/.test(b.textContent))
+const confirmYes = async (h) => { await waitFor(() => !!h.querySelector('.buy-confirm .confirm-yes')); await click(h.querySelector('.buy-confirm .confirm-yes')) }
+const popup = (h) => h.querySelector('.buy-confirm')
 const toSummary = async (h) => { await waitFor(() => !!h.querySelector('.reveal-card')); await wait(300); await click(h.querySelector('.reveal-card')); return waitFor(() => !!h.querySelector('[aria-label="Résumé du booster"]')) }
 {
   openReply = premiumReply(6)
   const m = await mountPage({ ...two, booster_types: [premium] })
   await change(select(m.host), '6')
   calls.length = 0
+  confirmAsked.length = 0
   await click(buyBtnOf(m.host))
+  const pop = popup(m.host)
+  const flat = (t) => t.replace(/\u202f|\u00a0/g, ' ').replace(/\s+/g, ' ')
+  ok('« Acheter » ouvre une fenêtre de validation du jeu (pas la boîte du navigateur), sans rien acheter encore', !!pop && pop.getAttribute('role') === 'dialog' && /Acheter un booster Premium \?/.test(pop.textContent) && calls.length === 0 && confirmAsked.length === 0)
+  ok('la fenêtre est dans un panneau clair (« sheet ») : prix 150, collection choisie, solde avant et après, « s\'ouvre tout de suite »', !!pop.querySelector('.sheet section h3') && /Prix150 🪙/.test(flat(pop.textContent)) && /CollectionRat’trapez les tous !/.test(flat(pop.textContent)) && /Ton solde500 🪙 → 350 🪙/.test(flat(pop.textContent)) && /Le booster s’ouvre tout de suite/.test(pop.textContent))
+  await confirmYes(m.host)
   await waitFor(() => calls.length >= 2)
   ok('acheter un Premium : p_category = la collection choisie (6)', calls[0][0] === 'buy_booster' && calls[0][1].p_type === 30 && calls[0][1].p_category === 6)
   ok('le booster acheté s\'ouvre AUSSITÔT : open_booster_of_type du Premium dans la même collection (6), sans passer par le stock', calls.length === 2 && calls[1][0] === 'open_booster_of_type' && calls[1][1].p_type === 30 && calls[1][1].p_category === 6)
@@ -179,15 +188,17 @@ const toSummary = async (h) => { await waitFor(() => !!h.querySelector('.reveal-
   // fin d'ouverture d'un booster PAYANT : « Acheter un nouveau booster · prix »
   openReply = premiumReply(5)
   const m = await mountPage({ ...base, coins: 500, booster_types: [{ ...premium, quantity: 0 }] })
-  await click(buyBtnOf(m.host))
+  await click(buyBtnOf(m.host)); await confirmYes(m.host)
   ok('résumé de l\'ouverture atteint', await toSummary(m.host))
   const again = btn(m.host, /Acheter un nouveau booster/)
   ok('booster payant : le bouton « Acheter un nouveau booster · 150 🪙 » apparaît à la fin, actif (500 pièces)', !!again && /Acheter un nouveau booster · 150 🪙/.test(text(again)) && again.disabled === false && /pour 150 pièces/.test(again.getAttribute('aria-label')))
   ok('le bouton est dans les actions du résumé, avant « Voir ma collection » et « Fermer »', (() => { const names = [...m.host.querySelectorAll('.overlay-actions button')].map((b) => b.textContent); return /Acheter un nouveau booster/.test(names[0]) && /Voir ma collection/.test(names.at(-2)) && /Fermer/.test(names.at(-1)) })())
   calls.length = 0
   await click(again)
+  ok('depuis le résumé : la même fenêtre de validation s\'ouvre PAR-DESSUS (rien n\'est acheté tant qu\'on n\'a pas validé)', !!popup(m.host) && calls.length === 0 && !!m.host.querySelector('[aria-label="Résumé du booster"]'))
+  await confirmYes(m.host)
   await waitFor(() => calls.length >= 2)
-  ok('cliquer : achat du même booster (collection choisie 5) puis ouverture immédiate d\'un nouveau, sans quitter la fenêtre', calls[0][0] === 'buy_booster' && calls[0][1].p_type === 30 && calls[0][1].p_category === 5 && calls[1][0] === 'open_booster_of_type' && calls[1][1].p_type === 30 && !!m.host.querySelector('.overlay'))
+  ok('valider : achat du même booster (collection choisie 5) puis ouverture immédiate d\'un nouveau, sans quitter la fenêtre', calls[0][0] === 'buy_booster' && calls[0][1].p_type === 30 && calls[0][1].p_category === 5 && calls[1][0] === 'open_booster_of_type' && calls[1][1].p_type === 30 && !!m.host.querySelector('.overlay'))
   await toSummary(m.host)
   ok('et la fin de ce nouveau booster propose de nouveau d\'en acheter un', !!btn(m.host, /Acheter un nouveau booster/))
   await m.unmount()
@@ -197,7 +208,7 @@ const toSummary = async (h) => { await waitFor(() => !!h.querySelector('.reveal-
   // solde insuffisant : bouton désactivé (le prix MEMBRE compte), aucun appel
   openReply = premiumReply(5)
   const m = await mountPage({ ...base, coins: 500, booster_types: [{ ...premium, price: 150, member_price: 120, quantity: 0 }] })
-  await click(buyBtnOf(m.host))
+  await click(buyBtnOf(m.host)); await confirmYes(m.host)
   await toSummary(m.host)
   const norm2 = (t) => t.replace(/\u202f|\u00a0/g, ' ')
   const again = btn(m.host, /Acheter un nouveau booster/)
@@ -226,7 +237,7 @@ const toSummary = async (h) => { await waitFor(() => !!h.querySelector('.reveal-
   buyFail = 'not_enough_coins'
   const m = await mountPage({ ...base, coins: 500, booster_types: [{ ...premium, quantity: 0 }] })
   calls.length = 0
-  await click(buyBtnOf(m.host)); await wait(200)
+  await click(buyBtnOf(m.host)); await confirmYes(m.host); await wait(200)
   ok('achat refusé (pas assez de pièces) : aucune ouverture n\'est tentée, le message s\'affiche', calls.length === 1 && calls[0][0] === 'buy_booster' && /Tu n’as pas assez de pièces/.test(text(m.host)) && !m.host.querySelector('.overlay'))
   buyFail = null
   await m.unmount(); clearSaved()
@@ -234,39 +245,54 @@ const toSummary = async (h) => { await waitFor(() => !!h.querySelector('.reveal-
   openReply = null
   const m2 = await mountPage({ ...base, coins: 500, booster_types: [{ ...premium, quantity: 0 }] })
   calls.length = 0
-  await click(buyBtnOf(m2.host)); await waitFor(() => calls.length >= 2); await wait(300)
+  await click(buyBtnOf(m2.host)); await confirmYes(m2.host); await waitFor(() => calls.length >= 2); await wait(300)
   ok('achat réussi mais ouverture impossible : le message d\'erreur s\'affiche et la fenêtre se referme (le booster acheté est dans le stock)', calls.length === 2 && calls[1][0] === 'open_booster_of_type' && !m2.host.querySelector('.overlay') && !!m2.host.querySelector('[role="alert"]'))
   await m2.unmount(); clearSaved()
   // échec de l'achat DEPUIS le résumé : message dans la fenêtre, le résumé reste
   openReply = premiumReply(5)
   const m3 = await mountPage({ ...base, coins: 500, booster_types: [{ ...premium, quantity: 0 }] })
-  await click(buyBtnOf(m3.host)); await toSummary(m3.host)
+  await click(buyBtnOf(m3.host)); await confirmYes(m3.host); await toSummary(m3.host)
   buyFail = 'not_enough_coins'
-  await click(btn(m3.host, /Acheter un nouveau booster/)); await wait(150)
+  await click(btn(m3.host, /Acheter un nouveau booster/)); await confirmYes(m3.host); await wait(150)
   ok('échec d\'un nouvel achat depuis le résumé : message « pas assez de pièces » dans la fenêtre, le résumé reste affiché', /Tu n’as pas assez de pièces/.test(text(m3.host.querySelector('.overlay'))) && !!m3.host.querySelector('[aria-label="Résumé du booster"]'))
   buyFail = null
   await m3.unmount(); clearSaved()
   openReply = null
 }
 
-// ---------- achat avec la remise du pass OneMore : prix barré, confirmation au prix réduit ----------
+// ---------- fenêtre de validation : remise membre, solde, annulation ----------
 {
-  const asked = []
-  dom.window.confirm = (msg) => { asked.push(msg); return true }
-  const norm = (t) => t.replace(/\u202f|\u00a0/g, ' ')
+  openReply = premiumReply(5)
+  const norm = (t) => t.replace(/\u202f|\u00a0/g, ' ').replace(/\s+/g, ' ')
   const mem = await mountPage({ ...two, coins: 1000, booster_types: [{ ...premium, price: 150, member_price: 120 }] })
-  const buyBtn = () => [...mem.host.querySelectorAll('.extra-boosters button')].find((b) => /Acheter/.test(b.textContent))
-  ok('membre : le bouton montre l\'ancien prix barré (150) puis le prix membre (120)', /Acheter · 150 120 🪙/.test(norm(buyBtn().textContent)) && !!buyBtn().querySelector('s.price-old') && buyBtn().querySelector('.price-new').textContent.replace(/\s/g, '') === '120')
-  await click(buyBtn())
-  ok('la confirmation annonce le prix réduit ET l\'ancien : « pour 120 pièces (au lieu de 150 : remise membre) »', asked.length === 1 && /pour 120 pièces \(au lieu de 150 : remise membre\) \?/.test(norm(asked[0])))
+  const bb = () => [...mem.host.querySelectorAll('.extra-boosters button')].find((b) => /Acheter/.test(b.textContent))
+  ok('membre : le bouton montre l\'ancien prix barré (150) puis le prix membre (120)', /Acheter · 150 120 🪙/.test(norm(bb().textContent)) && !!bb().querySelector('s.price-old'))
+  calls.length = 0; confirmAsked.length = 0
+  await click(bb())
+  let pop = popup(mem.host)
+  ok('la validation montre le prix barré, le prix membre et la remise (−30)', !!pop.querySelector('s.price-old') && pop.querySelector('s.price-old').textContent.trim() === '150' && /Remise membre OneMore/.test(pop.textContent) && /−30 🪙/.test(norm(pop.textContent)) && /Acheter · 120 🪙/.test(norm(pop.querySelector('.confirm-yes').textContent)))
+  ok('le solde est annoncé avant et après (1 000 → 880)', /1 000 🪙 → 880 🪙/.test(norm(pop.textContent)))
+  await click(pop.querySelector('.confirm-no'))
+  ok('Annuler : la fenêtre se ferme, rien n\'est acheté ni ouvert, aucune boîte du navigateur', !popup(mem.host) && calls.length === 0 && confirmAsked.length === 0 && !mem.host.querySelector('.overlay'))
+  await click(bb())
+  await act(async () => { window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape' })) }); await wait(40)
+  ok('Échap ferme aussi la fenêtre sans rien acheter', !popup(mem.host) && calls.length === 0)
+  await click(bb())
+  await click(popup(mem.host))   // clic sur le fond sombre
+  ok('un clic à côté de la fenêtre l\'annule aussi', !popup(mem.host) && calls.length === 0)
   await mem.unmount(); clearSaved()
-  asked.length = 0
+
   const non = await mountPage({ ...two, coins: 1000, booster_types: [{ ...premium, price: 150, member_price: 150 }] })
-  const buyBtn2 = () => [...non.host.querySelectorAll('.extra-boosters button')].find((b) => /Acheter/.test(b.textContent))
-  await click(buyBtn2())
-  ok('non-membre : prix unique, aucun prix barré, confirmation simple « pour 150 pièces ? »', !buyBtn2().querySelector('s') && asked.length === 1 && /pour 150 pièces \?/.test(norm(asked[0])) && !/remise/.test(asked[0]))
+  await click([...non.host.querySelectorAll('.extra-boosters button')].find((b) => /Acheter/.test(b.textContent)))
+  pop = popup(non.host)
+  ok('non-membre : prix simple, aucune ligne de remise ni prix barré', !pop.querySelector('s') && !/Remise/.test(pop.textContent) && /Acheter · 150 🪙/.test(norm(pop.querySelector('.confirm-yes').textContent)))
   await non.unmount(); clearSaved()
-  dom.window.confirm = () => true
+
+  const exact = await mountPage({ ...two, coins: 150, booster_types: [{ ...premium, price: 150 }] })
+  await click([...exact.host.querySelectorAll('.extra-boosters button')].find((b) => /Acheter/.test(b.textContent)))
+  ok('150 pièces pour un booster à 150 : l\'achat est possible, le solde tombera à 0', !popup(exact.host).querySelector('.confirm-yes').disabled && /150 🪙 → 0 🪙/.test(norm(popup(exact.host).textContent)))
+  await exact.unmount(); clearSaved()
+  openReply = null
 }
 
 // ---------- collection terminée pendant l'ouverture ----------
@@ -309,6 +335,18 @@ const toSummary = async (h) => { await waitFor(() => !!h.querySelector('.reveal-
   const m = await mountPage({ ...base, active_category_id: null, active_categories: [] })
   ok('aucune collection ouverte : message « Toutes les collections… », ni titre ni liste', /Toutes les collections de boosters ont été entièrement tirées/.test(text(m.host)) && !m.host.querySelector('.pack-name') && !m.host.querySelector('select'))
   await m.unmount()
+}
+
+// ---------- style de la fenêtre de validation ----------
+{
+  const { readFileSync } = await import('node:fs')
+  const css = readFileSync(path.join(root, 'src/styles.css'), 'utf8')
+  const src = readFileSync(path.join(root, 'src/components/Boosters.jsx'), 'utf8')
+  ok('plus aucune boîte de dialogue du navigateur (window.confirm) dans la page Boosters', !/window\.confirm|[^.\w]confirm\(/.test(src))
+  ok('la fenêtre s\'affiche AU-DESSUS du résumé d\'ouverture (z-index 60 contre 50)', /\.overlay \{[^}]*z-index: 50/.test(css) && /\.buy-confirm \{ z-index: 60; \}/.test(css))
+  ok('mise en page : panneau clair centré, lignes prix / collection / solde en deux colonnes, boutons centrés qui passent à la ligne', /\.buy-confirm \.sheet \{ text-align: center; \}/.test(css) && /\.confirm-lines li \{[^}]*display: flex[^}]*justify-content: space-between/.test(css) && /\.confirm-actions \{[^}]*justify-content: center[^}]*flex-wrap: wrap/.test(css))
+  ok('le petit paquet est réduit (104 px) pour ne pas écraser la fenêtre', /\.confirm-pack \.pack-wrap \{ width: 104px; \}/.test(css))
+  ok('prix barré et prix membre : mêmes styles que dans la boutique', /\.price-old \{ text-decoration: line-through/.test(css) && /\.price-new \{ font-weight: 800/.test(css))
 }
 
 if (bad) { console.error(`\n${bad} ÉCHEC(S)`); process.exit(1) }

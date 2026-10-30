@@ -82,6 +82,51 @@ export function PackShelf({ packs, selected, category, disabled, onSelect }) {
   )
 }
 
+// Fenêtre de validation d'un achat de booster (dans le style du jeu, pas la boîte du navigateur) : ce qu'on achète, le prix (prix membre barré/réduit), la collection, le solde avant et après.
+// item = le booster ; collection = la collection dans laquelle il sera ouvert (ou null) ; coins = pièces libres du joueur
+export function BuyConfirm({ item, category = null, collection = null, coins = 0, busy = false, onConfirm, onCancel }) {
+  const pay = buyPrice(item)
+  const discounted = pay < item.price
+  const missing = Math.max(0, pay - coins)
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape' && !busy) onCancel() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [busy, onCancel])
+  return (
+    <div className="overlay buy-confirm" role="dialog" aria-modal="true" aria-label={`Confirmer l’achat du booster ${item.name}`} onClick={() => { if (!busy) onCancel() }}>
+      <div className="detail" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet">
+          <section>
+            <h3>Acheter un booster {item.name} ?</h3>
+            <div className="confirm-pack"><Pack category={category} label={item.name} glow={item.glow} color={item.color} /></div>
+            <ul className="confirm-lines">
+              <li>
+                <span>Prix</span>
+                <strong>
+                  {discounted ? (<><s className="price-old">{fmt(item.price)}</s> <span className="price-new">{fmt(pay)}</span></>) : fmt(pay)} 🪙
+                </strong>
+              </li>
+              {discounted && <li className="confirm-note"><span>Remise membre OneMore</span><strong>−{fmt(item.price - pay)} 🪙</strong></li>}
+              {collection && <li><span>Collection</span><strong>{collection.name}</strong></li>}
+              <li><span>Ton solde</span><strong>{fmt(coins)} 🪙{missing === 0 ? <> → {fmt(coins - pay)} 🪙</> : null}</strong></li>
+            </ul>
+            {missing > 0 ? (
+              <p className="msg error" role="alert">Il te manque {fmt(missing)} pièce{missing > 1 ? 's' : ''} pour cet achat.</p>
+            ) : (
+              <p className="muted">Le booster s’ouvre tout de suite.</p>
+            )}
+            <div className="confirm-actions">
+              <button type="button" className="btn accent confirm-yes" onClick={onConfirm} disabled={busy || missing > 0}>{busy ? 'Achat…' : `Acheter · ${fmt(pay)} 🪙`}</button>
+              <button type="button" className="btn ghost confirm-no" onClick={onCancel} disabled={busy}>Annuler</button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // Autres types de boosters (Silver, Gold, Légende…) : en stock et/ou en vente contre des pièces. Chacun est un PAQUET comme le booster principal (son nom sur la bande, son halo,
 // son stock en pastille) avec ses boutons dessous (Ouvrir, Acheter) ; « i » ouvre leurs chances. category = la collection en cours (titre du paquet).
 // Prix payé par CE joueur : le prix membre (remise du pass OneMore) quand il est plus bas que le prix affiché ; l'ancien prix est alors barré
@@ -230,35 +275,25 @@ export default function Boosters({ goCollection, initialCategory = null }) {
 
   // Un booster acheté s'ouvre TOUT DE SUITE (il n'attend pas dans le stock). S'il ne peut pas s'ouvrir (collection terminée, réseau), il reste dans le stock et l'erreur est affichée.
   const [buying, setBuying] = useState(false)
-  const confirmBuy = (it) => {
-    const pay = buyPrice(it)
-    return window.confirm(`Acheter un booster ${it.name} pour ${pay} pièces${pay < it.price ? ` (au lieu de ${it.price} : remise membre)` : ''} ?`)
-  }
-  async function buy(it) {
-    if (buying || !confirmBuy(it)) return
+  const [ask, setAsk] = useState(null)   // achat en attente de validation : { item, again } (again : depuis le résumé d'une ouverture)
+  // « Acheter » ouvre la fenêtre de validation ; c'est elle qui lance l'achat
+  const buy = (it) => { if (!buying) setAsk({ item: it, again: false }) }
+  const buyAgain = (paid) => { if (!buying) setAsk({ item: paid, again: true }) }
+  async function confirmPurchase() {
+    if (!ask || buying) return
+    const { item, again } = ask
+    setBuying(true)
     setError('')
     setNotice('')
-    setBuying(true)
     try {
-      const res = await api.buyBooster(it.id, 1, selectedCat?.id)
+      const res = await api.buyBooster(item.id, 1, selectedCat?.id)
       setStatus(res.status)
-      await open(false, 'type', it.id, { bought: it })
+      setAsk(null)
+      await open(again, 'type', item.id, { bought: item })   // le booster acheté s'ouvre tout de suite, dans la même fenêtre si on vient du résumé
     } catch (e) {
-      setError(explain(e))
-    } finally {
-      setBuying(false)
-    }
-  }
-  // « Acheter un nouveau booster » à la fin de l'ouverture d'un booster payant : achat puis ouverture immédiate, sans quitter la fenêtre
-  async function buyAgain(paid) {
-    if (buying || !confirmBuy(paid)) return
-    setBuying(true)
-    try {
-      const res = await api.buyBooster(paid.id, 1, selectedCat?.id)
-      setStatus(res.status)
-      await open(true, 'type', paid.id, { bought: paid })
-    } catch (e) {
-      setOverlay((o) => (o ? { ...o, buyError: explain(e) } : o))
+      setAsk(null)
+      if (again) setOverlay((o) => (o ? { ...o, buyError: explain(e) } : o))
+      else setError(explain(e))
     } finally {
       setBuying(false)
     }
@@ -410,6 +445,8 @@ export default function Boosters({ goCollection, initialCategory = null }) {
           </div>
         )}
       </div>
+
+      {ask && <BuyConfirm item={ask.item} category={category} collection={selectedCat} coins={coinsFree} busy={buying} onConfirm={confirmPurchase} onCancel={() => setAsk(null)} />}
 
       {consentOpen && <PurchaseConsent status={status} onClose={() => setConsentOpen(false)} />}
       {termsOpen && <LegalSheet onClose={() => setTermsOpen(false)} />}
