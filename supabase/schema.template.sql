@@ -32,7 +32,7 @@ insert into public.{{P}}config (key, value, description) values
   ('auction_min_increment',  1,    'Surenchère minimale (pièces)'),
   ('auction_extend_seconds', 60,   'Si une mise arrive dans les X dernières secondes, le compteur repart à X secondes'),
   ('subscription_enabled',       0,   'Pass Pro (achat unique, à vie) : 1 = proposé aux joueurs, 0 = masqué'),
-  ('subscription_price_cents',    999, 'Pass Pro : prix de l''achat unique en centimes d''euro (999 = 9,99 €) ; ne change pas ce que les membres ont déjà payé'),
+  ('subscription_price_cents',    999, 'Pass Pro : prix de l''achat unique en centimes d''euro, HORS TVA (499 = 4,99 € HT ; la TVA du réglage vat_percent s''y ajoute) ; ne change pas ce que les membres ont déjà payé'),
   ('subscriber_regen_minutes',    5,   'Pass Pro : délai entre deux recharges de boosters pour les membres Pro (minutes)'),
   ('subscriber_discount_percent', 20,  'Pass Pro : remise (en %) sur le prix en pièces des boosters en vente, pour les membres Pro (0 = aucune remise)'),
   ('subscription_gift_quantity',  1,   'Pass Pro : boosters « cadeau Pro » offerts une seule fois, à l''achat'),
@@ -40,7 +40,8 @@ insert into public.{{P}}config (key, value, description) values
   ('cgu_version',           1,    'Version des conditions générales d''utilisation : en la montant, chaque joueur doit les accepter de nouveau avant de rejouer'),
   ('shop_enabled',           {{SHOP_ENABLED}},    'Boutique Stripe : 1 = visible dans l''application, 0 = masquée (à passer à 1 une fois Stripe configuré). Activée par défaut en préproduction pour pouvoir tester les achats'),
   ('stripe_pack_boosters',   10,   'Boosters bonus ajoutés par achat'),
-  ('stripe_pack_price_cents', 99,  'Prix d''un pack en centimes d''euro (99 = 0,99 EUR)'),
+  ('stripe_pack_price_cents', 99,  'Prix d''un pack en centimes d''euro, HORS TVA (99 = 0,99 € HT ; la TVA du réglage vat_percent s''y ajoute)'),
+  ('vat_percent',               20,  'TVA (en %) ajoutée au prix des achats en euros (pass Pro, packs de boosters) : affichée dans le jeu, et ajoutée par Stripe au paiement ; 0 = aucune TVA'),
   ('cgv_version',            3,    'Version des conditions générales de vente. À incrémenter à chaque modification du texte : les joueurs doivent alors ré-accepter avant de payer')
 on conflict (key) do nothing;
 -- Libellé corrigé : la revente directe retire la carte du jeu (elle ne retourne plus dans les boosters). Sans effet une fois corrigé.
@@ -914,6 +915,7 @@ begin
     'shop_enabled',        coalesce(public.{{P}}cfg('shop_enabled'), 0) = 1,
     'pack_boosters',       public.{{P}}cfg('stripe_pack_boosters')::int,
     'pack_price_cents',    public.{{P}}cfg('stripe_pack_price_cents')::int,
+    'vat_percent',         greatest(least(coalesce(public.{{P}}cfg('vat_percent'), 0), 100), 0),   -- TVA affichée en plus des prix en euros (0 = aucune)
     'cgv_version',         coalesce(public.{{P}}cfg('cgv_version'), 1)::int,
     'max_boosters',        v_max,
     'regen_minutes',       v_min,
@@ -1048,9 +1050,10 @@ insert into public.{{P}}text_config (key, value, description) values
 on conflict (key) do nothing;
 -- descriptions à jour aussi pour une base qui avait déjà ces réglages
 update public.{{P}}text_config set description = 'Nom du pass Pro (affiché aux joueurs)' where key = 'subscription_name';
+update public.{{P}}config set description = 'Prix d''un pack en centimes d''euro, HORS TVA (99 = 0,99 € HT ; la TVA du réglage vat_percent s''y ajoute)' where key = 'stripe_pack_price_cents';
 update public.{{P}}config set description = case key
   when 'subscription_enabled' then 'Pass Pro (achat unique, à vie) : 1 = proposé aux joueurs, 0 = masqué'
-  when 'subscription_price_cents' then 'Pass Pro : prix de l''achat unique en centimes d''euro (999 = 9,99 €) ; ne change pas ce que les membres ont déjà payé'
+  when 'subscription_price_cents' then 'Pass Pro : prix de l''achat unique en centimes d''euro, HORS TVA (499 = 4,99 € HT ; la TVA du réglage vat_percent s''y ajoute) ; ne change pas ce que les membres ont déjà payé'
   when 'subscriber_regen_minutes' then 'Pass Pro : délai entre deux recharges de boosters pour les membres Pro (minutes)'
   when 'subscription_gift_quantity' then 'Pass Pro : boosters « cadeau Pro » offerts une seule fois, à l''achat' end
  where key in ('subscription_enabled', 'subscription_price_cents', 'subscriber_regen_minutes', 'subscription_gift_quantity');

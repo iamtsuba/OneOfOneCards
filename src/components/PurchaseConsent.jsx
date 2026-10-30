@@ -3,10 +3,10 @@ import * as api from '../api'
 import { explain } from '../api'
 import LegalSheet from './Legal'
 
-const euro = (cents) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(cents / 100)
+import { payable, payAmount, vatDetail } from '../price'
 
 // Formulaire de consentement : le paiement n'est possible qu'une fois les deux cases cochées
-export function ConsentForm({ texts, packBoosters, price, busy, error, onConfirm, onCancel, onOpenTerms }) {
+export function ConsentForm({ texts, packBoosters, price, pay, vatLine, busy, error, onConfirm, onCancel, onOpenTerms }) {
   const [cgv, setCgv] = useState(false)
   const [withdrawal, setWithdrawal] = useState(false)
   const ready = !!texts && cgv && withdrawal && !busy
@@ -17,6 +17,7 @@ export function ConsentForm({ texts, packBoosters, price, busy, error, onConfirm
         <p>
           <strong>{packBoosters} boosters</strong> pour <strong>{price}</strong>. Contenu numérique ajouté à ton compte dès le paiement.
         </p>
+        {vatLine && <p className="vat-line vat-line-block">{vatLine}</p>}
 
         <label className="check">
           <input type="checkbox" checked={cgv} onChange={(e) => setCgv(e.target.checked)} />
@@ -32,7 +33,7 @@ export function ConsentForm({ texts, packBoosters, price, busy, error, onConfirm
 
         {error && <p className="msg error" role="alert">{error}</p>}
         <div className="row">
-          <button className="btn accent" onClick={onConfirm} disabled={!ready}>{busy ? 'Redirection…' : `Payer ${price}`}</button>
+          <button className="btn accent" onClick={onConfirm} disabled={!ready}>{busy ? 'Redirection…' : `Payer ${pay ?? price}`}</button>
           <button className="btn ghost" onClick={onCancel} disabled={busy}>Annuler</button>
         </div>
         <p className="fine">Paiement sécurisé par Stripe.</p>
@@ -69,7 +70,9 @@ export default function PurchaseConsent({ status, onClose }) {
       <ConsentForm
         texts={texts}
         packBoosters={status.pack_boosters}
-        price={euro(status.pack_price_cents)}
+        price={payable(status.pack_price_cents, status.vat_percent)}
+        pay={payAmount(status.pack_price_cents, status.vat_percent)}
+        vatLine={vatDetail(status.pack_price_cents, status.vat_percent)}
         busy={busy}
         error={error}
         onConfirm={confirm}

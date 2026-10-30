@@ -337,6 +337,23 @@ const toSummary = async (h) => { await waitFor(() => !!h.querySelector('.reveal-
   await m.unmount()
 }
 
+// ---------- boutique de packs : prix TTC et détail de la TVA ----------
+{
+  const norm = (t) => t.replace(/\u202f|\u00a0/g, ' ').replace(/\s+/g, ' ')
+  const shop = { ...base, shop_enabled: true, pack_boosters: 10, pack_price_cents: 99, vat_percent: 20 }
+  const m = await mountPage(shop)
+  const line = norm(m.host.querySelector('.shop .muted').textContent)
+  ok('boutique : « 10 boosters en plus pour 1,19 € TTC (0,99 € HT + TVA 20 % (0,20 €)) »', /10 boosters en plus pour 1,19 € TTC \(0,99 € HT \+ TVA 20 % \(0,20 €\)\)\./.test(line))
+  ok('boutique : le bouton d\'achat du pack ne change pas (« Acheter 10 boosters »)', /Acheter 10 boosters/.test(m.host.querySelector('.shop .btn').textContent))
+  await m.unmount(); clearSaved()
+  const m0 = await mountPage({ ...shop, vat_percent: 0 })
+  ok('boutique sans TVA : « 10 boosters en plus pour 0,99 €. » comme avant, sans détail', /10 boosters en plus pour 0,99 €\./.test(norm(m0.host.querySelector('.shop .muted').textContent)) && !m0.host.querySelector('.shop .vat-line'))
+  await m0.unmount(); clearSaved()
+  const mo = await mountPage({ ...shop, vat_percent: undefined })
+  ok('boutique avec un serveur qui n\'annonce pas encore la TVA : comme avant (0,99 €)', /pour 0,99 €\./.test(norm(mo.host.querySelector('.shop .muted').textContent)))
+  await mo.unmount(); clearSaved()
+}
+
 // ---------- style de la fenêtre de validation ----------
 {
   const { readFileSync } = await import('node:fs')

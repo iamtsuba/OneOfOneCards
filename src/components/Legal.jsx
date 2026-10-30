@@ -3,7 +3,7 @@ import * as api from '../api'
 import { explain } from '../api'
 import { TermsDocument } from './TermsText'
 
-const euro = (cents) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(cents / 100)
+import { payable, vatDetail } from '../price'
 
 // Valeur manquante : mise en évidence pour que le vendeur pense à la renseigner
 const V = ({ value, children }) => (value ? (children ?? value) : <span className="todo">[à compléter]</span>)
@@ -11,7 +11,8 @@ const V = ({ value, children }) => (value ? (children ?? value) : <span classNam
 // Texte des conditions générales de vente et mentions légales.
 // Modèle à faire relire : les informations du vendeur viennent de la table legal (préfixée par l’environnement).
 export function LegalDocument({ legal = {}, config = {} }) {
-  const price = config.stripe_pack_price_cents ? euro(config.stripe_pack_price_cents) : '[prix]'
+  const price = config.stripe_pack_price_cents ? payable(config.stripe_pack_price_cents, config.vat_percent) : '[prix]'
+  const vatNote = config.stripe_pack_price_cents ? vatDetail(config.stripe_pack_price_cents, config.vat_percent) : ''   // « 0,99 € HT + TVA 20 % (0,20 €) » quand une TVA s'ajoute
   const boosters = config.stripe_pack_boosters ?? '[nombre]'
   const mail = legal.seller_email
   return (
@@ -36,8 +37,7 @@ export function LegalDocument({ legal = {}, config = {} }) {
 
       <h3>3. Produit et prix</h3>
       <p>
-        Un pack donne {boosters} boosters supplémentaires, au prix de {price}, toutes taxes comprises lorsqu’elles
-        s’appliquent. Le prix applicable est celui affiché au moment de la commande. Les boosters achetés s’ajoutent au stock
+        Un pack donne {boosters} boosters supplémentaires, au prix de {price}{vatNote ? ` (${vatNote})` : ', toutes taxes comprises lorsqu’elles s’appliquent'}. Le prix applicable est celui affiché au moment de la commande. Les boosters achetés s’ajoutent au stock
         du joueur, ne comptent pas dans le plafond de la recharge gratuite et sont utilisés après le stock gratuit.
       </p>
 

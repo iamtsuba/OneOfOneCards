@@ -3,13 +3,13 @@ import * as api from '../api'
 import { explain } from '../api'
 import LegalSheet from './Legal'
 
-const euro = (cents) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(cents / 100)
+import { payable, payAmount, vatDetail } from '../price'
 const dateFr = (iso) => new Date(iso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Paris' })
 
 // Pass Pro (achat unique, avantages à vie), page Profil : l'offre (avantages, prix) ou l'état de membre.
 // sub = status.subscription ; baseMinutes = délai de recharge normal (celui d'un non membre) ; gift = le booster « cadeau Pro » dans le stock du joueur
 // pending = retour de paiement : le pass est en cours d'activation (plus de bouton d'achat)
-export function ProPanel({ sub, baseMinutes, onBuy, gift = null, pending = false, busy = false, error = '' }) {
+export function ProPanel({ sub, baseMinutes, vat = 0, onBuy, gift = null, pending = false, busy = false, error = '' }) {
   if (!sub || (!sub.enabled && !sub.active && !pending)) return null
   if (pending && !sub.active) {
     return (
@@ -66,7 +66,10 @@ export function ProPanel({ sub, baseMinutes, onBuy, gift = null, pending = false
       ) : (
         <>
           <strong className="sub-title">{sub.name}</strong>
-          <p className="sub-price"><strong>{euro(sub.price_cents)}</strong> une seule fois, avantages à vie, sans abonnement</p>
+          <p className="sub-price">
+            <strong>{payable(sub.price_cents, vat)}</strong> une seule fois, avantages à vie, sans abonnement
+            {vatDetail(sub.price_cents, vat) && <small className="vat-line">{vatDetail(sub.price_cents, vat)}</small>}
+          </p>
           {perkList}
           <button type="button" className="btn accent" onClick={onBuy} disabled={busy}>Devenir {sub.name} à vie</button>
         </>
@@ -77,7 +80,7 @@ export function ProPanel({ sub, baseMinutes, onBuy, gift = null, pending = false
 }
 
 // Formulaire de consentement : conditions de vente et exécution immédiate (contenu numérique), comme pour un pack de boosters
-export function ProForm({ texts, name, price, busy, error, onConfirm, onCancel, onOpenTerms }) {
+export function ProForm({ texts, name, price, pay, vatLine, busy, error, onConfirm, onCancel, onOpenTerms }) {
   const [cgv, setCgv] = useState(false)
   const [withdrawal, setWithdrawal] = useState(false)
   const ready = !!texts && cgv && withdrawal && !busy
@@ -86,6 +89,7 @@ export function ProForm({ texts, name, price, busy, error, onConfirm, onCancel, 
       <div className="legal-panel consent">
         <h2>Devenir {name} à vie</h2>
         <p><strong>{price}</strong>, payé une seule fois. Pas d’abonnement, pas de renouvellement : les avantages sont à toi pour toujours et s’activent dès le paiement.</p>
+        {vatLine && <p className="vat-line vat-line-block">{vatLine}</p>}
 
         <label className="check">
           <input type="checkbox" checked={cgv} onChange={(e) => setCgv(e.target.checked)} />
@@ -101,7 +105,7 @@ export function ProForm({ texts, name, price, busy, error, onConfirm, onCancel, 
 
         {error && <p className="msg error" role="alert">{error}</p>}
         <div className="row">
-          <button className="btn accent" onClick={onConfirm} disabled={!ready}>{busy ? 'Redirection…' : `Payer ${price}`}</button>
+          <button className="btn accent" onClick={onConfirm} disabled={!ready}>{busy ? 'Redirection…' : `Payer ${pay ?? price}`}</button>
           <button className="btn ghost" onClick={onCancel} disabled={busy}>Annuler</button>
         </div>
         <p className="fine">Paiement sécurisé par Stripe.</p>
@@ -132,7 +136,7 @@ export function ProConsent({ status, onClose }) {
   const sub = status.subscription
   return (
     <>
-      <ProForm texts={texts} name={sub.name} price={euro(sub.price_cents)} busy={busy} error={error} onConfirm={confirm} onCancel={onClose} onOpenTerms={() => setTerms(true)} />
+      <ProForm texts={texts} name={sub.name} price={payable(sub.price_cents, status.vat_percent)} pay={payAmount(sub.price_cents, status.vat_percent)} vatLine={vatDetail(sub.price_cents, status.vat_percent)} busy={busy} error={error} onConfirm={confirm} onCancel={onClose} onOpenTerms={() => setTerms(true)} />
       {terms && <LegalSheet onClose={() => setTerms(false)} />}
     </>
   )

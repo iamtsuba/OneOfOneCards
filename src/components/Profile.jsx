@@ -146,7 +146,7 @@ export default function Profile({ session }) {
       {error && <p className="msg error" role="alert">{error}</p>}
       {notice && <p className="msg info" role="status">{notice}</p>}
 
-      <ProPanel sub={status?.subscription} baseMinutes={status?.subscription?.active ? null : status?.regen_minutes} gift={(status?.booster_types ?? []).find((b) => b.id === status?.subscription?.gift_id) ?? null} onBuy={() => setProOpen(true)} pending={proPending} />
+      <ProPanel sub={status?.subscription} vat={status?.vat_percent} baseMinutes={status?.subscription?.active ? null : status?.regen_minutes} gift={(status?.booster_types ?? []).find((b) => b.id === status?.subscription?.gift_id) ?? null} onBuy={() => setProOpen(true)} pending={proPending} />
 
       {stats && <StatTiles stats={stats} status={status} />}
 

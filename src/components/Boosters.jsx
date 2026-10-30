@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as api from '../api'
 import { explain } from '../api'
+import { payable, vatDetail } from '../price'
 import { isSpecial, isArtRare } from '../rarity'
 import ArtIntro, { GOLD_FIREWORKS } from './ArtReveal'
 import { useGame, useCountdown, fmtClock, fmt } from '../game'
@@ -431,7 +432,7 @@ export default function Boosters({ goCollection, initialCategory = null }) {
             <div>
               <strong>Plus de boosters ?</strong>
               <p className="muted">
-                {fmt(status.pack_boosters)} boosters en plus pour {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(status.pack_price_cents / 100)}.
+                {fmt(status.pack_boosters)} boosters en plus pour {payable(status.pack_price_cents, status.vat_percent)}{vatDetail(status.pack_price_cents, status.vat_percent) ? <span className="vat-line"> ({vatDetail(status.pack_price_cents, status.vat_percent)})</span> : null}.
                 Ils s’ajoutent à ton stock et ne comptent pas dans le plafond de {status.max_boosters}.
               </p>
             </div>

@@ -125,7 +125,7 @@ export async function confirmSubscription(sessionId) {
 export async function getLegal() {
   const [legal, config] = await Promise.all([
     supabase.from(table('legal')).select('key,value'),
-    supabase.from(table('config')).select('key,value').in('key', ['stripe_pack_boosters', 'stripe_pack_price_cents', 'cgv_version', 'cgu_version']),
+    supabase.from(table('config')).select('key,value').in('key', ['stripe_pack_boosters', 'stripe_pack_price_cents', 'vat_percent', 'cgv_version', 'cgu_version']),
   ])
   if (legal.error) throw legal.error
   if (config.error) throw config.error
