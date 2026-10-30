@@ -92,6 +92,7 @@ let closed = 0, changed = 0
   const m = await mount(modal({ initialRows: rows }))
   const dlg = m.host.querySelector('[role="dialog"]')
   ok('fenêtre : titre, collection concernée et règle (un exemplaire gardé, album gardé, cartes en vente non touchées)', dlg.getAttribute('aria-label') === 'Vente rapide des doubles' && /Collection « Chat’trapez les tous ! »/.test(dlg.textContent) && /on garde un exemplaire/.test(dlg.textContent) && /celui de ton album/.test(dlg.textContent) && /Les cartes en vente ne sont pas touchées/.test(dlg.textContent))
+  ok('mise en page : titre, explication et liste dans le panneau clair (« sheet »), comme la vente d\'une pile, pour rester lisibles sur le fond sombre', !!dlg.querySelector('.sheet section h3') && !!dlg.querySelector('.sheet .muted') && !!dlg.querySelector('.sheet label.doubles-select select') && !dlg.querySelector('.detail > .muted') && !dlg.querySelector('.detail > h3'))
   const sel = dlg.querySelector('select')
   const opts = [...sel.options].map((o) => norm(o.textContent))
   ok('liste des raretés : seulement celles qui ont des doubles, avec leur nombre (singulier / pluriel)', opts.join('|') === 'Choisis une rareté|Commune : 5 doubles|Rare : 1 double')

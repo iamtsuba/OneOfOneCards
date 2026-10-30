@@ -585,6 +585,8 @@ export function DuplicatesModal({ category, rarityMap, onClose, onChanged, initi
   return (
     <div className="overlay" role="dialog" aria-modal="true" aria-label="Vente rapide des doubles" onClick={onClose}>
       <div className="detail doubles" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet">
+        <section>
         <h3>Vente rapide des doubles</h3>
         <p className="muted">Collection « {category.name} ». Pour chaque carte, on garde un exemplaire (celui de ton album s’il y en a un) et on vend les autres. Les cartes en vente ne sont pas touchées.</p>
 
@@ -623,6 +625,8 @@ export function DuplicatesModal({ category, rarityMap, onClose, onChanged, initi
             )}
           </>
         )}
+        </section>
+        </div>
 
         {done && <p className="msg info" role="status">{done.sold} carte{plural(done.sold, '', 's')} vendue{plural(done.sold, '', 's')} : +{fmt(done.coins)} pièce{plural(Number(done.coins), '', 's')}.</p>}
         {error && <p className="msg error" role="alert">{error}</p>}

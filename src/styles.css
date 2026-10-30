@@ -422,6 +422,9 @@ button.slot:hover { border-color: var(--ink-soft); color: var(--ink-soft); }
 .stack-breakdown { text-align: center; color: rgba(255,255,255,.8); }
 .stack-qty { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .stack-qty input { width: 84px; text-align: center; }
+/* Vente rapide des doubles : la liste des raretés prend toute la largeur du panneau clair */
+.doubles-select { display: grid; gap: 6px; width: 100%; font-weight: 700; }
+.doubles-select select { width: 100%; }
 .rarity-dot { width: 10px; height: 10px; border-radius: 50%; background: linear-gradient(135deg, var(--r1, #cfc8b8), var(--r2, #9a917f)); }
 .progress.small { width: 100%; height: 5px; }
 .album-title { display: flex; align-items: center; gap: 10px; margin: 6px 0 12px; font-family: var(--font-display); font-size: 24px; font-weight: 800; letter-spacing: -0.02em; }
