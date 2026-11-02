@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import * as api from '../api'
 import { explain } from '../api'
 import { payable, vatDetail } from '../price'
+import { preloadImages } from '../imageCache'
 import { isSpecial, isArtRare } from '../rarity'
 import ArtIntro, { GOLD_FIREWORKS } from './ArtReveal'
 import { useGame, useCountdown, fmtClock, fmt } from '../game'
@@ -324,6 +325,8 @@ export default function Boosters({ goCollection, initialCategory = null }) {
         (a, b) => (rarityMap[b.rarity_id]?.sort_order ?? 0) - (rarityMap[a.rarity_id]?.sort_order ?? 0),
       )
       const golden = !!res.golden   // booster Gold gagné, ou booster ordinaire devenu Gold par hasard
+      // Les images des cartes tirées se chargent PENDANT l'animation du paquet (elles viennent du stockage de fichiers)
+      const preload = preloadImages(cards.map((c) => catalog?.typeMap?.[c.type_id]?.image))
       if (isGold) {
         await wait(Math.max(0, 1100 - (Date.now() - t0)))
       } else if (golden) {
@@ -335,6 +338,7 @@ export default function Boosters({ goCollection, initialCategory = null }) {
       }
       setOverlay((o) => ({ ...o, phase: 'tear', golden }))
       await wait(700)
+      await Promise.race([preload, wait(2500)])   // si une image n'est pas encore arrivée on attend un peu (2,5 s au plus) plutôt que d'afficher une carte vide
       setOverlay({ phase: 'reveal', cards, idx: 0, golden, gold: isGold || golden, label: res.booster?.name, categoryId: res.category_id, nextCategoryId: res.status.active_category_id, paid })
     } catch (e) {
       setOverlay(null)

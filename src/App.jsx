@@ -17,6 +17,7 @@ import Profile from './components/Profile'
 import EnvBanner from './components/EnvBanner'
 import NotificationBell from './components/NotificationBell'
 import { numberVisible, typeSeries, checklistNumbers, cardStyle } from './bands'
+import { useWarmImages } from './useWarmImages'
 
 export default function App() {
   const [session, setSession] = useState(undefined)
@@ -117,6 +118,7 @@ function Game({ session }) {
       checklist: (typeId) => lists[typeId] ?? null,
     }
   }, [catalogRaw])
+  useWarmImages(catalog, status?.active_category_id)   // images de la collection active chargées en tâche de fond (cartes tirées instantanées)
   const ctx = useMemo(
     () => ({ rarities, rarityMap, catalog, refreshCatalog, status, setStatus, refreshStatus, setRevealing }),
     [rarities, rarityMap, catalog, refreshCatalog, status, setStatus, refreshStatus],

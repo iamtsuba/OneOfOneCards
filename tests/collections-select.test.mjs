@@ -354,6 +354,39 @@ const toSummary = async (h) => { await waitFor(() => !!h.querySelector('.reveal-
   await mo.unmount(); clearSaved()
 }
 
+// ---------- images des cartes tirées : chargées pendant l'animation du paquet ----------
+{
+  const made = []
+  let mode = 'fast'
+  globalThis.Image = class { constructor() { made.push(this) } set src(v) { this._src = v; if (mode === 'fast') setTimeout(() => this.onload?.(), 40) } get src() { return this._src } }
+  const IMG = (n) => `https://abc.supabase.co/storage/v1/object/public/o1ocards-images/pp/types/${n}.webp`
+  const timeToReveal = async (image) => {
+    catalog.typeMap[1] = { id: 1, category_id: 5, image }
+    openReply = premiumReply(5)
+    made.length = 0
+    const m = await mountPage({ ...base, coins: 500, booster_types: [{ ...premium, quantity: 0 }] })
+    await click(buyBtnOf(m.host))
+    const t0 = Date.now()
+    await click(m.host.querySelector('.buy-confirm .confirm-yes'))
+    await waitFor(() => made.length > 0 || !!m.host.querySelector('.reveal-card'), 3000)
+    const early = { count: made.length, src: made[0]?.src, decoding: made[0]?.decoding, revealed: !!m.host.querySelector('.reveal-card') }
+    await waitFor(() => !!m.host.querySelector('.reveal-card'), 8000)
+    const elapsed = Date.now() - t0
+    await m.unmount(); clearSaved()
+    return { early, elapsed }
+  }
+  const fast = await timeToReveal(IMG('rapide'))
+  ok('l\'image de la carte tirée est demandée dès la réponse du serveur, AVANT l\'affichage des cartes (pendant que le paquet s\'anime), avec décodage asynchrone', fast.early.count === 1 && fast.early.src === IMG('rapide') && fast.early.decoding === 'async' && fast.early.revealed === false)
+  ok('image arrivée à temps : les cartes apparaissent à l\'heure habituelle (environ 1,4 s), sans attente en plus', fast.elapsed < 2400)
+  mode = 'never'
+  const slow = await timeToReveal(IMG('jamais'))
+  ok('image qui n\'arrive jamais : on attend au plus 2,5 s de plus, puis les cartes s\'affichent quand même (le jeu n\'est jamais bloqué)', slow.elapsed >= 3300 && slow.elapsed < 5600)
+  mode = 'fast'
+  const emoji = await timeToReveal('🐱')
+  ok('carte illustrée par un emoji : rien à précharger, aucune attente', emoji.early.count === 0 && emoji.elapsed < 2400)
+  delete globalThis.Image; delete catalog.typeMap[1]
+}
+
 // ---------- style de la fenêtre de validation ----------
 {
   const { readFileSync } = await import('node:fs')

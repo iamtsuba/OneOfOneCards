@@ -48,7 +48,7 @@ rmSync(out, { recursive: true, force: true })
 let bad = 0
 const ok = (name, cond) => { console.log(cond ? 'OK  ' : 'FAIL', name); if (!cond) bad++ }
 const tables = () => calls.filter((c) => c.startsWith('table:')).length
-const reset = () => { calls.length = 0 }
+const reset = () => { calls.length = 0; api.clearCatalogMemory() }   // chaque scénario simule une nouvelle visite (rien en mémoire de session)
 const KEY = 'o1o:catalog:v1:pp_o1ocards_'
 
 // 1. premier chargement : empreinte + 3 tables, puis rangé
@@ -60,12 +60,18 @@ reset()
 d = await api.getCatalog(); const again = await api.getCatalog(); await api.getCatalog()
 ok('visites suivantes (rien n\'a changé) : UNE seule petite demande d\'empreinte chaque fois, AUCUNE table téléchargée', calls.length === 3 && calls.every((c) => c === 'rpc:pp_o1ocards_catalog_version') && tables() === 0)
 ok('et le catalogue rendu est bien celui du cache', d.categories[0].name === 'Collection v-aaa' && again.types[0].id === 5)
+ok('dans une même visite, c\'est le MÊME objet tant que l\'empreinte ne change pas (l\'écran n\'est pas redessiné pour rien)', d === again)
 // 3. changement
 version = 'v-bbb'; reset()
 d = await api.getCatalog()
 ok('le catalogue a changé (nouvelle empreinte) : les 3 tables sont retéléchargées et le cache mis à jour', tables() === 3 && d.categories[0].name === 'Collection v-bbb' && JSON.parse(store.get(KEY)).v === 'v-bbb')
 reset(); await api.getCatalog()
 ok('puis de nouveau plus rien à télécharger', tables() === 0)
+const before = await api.getCatalog()
+version = 'v-tmp'
+const after = await api.getCatalog()
+version = 'v-bbb'
+ok('empreinte changée dans la même visite : nouvel objet, catalogue mis à jour', before !== after && after.categories[0].name === 'Collection v-tmp')
 // 4. serveur ancien
 store.clear(); versionStatus = 404; reset()
 d = await api.getCatalog(); await api.getCatalog()
@@ -93,7 +99,9 @@ ok('stockage plein : le catalogue est quand même rendu, sans erreur, sans cache
 quotaFull = false
 storageBroken = true; reset()
 d = await api.getCatalog(); await api.getCatalog()
-ok('stockage interdit (navigation privée stricte) : le site marche, il retélécharge le catalogue à chaque fois', tables() === 6 && d.types.length === 1)
+ok('stockage interdit (navigation privée stricte) : le site marche ; une seule descente du catalogue par visite (la mémoire de la visite sert la suite)', tables() === 3 && d.types.length === 1)
+reset(); await api.getCatalog()
+ok('… et une nouvelle visite le retélécharge (rien n\'est gardé d\'une visite à l\'autre)', tables() === 3)
 storageBroken = false
 // 8. erreurs
 store.clear(); tableFail = 'pp_o1ocards_types'; reset()

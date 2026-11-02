@@ -154,14 +154,18 @@ function writeCatalogCache(v, data) {
     try { localStorage.removeItem(CATALOG_CACHE_KEY) } catch { /* stockage plein ou interdit : tant pis, pas de cache */ }
   }
 }
+let memCatalog = null   // dernier catalogue de cette session : même objet tant que l'empreinte ne change pas (l'écran n'est pas redessiné pour rien)
+export const clearCatalogMemory = () => { memCatalog = null }   // nouvelle visite simulée (tests)
 export async function getCatalog() {
   let version = null
   try { version = await rpc('catalog_version') } catch { /* serveur pas à jour */ }
   if (typeof version !== 'string' || !version) return fetchCatalog()
+  if (memCatalog && memCatalog.v === version) return memCatalog.data
   const cached = readCatalogCache()
-  if (cached && cached.v === version) return cached.data
+  if (cached && cached.v === version) { memCatalog = cached; return cached.data }
   const data = await fetchCatalog()
   writeCatalogCache(version, data)
+  memCatalog = { v: version, data }
   return data
 }
 async function fetchCatalog() {
