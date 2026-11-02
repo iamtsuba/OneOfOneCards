@@ -97,7 +97,7 @@ select pg_temp.expect('la table des amis n''est lisible par personne directement
 select pg_temp.expect('A propose 5 pièces à B pour son double 1/11', (public.{{P}}make_offer(1, (select base_rarity from public.{{P}}cards where type_id = 1 and number = 11), 100, 11, 5) ->> 'offer_id') is not null);
 select pg_temp.expect('l''offre existe (acheteur A, vendeur B, 5 pièces) et B est prévenu', (select count(*) from public.{{P}}offers where buyer_id = :A and seller_id = :B and amount = 5) = 1 and (select count(*) from public.{{P}}notifications where user_id = :B and kind = 'offer_received') >= 1);
 
-\echo '--- offre acceptée par un ami : la carte nouvelle va directement dans l''album de l''acheteur'
+\echo '--- offre acceptée : la carte va directement dans l''album de l''acheteur (emplacement libre)'
 create temp table coins_avant as select id, coins from public.{{P}}profiles where id in (:A, :B, :C);
 update public.{{P}}profiles set coins = 1000 where id in (:A, :B, :C);
 select id as oid1 from public.{{P}}offers where buyer_id = :A and seller_id = :B and amount = 5 \gset
@@ -117,14 +117,14 @@ set request.jwt.claim.sub = :A;
 select pg_temp.expect('carte déjà couverte : la carte 12 arrive chez A mais l''album garde la carte 11 (aucun remplacement)',
   (select owner_id from public.{{P}}cards where type_id = 1 and number = 12) = :A
   and (select count(*) from public.{{P}}album_picks where user_id = :A and type_id = 1) = 1 and exists (select 1 from public.{{P}}album_picks where user_id = :A and type_id = 1 and number = 11));
--- offre d'un joueur qui n'est PAS ami du vendeur : la carte arrive, mais pas dans l'album
+-- offre d'un joueur qui n'est PAS ami du vendeur : la carte arrive ET va aussi dans l'album (la règle ne dépend plus de l'amitié)
 set request.jwt.claim.sub = :C;
 select (public.{{P}}make_offer(2, (select base_rarity from public.{{P}}cards where type_id = 2 and number = 21), 100, 21, 5) ->> 'offer_id')::bigint as oid3 \gset
 set request.jwt.claim.sub = :B;
 select (public.{{P}}respond_offer(:oid3, true) -> 'status') is not null as acceptee_3;
 set request.jwt.claim.sub = :C;
-select pg_temp.expect('vendeur non ami : la carte 2/21 arrive chez C mais n''est PAS placée dans son album',
-  (select owner_id from public.{{P}}cards where type_id = 2 and number = 21) = :C and not exists (select 1 from public.{{P}}album_picks where user_id = :C));
+select pg_temp.expect('vendeur non ami : la carte 2/21 arrive chez C ET est placée dans son album (emplacement libre)',
+  (select owner_id from public.{{P}}cards where type_id = 2 and number = 21) = :C and exists (select 1 from public.{{P}}album_picks where user_id = :C and type_id = 2 and number = 21));
 set request.jwt.claim.sub = :A;
 select pg_temp.expect('A peut vendre la carte 12 (hors album) : seul l''emplacement nouveau a été protégé', not exists (select 1 from public.{{P}}album_picks where user_id = :A and number = 12));
 update public.{{P}}profiles p set coins = c.coins from coins_avant c where c.id = p.id;

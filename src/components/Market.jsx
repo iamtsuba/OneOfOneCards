@@ -14,6 +14,7 @@ export default function Market({ initialView = 'browse', initialListingId = null
   const [view, setView] = useState(initialView)
   const [kind, setKind] = useState(null)
   const [sort, setSort] = useState('ending')
+  const [bought, setBought] = useState('')      // confirmation après un achat (la fenêtre de l'annonce se ferme)
   const [rarity, setRarity] = useState('')      // filtre par rareté affichée ('' = toutes)
   const [missing, setMissing] = useState(false) // seulement les cartes qui manquent à mon album
   const [browse, setBrowse] = useState([])
@@ -97,6 +98,7 @@ export default function Market({ initialView = 'browse', initialListingId = null
       </div>
 
       {error && <p className="msg error" role="alert">{error}</p>}
+      {bought && <p className="msg info" role="status">{bought}</p>}
 
       {view === 'browse' && (
         <BrowsePanel rows={browse} loading={loading} kind={kind} setKind={setKind} sort={sort} setSort={setSort} rarity={rarity} setRarity={setRarity} missing={missing} setMissing={setMissing}
@@ -147,12 +149,16 @@ export default function Market({ initialView = 'browse', initialListingId = null
           coins={status?.coins ?? 0}
           onClose={() => setSelectedId(null)}
           onStatus={setStatus}
+          onBought={(res) => setBought(boughtMessage(res))}
           reload={load}
         />
       )}
     </section>
   )
 }
+
+// Confirmation après un achat au prix fixe : dit si la carte a été rangée dans l'album (emplacement libre) ou non (emplacement déjà occupé)
+export const boughtMessage = (res) => (res?.placed ? 'Carte achetée : elle est dans ton album.' : 'Carte achetée.')
 
 function describe(r, ms) {
   const clock = ms !== null && ms !== undefined ? fmtClock(ms) : ''
@@ -255,14 +261,17 @@ export function BrowsePanel({ rows, loading, kind, setKind, sort, setSort, rarit
 export function OffersPanel({ rows, loading, rarityMap, catalog, status, setStatus, reload }) {
   const [busyId, setBusyId] = useState(null)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [counter, setCounter] = useState(null)   // contre-offre en préparation : { id, value }
 
   async function act(id, fn) {
     setBusyId(id)
     setError('')
+    setNotice('')
     try {
       const res = await fn()
       if (res?.status) setStatus(res.status)
+      if (res?.placed) setNotice('Carte achetée : elle est dans ton album.')   // l'acheteur vient d'accepter une contre-offre
       setCounter(null)
       await reload()
     } catch (e) {
@@ -283,6 +292,7 @@ export function OffersPanel({ rows, loading, rarityMap, catalog, status, setStat
 
   return (
     <>
+      {notice && <p className="msg info" role="status">{notice}</p>}
       {error && <p className="msg error" role="alert">{error}</p>}
       <ul className="mine-list">
         {rows.map((r) => {
@@ -416,7 +426,7 @@ export function FavoritesPanel({ rows, loading, rarityMap, catalog, reload, onOp
   )
 }
 
-function ListingModal({ row, ms, rarity, coins, onClose, onStatus, reload }) {
+export function ListingModal({ row, ms, rarity, coins, onClose, onStatus, onBought, reload }) {
   const { catalog } = useGame()
   const [amount, setAmount] = useState(String(row.min_bid ?? ''))
   const [busy, setBusy] = useState(false)
@@ -440,7 +450,8 @@ function ListingModal({ row, ms, rarity, coins, onClose, onStatus, reload }) {
       const res = await fn()
       if (res?.status) onStatus(res.status)
       await reload()
-      if (done === 'close') onClose()
+      if (done === 'bought') { onBought?.(res); onClose() }   // achat au prix fixe : la fenêtre se ferme, la page confirme (et dit si la carte est dans l'album)
+      else if (done === 'close') onClose()
       else setNotice(done)
     } catch (e) {
       setError(explain(e))
@@ -500,7 +511,7 @@ function ListingModal({ row, ms, rarity, coins, onClose, onStatus, reload }) {
           ) : (
             <>
               {coins < row.price && <p className="msg error">Il te manque {fmtCoins(row.price - coins)}.</p>}
-              <button className="btn accent" disabled={busy || coins < row.price} onClick={() => act(() => api.buyNow(row.listing_id), 'close')}>
+              <button className="btn accent" disabled={busy || coins < row.price} onClick={() => act(() => api.buyNow(row.listing_id), 'bought')}>
                 Acheter pour {fmtCoins(row.price)}
               </button>
             </>
