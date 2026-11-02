@@ -3171,6 +3171,63 @@ grant execute on function public.o1ocards_admin_users(text, text, int) to authen
 grant execute on function public.o1ocards_admin_grant_pro(text, uuid) to authenticated;
 grant execute on function public.o1ocards_admin_revoke_pro(text, uuid) to authenticated;
 
+-- ---------- Images hors de la base : version du catalogue (cache du navigateur), stockage de fichiers, changement d'image par l'admin ----------
+-- Empreinte du catalogue (collections, cartes, raretés par carte) : change dès que quelque chose change. Le site la demande (quelques octets) et ne retélécharge le catalogue que si elle a changé.
+create or replace function public.o1ocards_catalog_version()
+returns text language sql stable set search_path = public as $$
+  select md5(concat_ws('|',
+    (select coalesce(string_agg(to_jsonb(c)::text, '' order by c.id), '') from public.o1ocards_categories c),
+    (select coalesce(string_agg(to_jsonb(t)::text, '' order by t.id), '') from public.o1ocards_types t),
+    (select coalesce(string_agg(to_jsonb(r)::text, '' order by r.type_id, r.rarity_id), '') from public.o1ocards_type_rarities r)))
+$$;
+revoke all on function public.o1ocards_catalog_version() from public;
+grant execute on function public.o1ocards_catalog_version() to anon, authenticated;
+
+-- Le joueur connecté est-il le compte administrateur de cet environnement ? (sert à autoriser l'envoi d'images dans le stockage ; le mot de passe admin reste exigé pour tout le reste)
+create or replace function public.o1ocards_is_admin_user()
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.o1ocards_secrets where key = 'admin_user_id' and value = auth.uid()::text)
+$$;
+revoke all on function public.o1ocards_is_admin_user() from public, anon;
+grant execute on function public.o1ocards_is_admin_user() to authenticated;
+
+-- Stockage des images : un seul bucket public « o1ocards-images » (lecture pour tous, servi avec un cache d'un an), un dossier par environnement (pp/ pour la préproduction, prod/ pour la production) ;
+-- seul le compte administrateur de l'environnement peut ENVOYER des fichiers dans son dossier (pas de modification ni de suppression). Sans schéma « storage » (tests), cette fonction ne fait rien.
+create or replace function public.o1ocards_ensure_storage()
+returns void language plpgsql as $$
+declare v_folder text := case when left('o1ocards_', 3) = 'pp_' then 'pp' else 'prod' end;
+begin
+  if to_regclass('storage.buckets') is null or to_regclass('storage.objects') is null then return; end if;
+  insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+  values ('o1ocards-images', 'o1ocards-images', true, 1048576, array['image/webp', 'image/png', 'image/jpeg', 'image/gif'])
+  on conflict (id) do update set public = true, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+  begin
+    execute 'drop policy if exists o1ocards_images_insert on storage.objects';
+    execute format('create policy o1ocards_images_insert on storage.objects for insert to authenticated with check (bucket_id = %L and (storage.foldername(name))[1] = %L and public.o1ocards_is_admin_user())', 'o1ocards-images', v_folder);
+  exception when others then
+    raise notice 'Stockage des images : politique non créée (%)', sqlerrm;
+  end;
+end $$;
+revoke all on function public.o1ocards_ensure_storage() from public, anon, authenticated;
+select public.o1ocards_ensure_storage();
+
+-- Remplace l'image d'une collection ou d'une carte par une adresse https (migration des images intégrées vers le stockage)
+create or replace function public.o1ocards_admin_set_image(p_password text, p_kind text, p_id int, p_image text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare err text := public.o1ocards_admin_guard(p_password); v_n int;
+begin
+  if err is not null then return jsonb_build_object('error', err); end if;
+  if p_image is null or p_image !~ '^https://' or char_length(p_image) > 500 then raise exception 'invalid_image'; end if;
+  if p_kind = 'type' then update public.o1ocards_types set image = p_image where id = p_id;
+  elsif p_kind = 'category' then update public.o1ocards_categories set image = p_image where id = p_id;
+  else raise exception 'invalid_kind'; end if;
+  get diagnostics v_n = row_count;
+  if v_n = 0 then raise exception 'not_found'; end if;
+  return jsonb_build_object('ok', true);
+end $$;
+revoke all on function public.o1ocards_admin_set_image(text, text, int, text) from public, anon;
+grant execute on function public.o1ocards_admin_set_image(text, text, int, text) to authenticated;
+
 -- ---------- Conditions générales d'utilisation : preuve d'acceptation (une ligne par joueur et par version) ----------
 create table if not exists public.o1ocards_terms_acceptances (
   user_id     uuid not null references auth.users (id) on delete cascade,

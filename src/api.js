@@ -135,8 +135,36 @@ export async function getLegal() {
   }
 }
 
-// Catalogue : collections de boosters et types de cartes (lisible par tous)
+// Catalogue : collections de boosters et types de cartes (lisible par tous).
+// Gardé dans le navigateur (localStorage) avec son empreinte : à chaque ouverture on ne demande que l'empreinte (quelques octets) ; le catalogue n'est retéléchargé que s'il a changé.
+// Un serveur qui n'a pas encore la fonction catalog_version : pas de cache, comportement d'avant.
+const CATALOG_CACHE_KEY = `o1o:catalog:v1:${PREFIX}`
+function readCatalogCache() {
+  try {
+    const c = JSON.parse(localStorage.getItem(CATALOG_CACHE_KEY) || 'null')
+    return c && typeof c.v === 'string' && Array.isArray(c.data?.categories) && Array.isArray(c.data?.types) && Array.isArray(c.data?.typeRarities) ? c : null
+  } catch {
+    return null
+  }
+}
+function writeCatalogCache(v, data) {
+  try {
+    localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify({ v, data }))
+  } catch {
+    try { localStorage.removeItem(CATALOG_CACHE_KEY) } catch { /* stockage plein ou interdit : tant pis, pas de cache */ }
+  }
+}
 export async function getCatalog() {
+  let version = null
+  try { version = await rpc('catalog_version') } catch { /* serveur pas à jour */ }
+  if (typeof version !== 'string' || !version) return fetchCatalog()
+  const cached = readCatalogCache()
+  if (cached && cached.v === version) return cached.data
+  const data = await fetchCatalog()
+  writeCatalogCache(version, data)
+  return data
+}
+async function fetchCatalog() {
   const [cats, types, typeRarities] = await Promise.all([
     supabase.from(table('categories')).select('*').order('position').order('id'),
     supabase.from(table('types')).select('*').order('position').order('id'),
@@ -177,6 +205,8 @@ export const adminSetConfig = (pw, key, value) => rpc('admin_set_config', { p_pa
 export const adminUsers = (pw, search = '', limit = 300) => rpc('admin_users', { p_password: pw, p_search: search ? search : null, p_limit: limit })
 export const adminGrantPro = (pw, userId) => rpc('admin_grant_pro', { p_password: pw, p_user: userId })
 export const adminRevokePro = (pw, userId) => rpc('admin_revoke_pro', { p_password: pw, p_user: userId })
+// Remplace l'image d'une collection (kind 'category') ou d'une carte (kind 'type') par une adresse https du stockage
+export const adminSetImage = (pw, kind, id, image) => rpc('admin_set_image', { p_password: pw, p_kind: kind, p_id: id, p_image: image })
 export const adminSaveRarity = (pw, r) =>
   rpc('admin_save_rarity', {
     p_password: pw, p_id: r.id, p_name: r.name, p_max_series: r.max_series === null || r.max_series === '' ? null : Number(r.max_series),
@@ -306,6 +336,9 @@ export function explain(e) {
   if (m.includes('buyer_insufficient_coins')) return 'L’acheteur n’a plus assez de pièces pour cette offre.'
   if (m.includes('card_in_auction')) return 'Cette carte est aux enchères avec des offres en cours : accepte d’abord l’issue de l’enchère.'
   if (m.includes('offer_unavailable')) return 'Cette offre n’est plus disponible.'
+  if (m.includes('storage_not_ready')) return 'Le stockage des images n’est pas installé : exécute le SQL à jour dans Supabase, puis réessaie.'
+  if (m.includes('storage_denied')) return 'Envoi refusé : le stockage des images n’accepte que le compte administrateur (reconnecte-toi avec ce compte).'
+  if (m.includes('storage_failed')) return 'L’envoi de l’image a échoué. Réessaie dans un instant.'
   if (m.includes('pro_required')) return 'Cette vente rapide des doubles est réservée aux membres du pass OneMore.'
   if (m.includes('nothing_to_sell')) return 'Il n’y a plus de double à vendre pour cette rareté.'
   if (m.includes('own_offer')) return 'C’est ta proposition : attends la réponse de l’autre joueur (ou retire-la).'

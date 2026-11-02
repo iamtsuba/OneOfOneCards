@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { isEmbedded, isStored, uploadImage, migrateEmbeddedImages } from '../images'
 import * as api from '../api'
 import { isPseudoEmail } from '../pseudo'
 import { explain } from '../api'
@@ -53,8 +54,11 @@ const LEGAL_LABELS = {
   consent_withdrawal_text: 'Texte de la case « renonciation à la rétractation »',
 }
 
-// Réduit une image choisie (≤ 256 px) et la renvoie sous forme d'image intégrée (data:image/...)
-async function fileToDataUrl(file, max = 256) {
+// Réduit une image choisie (≤ 256 px), l'envoie dans le stockage de fichiers et renvoie son adresse https (plus d'image enregistrée dans la base)
+async function fileToStoredUrl(file, kind = 'types', max = 256) {
+  return uploadImage(await fileToBlob(file, max), kind)
+}
+async function fileToBlob(file, max = 256) {
   const url = URL.createObjectURL(file)
   try {
     const img = await new Promise((resolve, reject) => {
@@ -68,8 +72,11 @@ async function fileToDataUrl(file, max = 256) {
     canvas.width = Math.max(1, Math.round(img.naturalWidth * scale))
     canvas.height = Math.max(1, Math.round(img.naturalHeight * scale))
     canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
-    let out = canvas.toDataURL('image/webp', 0.85)
-    if (out.length > 250000) out = canvas.toDataURL('image/webp', 0.6)
+    const toBlob = (type, q) => new Promise((resolve) => canvas.toBlob(resolve, type, q))
+    let out = await toBlob('image/webp', 0.85)
+    if (out && out.size > 120000) out = await toBlob('image/webp', 0.6)
+    if (!out) out = await toBlob('image/png')   // navigateur sans WebP
+    if (!out) throw new Error('invalid_image')
     return out
   } finally {
     URL.revokeObjectURL(url)
@@ -375,7 +382,7 @@ function CategoryForm({ cat, nextPos, run, busy, typeCount = 0 }) {
       </div>
       </div>
       <div className="cat-side">
-      <ImageField label="Image du booster (emoji ou adresse https://), au centre ; « 1/1 » si vide" value={f.image} onChange={set('image')} />
+      <ImageField label="Image du booster (emoji ou adresse https://), au centre ; « 1/1 » si vide" value={f.image} onChange={set('image')} kind="categories" />
       <p className="fine">Aperçu du booster : le nom de la collection en haut, son image au centre.</p>
       <div className="admin-pack-preview"><Pack category={{ name: f.name || 'Collection', color: f.color, color2: f.color2, text_color: f.text_color, image: f.image }} /></div>
       </div>
@@ -461,19 +468,23 @@ export function TypesTab({ data, run, busy, initialCollapsed = [], wide = false,
   )
 }
 
-// Champ image : emoji, adresse https:// ou image téléversée (réduite à 256 px)
-function ImageField({ label, value, onChange, placeholder = '📼 ou https://…' }) {
+// Champ image : emoji, adresse https:// ou image téléversée (réduite à 256 px, enregistrée dans le stockage de fichiers)
+export function ImageField({ label, value, onChange, placeholder = '📼 ou https://…', kind = 'types' }) {
   const [localError, setLocalError] = useState('')
-  const uploaded = value.startsWith('data:')
+  const [sending, setSending] = useState(false)
+  const uploaded = isEmbedded(value) || isStored(value)
   const onFile = async (e) => {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
     setLocalError('')
+    setSending(true)
     try {
-      onChange(await fileToDataUrl(file))
-    } catch {
-      setLocalError('Impossible de lire cette image.')
+      onChange(await fileToStoredUrl(file, kind))
+    } catch (err) {
+      setLocalError(err?.message === 'invalid_image' ? 'Impossible de lire cette image.' : explain(err))
+    } finally {
+      setSending(false)
     }
   }
   return (
@@ -481,15 +492,15 @@ function ImageField({ label, value, onChange, placeholder = '📼 ou https://…
       <label>
         {label}
         {uploaded ? (
-          <input value="Image téléversée" readOnly />
+          <input value={isEmbedded(value) ? 'Image téléversée (ancienne, dans la base)' : 'Image téléversée'} readOnly />
         ) : (
           <input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
         )}
       </label>
       <div className="row">
-        <label className="btn ghost file-btn">
-          Téléverser une image
-          <input type="file" accept="image/*" onChange={onFile} hidden />
+        <label className="btn ghost file-btn" aria-busy={sending}>
+          {sending ? 'Envoi…' : 'Téléverser une image'}
+          <input type="file" accept="image/*" onChange={onFile} disabled={sending} hidden />
         </label>
         {value && <button type="button" className="btn ghost" onClick={() => onChange('')}>Retirer l’image</button>}
       </div>
@@ -932,7 +943,7 @@ function ImportPanel({ categoryId, types, data, run, busy }) {
     setPhotoBusy(true)
     const out = []
     for (const f of files.slice(0, 300)) {
-      try { out.push({ name: f.name, url: await fileToDataUrl(f) }) } catch { out.push({ name: f.name, url: '', error: 'image illisible' }) }
+      try { out.push({ name: f.name, url: await fileToStoredUrl(f, 'types') }) } catch (err) { out.push({ name: f.name, url: '', error: err?.message === 'invalid_image' ? 'image illisible' : explain(err) }) }
     }
     setPhotos((cur) => [...cur, ...out])
     setPhotoBusy(false)
@@ -1105,10 +1116,59 @@ function ImportPanel({ categoryId, types, data, run, busy }) {
 }
 
 // ---------- Réglages ----------
+// Images des cartes et des collections encore enregistrées DANS la base : chaque visite les retélécharge (c'est ce qui fait grimper la consommation de données de Supabase).
+// Ce bouton les envoie dans le stockage de fichiers (mises en cache par le navigateur) et remplace l'image par son adresse. Sans risque : on peut relancer, une image déjà déplacée n'est plus concernée.
+export function ImagesPanel({ data, run, busy }) {
+  const [progress, setProgress] = useState(null)
+  const [failed, setFailed] = useState([])
+  const items = [
+    ...(data.categories ?? []).filter((c) => isEmbedded(c.image)).map((c) => ({ kind: 'category', id: c.id, name: c.name, image: c.image })),
+    ...(data.types ?? []).filter((t) => isEmbedded(t.image)).map((t) => ({ kind: 'type', id: t.id, name: t.name, image: t.image })),
+  ]
+  const stored = [...(data.categories ?? []), ...(data.types ?? [])].filter((x) => isStored(x.image)).length
+  const kb = Math.round(items.reduce((n, it) => n + it.image.length, 0) / 1024)
+  const go = () => run(async (pw) => {
+    setFailed([])
+    setProgress({ done: 0, total: items.length })
+    try {
+      return await migrateEmbeddedImages(items, {
+        save: (it, url) => api.adminSetImage(pw, it.kind, it.id, url),
+        onProgress: (p) => { setProgress({ done: p.done, total: p.total }); setFailed(p.failed) },
+      })
+    } finally {
+      setProgress(null)
+    }
+  }, (res) => `${res.ok} image${plural(res.ok, '', 's')} déplacée${plural(res.ok, '', 's')} vers le stockage${res.failed.length ? `, ${res.failed.length} en échec` : ''}.`)
+  return (
+    <div className="admin-card images-panel">
+      <strong>Images des cartes</strong>
+      {items.length === 0 ? (
+        <p className="muted">Toutes les images sont dans le stockage de fichiers{stored > 0 ? ` (${stored} image${plural(stored, '', 's')})` : ''} : le catalogue reste léger et le navigateur garde les images en mémoire.</p>
+      ) : (
+        <>
+          <p className="muted">
+            {items.length} image{plural(items.length, '', 's')} (collections et cartes) {plural(items.length, 'est', 'sont')} encore enregistrée{plural(items.length, '', 's')} dans la base de données, environ {kb} Ko : chaque visite les télécharge.
+            Déplace-les vers le stockage de fichiers pour alléger le site et la consommation de données.
+          </p>
+          <button type="button" className="btn" disabled={busy || !!progress} onClick={go}>Déplacer {items.length} image{plural(items.length, '', 's')} vers le stockage</button>
+        </>
+      )}
+      {progress && <p className="fine" role="status">Déplacement en cours : {progress.done} / {progress.total}…</p>}
+      {failed.length > 0 && (
+        <div className="msg error" role="alert">
+          <p>{failed.length} image{plural(failed.length, '', 's')} n’{plural(failed.length, 'a', 'ont')} pas pu être déplacée{plural(failed.length, '', 's')} ({plural(failed.length, 'elle reste telle quelle', 'elles restent telles quelles')}, tu peux relancer) :</p>
+          <ul>{failed.map((f) => <li key={`${f.kind}-${f.id}`}>{f.name} : {explain({ message: f.error })}</li>)}</ul>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function ConfigTab({ data, run, busy }) {
   return (
     <div className="admin-list cols-2">
       <p className="muted">Réglages du jeu et de la boutique. Les modifications s’appliquent tout de suite.</p>
+      <ImagesPanel data={data} run={run} busy={busy} />
       {(data.text_config ?? []).map((row) => <TextConfigRow key={row.key} row={row} run={run} busy={busy} />)}
       {data.config.filter((row) => row.key !== 'card_reward_booster').map((row) => <ConfigRow key={row.key} row={row} run={run} busy={busy} />)}
     </div>
