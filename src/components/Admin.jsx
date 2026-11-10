@@ -1539,6 +1539,7 @@ export function UsersTab({ users, onLoad, run, busy }) {
   const [sort, setSort] = useState('cards')
   const [open, setOpen] = useState(null)         // joueur dont le détail par collection est déplié
   const [ask, setAsk] = useState(null)           // confirmation en cours : { id, action: 'grant' | 'revoke' }
+  const [coinsFor, setCoinsFor] = useState(null) // joueur dont le champ « Offrir des pièces » est ouvert : { id, amount }
   const loaded = useRef(false)
   useEffect(() => { if (users === null && !loaded.current) { loaded.current = true; onLoad('') } }, [users, onLoad])
 
@@ -1555,9 +1556,15 @@ export function UsersTab({ users, onLoad, run, busy }) {
     if (done !== false) onLoad(applied)   // liste relue pour montrer le nouvel état ; en cas d'erreur on la laisse (le message d'erreur reste affiché)
   }
 
+  const giveCoins = async (u) => {
+    const n = Number(coinsFor?.amount)
+    const done = await run((pw) => api.adminGrantCoins(pw, u.id, n), (res) => `${n} pièce${plural(n, '', 's')} offerte${plural(n, '', 's')} à ${u.username} (nouveau solde : ${res?.coins ?? '?'}).`)
+    if (done !== false) { setCoinsFor(null); onLoad(applied) }
+  }
+
   return (
     <div className="admin-list users-tab">
-      <p className="muted">Tous les joueurs de cet environnement, avec leurs cartes et leurs doublons par collection. Tu peux offrir le pass OneMore à un joueur sans qu’il paie.</p>
+      <p className="muted">Tous les joueurs de cet environnement, avec leurs cartes et leurs doublons par collection. Tu peux offrir le pass OneMore ou des pièces à un joueur sans qu’il paie.</p>
       <form className="row users-search" onSubmit={find} role="search">
         <label className="sr" htmlFor="users-q">Rechercher un pseudo</label>
         <input id="users-q" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher un pseudo" autoComplete="off" />
@@ -1590,6 +1597,7 @@ export function UsersTab({ users, onLoad, run, busy }) {
                   <p className="user-stats">
                     <span><strong>{u.cards}</strong> carte{plural(u.cards, '', 's')}</span>
                     <span><strong>{u.doubles}</strong> doublon{plural(u.doubles, '', 's')}</span>
+                    <span><strong>{u.coins ?? 0}</strong> pièce{plural(u.coins ?? 0, '', 's')}</span>
                   </p>
                   {mine.length > 0 && (
                     <button type="button" className="link" aria-expanded={expanded} onClick={() => setOpen(expanded ? null : u.id)}>
@@ -1607,6 +1615,16 @@ export function UsersTab({ users, onLoad, run, busy }) {
                     </ul>
                   )}
                   <div className="row user-actions">
+                    {coinsFor?.id === u.id ? (
+                      <form className="row user-coins" onSubmit={(e) => { e.preventDefault(); if (Number.isInteger(Number(coinsFor.amount)) && Number(coinsFor.amount) >= 1 && Number(coinsFor.amount) <= 1000000) giveCoins(u) }}>
+                        <label className="sr" htmlFor={`coins-${u.id}`}>Nombre de pièces à offrir à {u.username}</label>
+                        <input id={`coins-${u.id}`} type="number" inputMode="numeric" min="1" max="1000000" step="1" value={coinsFor.amount} autoFocus placeholder="Pièces à offrir" onChange={(e) => setCoinsFor({ id: u.id, amount: e.target.value })} />
+                        <button className="btn accent" disabled={busy || !(Number.isInteger(Number(coinsFor.amount)) && Number(coinsFor.amount) >= 1 && Number(coinsFor.amount) <= 1000000)}>Offrir</button>
+                        <button type="button" className="btn ghost" disabled={busy} onClick={() => setCoinsFor(null)}>Annuler</button>
+                      </form>
+                    ) : (
+                      <button type="button" className="btn ghost" disabled={busy} onClick={() => { setAsk(null); setCoinsFor({ id: u.id, amount: '' }) }}>Offrir des pièces</button>
+                    )}
                     {confirming ? (
                       <>
                         <span className="fine">{confirming === 'grant' ? `Offrir OneMore à ${u.username} ?` : `Retirer OneMore à ${u.username} ?`}</span>

@@ -209,6 +209,7 @@ export const adminSetConfig = (pw, key, value) => rpc('admin_set_config', { p_pa
 export const adminUsers = (pw, search = '', limit = 300) => rpc('admin_users', { p_password: pw, p_search: search ? search : null, p_limit: limit })
 export const adminGrantPro = (pw, userId) => rpc('admin_grant_pro', { p_password: pw, p_user: userId })
 export const adminRevokePro = (pw, userId) => rpc('admin_revoke_pro', { p_password: pw, p_user: userId })
+export const adminGrantCoins = (pw, userId, amount) => rpc('admin_grant_coins', { p_password: pw, p_user: userId, p_amount: amount })
 // Remplace l'image d'une collection (kind 'category') ou d'une carte (kind 'type') par une adresse https du stockage
 export const adminSetImage = (pw, kind, id, image) => rpc('admin_set_image', { p_password: pw, p_kind: kind, p_id: id, p_image: image })
 export const adminSaveRarity = (pw, r) =>
@@ -329,6 +330,8 @@ export function explain(e) {
   if (m.includes('not_friends')) return 'Tu dois d’abord être ami avec ce joueur.'
   if (m.includes('cannot_friend_self')) return 'Tu ne peux pas t’ajouter toi-même.'
   if (m.includes('user_not_found')) return 'Ce joueur n’existe pas.'
+  if (m.includes('Could not find the function')) return 'Le SQL à jour n’est pas encore exécuté dans Supabase (fonction manquante) : exécute le schéma SQL de cet environnement dans le SQL Editor, puis réessaie.'
+  if (m.includes('invalid_amount')) return 'Montant invalide : un nombre entier de pièces, de 1 à 1 000 000.'
   if (m.includes('already_member')) return 'Ce joueur est déjà membre OneMore.'
   if (m.includes('paid_member')) return 'Ce joueur a payé son pass : pour le retirer, rembourse-le dans Stripe (le retrait est alors automatique).'
   if (m.includes('not_member')) return 'Ce joueur n’a pas de pass OneMore.'

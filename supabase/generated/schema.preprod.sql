@@ -3107,7 +3107,7 @@ drop table if exists public.pp_o1ocards_golden_contents;
 delete from public.pp_o1ocards_config where key in ('series_reward_min_size', 'golden_unique_chance');
 update public.pp_o1ocards_config set description = 'Chance qu''un booster ouvert devienne un booster Gold (0.00000001 = 0,000001 %). Contenu : celui du booster Gold du module Boosters' where key = 'golden_booster_chance';
 
--- ---------- Console admin : joueurs, doubles par collection, OneMore offert ----------
+-- ---------- Console admin : joueurs, doubles par collection, OneMore offert, pièces offertes ----------
 -- Liste des joueurs de cet environnement (les plus riches en cartes d'abord) : pseudo, nombre de cartes, doubles par collection (un double = un exemplaire en plus d'une même carte de même rareté,
 -- comme dans « Mes cartes »), état du pass OneMore (payé ou offert). Recherche par morceau de pseudo ; p_limit : 1 à 1000 joueurs (300 par défaut).
 create or replace function public.pp_o1ocards_admin_users(p_password text, p_search text default null, p_limit int default 300)
@@ -3120,7 +3120,7 @@ begin
   if err is not null then return jsonb_build_object('error', err); end if;
   select count(*) into v_total from public.pp_o1ocards_profiles pr where v_search is null or position(lower(v_search) in lower(pr.username)) > 0;
   with picked as (
-    select pr.id, pr.username, pr.created_at, (select count(*) from public.pp_o1ocards_cards c where c.owner_id = pr.id)::int as cards
+    select pr.id, pr.username, pr.created_at, pr.coins, (select count(*) from public.pp_o1ocards_cards c where c.owner_id = pr.id)::int as cards
     from public.pp_o1ocards_profiles pr
     where v_search is null or position(lower(v_search) in lower(pr.username)) > 0
     order by 4 desc, lower(pr.username)
@@ -3134,7 +3134,7 @@ begin
   ),
   per as (select owner_id, category_id, sum(n)::int as cards, (sum(n) - count(*))::int as doubles from slots group by 1, 2)
   select coalesce(jsonb_agg(jsonb_build_object(
-           'id', p.id, 'username', p.username, 'created_at', p.created_at, 'cards', p.cards,
+           'id', p.id, 'username', p.username, 'created_at', p.created_at, 'coins', p.coins, 'cards', p.cards,
            'doubles', coalesce((select sum(per.doubles) from per where per.owner_id = p.id), 0),
            'pro', (select case when pm.revoked_at is null
                                then jsonb_build_object('active', true, 'source', case when pm.stripe_session_id like 'admin:%' then 'admin' else 'paid' end, 'since', pm.granted_at)
@@ -3174,12 +3174,26 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
+-- Offre des pièces à un joueur (cadeau, sans paiement) : de 1 à 1 000 000 par offre (invalid_amount sinon), joueur inconnu : user_not_found. Renvoie le nouveau solde.
+create or replace function public.pp_o1ocards_admin_grant_coins(p_password text, p_user uuid, p_amount int)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare err text := public.pp_o1ocards_admin_guard(p_password); v_coins bigint; v_name text;
+begin
+  if err is not null then return jsonb_build_object('error', err); end if;
+  if p_amount is null or p_amount < 1 or p_amount > 1000000 then raise exception 'invalid_amount'; end if;
+  update public.pp_o1ocards_profiles set coins = coins + p_amount where id = p_user returning coins, username into v_coins, v_name;
+  if not found then raise exception 'user_not_found'; end if;
+  return jsonb_build_object('ok', true, 'coins', v_coins, 'username', v_name);
+end $$;
+
 revoke all on function public.pp_o1ocards_admin_users(text, text, int) from public, anon;
 revoke all on function public.pp_o1ocards_admin_grant_pro(text, uuid) from public, anon;
 revoke all on function public.pp_o1ocards_admin_revoke_pro(text, uuid) from public, anon;
 grant execute on function public.pp_o1ocards_admin_users(text, text, int) to authenticated;
 grant execute on function public.pp_o1ocards_admin_grant_pro(text, uuid) to authenticated;
 grant execute on function public.pp_o1ocards_admin_revoke_pro(text, uuid) to authenticated;
+revoke all on function public.pp_o1ocards_admin_grant_coins(text, uuid, int) from public, anon;
+grant execute on function public.pp_o1ocards_admin_grant_coins(text, uuid, int) to authenticated;
 
 -- ---------- Images hors de la base : version du catalogue (cache du navigateur), stockage de fichiers, changement d'image par l'admin ----------
 -- Empreinte du catalogue (collections, cartes, raretés par carte) : change dès que quelque chose change. Le site la demande (quelques octets) et ne retélécharge le catalogue que si elle a changé.

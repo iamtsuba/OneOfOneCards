@@ -19,11 +19,11 @@ const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const adminData = JSON.parse(readFileSync(path.join(root, 'tests/fixtures/admin_data.json'), 'utf8'))
 
 const cats = [{ id: 1, name: 'Chat’trapez les tous !', closed: false }, { id: 2, name: 'Ancienne collection', closed: true }]
-const U = (o) => ({ created_at: '2026-10-01T10:00:00Z', pro: null, collections: [], ...o })
+const U = (o) => ({ created_at: '2026-10-01T10:00:00Z', pro: null, collections: [], coins: 0, ...o })
 const usersFixture = () => ({
   total: 5, shown: 5, categories: cats,
   users: [
-    U({ id: 'u1', username: 'Alice', cards: 10, doubles: 6, collections: [{ category_id: 1, cards: 8, doubles: 5 }, { category_id: 2, cards: 2, doubles: 1 }] }),
+    U({ id: 'u1', username: 'Alice', coins: 120, cards: 10, doubles: 6, collections: [{ category_id: 1, cards: 8, doubles: 5 }, { category_id: 2, cards: 2, doubles: 1 }] }),
     U({ id: 'u2', username: 'Bob', cards: 2, doubles: 1, pro: { active: true, source: 'paid', since: '2026-10-19T10:00:00Z' }, collections: [{ category_id: 1, cards: 2, doubles: 1 }] }),
     U({ id: 'u3', username: 'Cleo', cards: 0, doubles: 0, pro: { active: true, source: 'admin', since: '2026-10-20T10:00:00Z' } }),
     U({ id: 'u4', username: 'david', cards: 1, doubles: 0, collections: [{ category_id: 1, cards: 1, doubles: 0 }] }),
@@ -33,11 +33,14 @@ const usersFixture = () => ({
 
 const rpc = []
 let grantReply = { ok: true, gift_granted: true }
+let coinsReply = { ok: true, coins: 170, username: 'Alice' }
+let coinsStatus = 200
 let usersReply = usersFixture()
 globalThis.fetch = async (url, init) => {
   const u = String(url); const body = init?.body ? JSON.parse(init.body) : {}
   if (u.includes('admin_users')) { rpc.push(['admin_users', body]); return json(usersReply) }
   if (u.includes('admin_grant_pro')) { rpc.push(['admin_grant_pro', body]); return json(grantReply) }
+  if (u.includes('admin_grant_coins')) { rpc.push(['admin_grant_coins', body]); return json(coinsReply, coinsStatus) }
   if (u.includes('admin_revoke_pro')) { rpc.push(['admin_revoke_pro', body]); return json({ ok: true }) }
   if (u.includes('admin_data')) { rpc.push(['admin_data', body]); return json(adminData) }
   return json([])
@@ -157,6 +160,35 @@ const mount = async (props) => {
   await busy.unmount()
 }
 
+{
+  // offrir des pièces : champ numérique, validation, un seul champ ouvert à la fois
+  loads.length = 0; rpc.length = 0; runs.length = 0; notice = ''
+  const m = await mount()
+  const a = () => card(m.host, 'Alice'), form = () => a().querySelector('.user-coins')
+  ok('chaque joueur montre son solde (Alice « 120 pièces », Bob « 0 pièce »)', /120 pièces/.test(a().textContent) && /0 pièce(?!s)/.test(card(m.host, 'Bob').textContent))
+  ok('bouton « Offrir des pièces » sur chaque joueur, champ fermé au départ', !!btn(a(), /^Offrir des pièces$/) && !!btn(card(m.host, 'Bob'), /^Offrir des pièces$/) && !form())
+  await click(btn(a(), /^Offrir des pièces$/))
+  ok('le champ s\'ouvre : nombre, « Offrir » désactivé tant qu\'il est vide, « Annuler »', !!form() && form().querySelector('input').type === 'number' && btn(form(), /^Offrir$/).disabled && !!btn(form(), /^Annuler$/))
+  for (const v of ['0', '-5', '1.5', '1000001']) {
+    await type(form().querySelector('input'), v); await submit(form())
+    ok(`montant « ${v} » : « Offrir » désactivé et rien n\'est envoyé`, btn(form(), /^Offrir$/).disabled && rpc.length === 0)
+  }
+  await click(btn(form(), /^Annuler$/))
+  ok('Annuler : le champ se ferme, rien d\'envoyé', !form() && !!btn(a(), /^Offrir des pièces$/) && rpc.length === 0)
+  await click(btn(a(), /^Offrir des pièces$/)); await click(btn(card(m.host, 'Emma'), /^Offrir des pièces$/))
+  ok('un seul champ ouvert à la fois (celui d\'Emma remplace celui d\'Alice)', !form() && !!card(m.host, 'Emma').querySelector('.user-coins'))
+  await click(btn(a(), /^Offrir des pièces$/))
+  await type(form().querySelector('input'), '50')
+  ok('montant valide (50) : « Offrir » actif', !btn(form(), /^Offrir$/).disabled)
+  await submit(form())
+  ok('envoyer : UN appel admin_grant_coins avec le mot de passe admin, l\'identifiant d\'Alice et le montant (nombre)', rpc.length === 1 && rpc[0][0] === 'admin_grant_coins' && rpc[0][1].p_password === 'mdp-admin' && rpc[0][1].p_user === 'u1' && rpc[0][1].p_amount === 50)
+  ok('message de succès avec le pseudo, le montant et le nouveau solde', notice === '50 pièces offertes à Alice (nouveau solde : 170).')
+  ok('le champ se referme et la liste est redemandée (solde à jour)', !form() && loads.length === 1)
+  await click(btn(a(), /^Offrir des pièces$/)); await type(form().querySelector('input'), '1'); await submit(form())
+  ok('une seule pièce : singulier dans le message', notice === '1 pièce offerte à Alice (nouveau solde : 170).')
+  await m.unmount()
+}
+
 // ---------- dans la vraie console admin (mot de passe, onglets, appels serveur) ----------
 {
   rpc.length = 0; usersReply = usersFixture(); grantReply = { ok: true, gift_granted: true }
@@ -186,6 +218,18 @@ const mount = async (props) => {
   await click(btn(card(host, 'Alice'), /^Offrir OneMore$/)); await click(btn(card(host, 'Alice'), /^Confirmer l’offre$/)); await wait(80)
   ok('en cas d\'erreur, la liste n\'est PAS relue (le message d\'erreur reste affiché)', !rpc.some((c) => c[0] === 'admin_users'))
   ok('erreur du serveur (déjà membre) : message clair dans la console, sans planter', /Ce joueur est déjà membre OneMore\./.test(host.querySelector('.msg.error')?.textContent ?? ''))
+  // pièces offertes depuis la console, puis refus du serveur (montant invalide)
+  rpc.length = 0; coinsReply = { ok: true, coins: 220, username: 'Alice' }
+  await click(btn(card(host, 'Alice'), /^Offrir des pièces$/)); await type(host.querySelector('.user-coins input'), '100'); await submit(host.querySelector('.user-coins')); await wait(80)
+  ok('pièces offertes depuis la console : admin_grant_coins (mot de passe, Alice, 100), puis données et liste relues, message affiché', rpc[0]?.[0] === 'admin_grant_coins' && rpc[0][1].p_password === 'mon-mdp' && rpc[0][1].p_user === 'u1' && rpc[0][1].p_amount === 100 && rpc.some((c) => c[0] === 'admin_data') && rpc.some((c) => c[0] === 'admin_users') && /100 pièces offertes à Alice \(nouveau solde : 220\)\./.test(host.textContent))
+  rpc.length = 0; coinsReply = { error: 'invalid_amount' }
+  await click(btn(card(host, 'Alice'), /^Offrir des pièces$/)); await type(host.querySelector('.user-coins input'), '5'); await submit(host.querySelector('.user-coins')); await wait(80)
+  ok('refus du serveur (montant invalide) : message clair, liste non relue, champ laissé ouvert', /Montant invalide/.test(host.querySelector('.msg.error')?.textContent ?? '') && !rpc.some((c) => c[0] === 'admin_users') && !!host.querySelector('.user-coins'))
+  // SQL pas encore exécuté côté serveur : la fonction n'existe pas
+  rpc.length = 0; coinsStatus = 404; coinsReply = { code: 'PGRST202', message: 'Could not find the function public.pp_o1ocards_admin_grant_coins(p_amount, p_password, p_user) in the schema cache' }
+  await type(host.querySelector('.user-coins input'), '5'); await submit(host.querySelector('.user-coins')); await wait(80)
+  ok('fonction SQL absente du serveur : message en français qui dit d\'exécuter le SQL à jour, au lieu du texte technique', /SQL à jour n’est pas encore exécuté/.test(host.querySelector('.msg.error')?.textContent ?? '') && !/PGRST202|schema cache/.test(host.textContent))
+  coinsStatus = 200
   await act(async () => r.unmount()); host.remove()
 }
 
