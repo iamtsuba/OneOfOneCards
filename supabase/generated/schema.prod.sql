@@ -2059,6 +2059,16 @@ begin
   return jsonb_build_object('status', public.o1ocards_status_json(p));
 end $$;
 
+-- Carte d'un type SECRET ? Exception à la règle « une carte placée dans l'album ne se vend pas » : une carte secrète peut être mise en vente
+-- ou vendue par offre même si elle est dans l'album ; quand elle est vendue à un autre joueur, elle quitte automatiquement l'album de son vendeur.
+-- (La revente à la banque reste refusée tant que la carte est dans l'album.)
+create or replace function public.o1ocards_card_is_secret(p_type int)
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce((select t.secret from public.o1ocards_types t where t.id = p_type), false)
+$$;
+revoke all on function public.o1ocards_card_is_secret(int) from public, anon;
+grant execute on function public.o1ocards_card_is_secret(int) to authenticated;
+
 -- Mise en vente : achat direct (prix libre) ou enchère (durée et prix de départ fixés dans la config)
 drop function if exists public.o1ocards_list_card(int, int, int, text, int);
 create or replace function public.o1ocards_list_card(p_type int, p_base text, p_series int, p_number int, p_kind text, p_price int default null)
@@ -2079,8 +2089,9 @@ begin
              where type_id = p_type and base_rarity = p_base and series = p_series and number = p_number and status = 'active') then
     raise exception 'card_listed';
   end if;
-  if exists (select 1 from public.o1ocards_album_picks
-             where user_id = uid and type_id = p_type and base_rarity = p_base and series = p_series and number = p_number) then
+  if not public.o1ocards_card_is_secret(p_type)   -- une carte SECRÈTE peut se vendre depuis l'album (elle en sort quand elle est vendue)
+     and exists (select 1 from public.o1ocards_album_picks
+                 where user_id = uid and type_id = p_type and base_rarity = p_base and series = p_series and number = p_number) then
     raise exception 'card_in_album';   -- une carte placée dans l'album ne peut pas être vendue
   end if;
 
@@ -2456,8 +2467,9 @@ begin
     return jsonb_build_object('status', public.o1ocards_status_json(p));
   end if;
 
-  if exists (select 1 from public.o1ocards_album_picks
-             where user_id = o.seller_id and type_id = o.type_id and base_rarity = o.base_rarity and series = o.series and number = o.number) then
+  if not public.o1ocards_card_is_secret(o.type_id)   -- une carte SECRÈTE se vend depuis l'album : la suppression de l'emplacement se fait plus bas, avec le transfert
+     and exists (select 1 from public.o1ocards_album_picks
+                 where user_id = o.seller_id and type_id = o.type_id and base_rarity = o.base_rarity and series = o.series and number = o.number) then
     raise exception 'card_in_album';   -- une carte placée dans l'album ne peut pas être vendue
   end if;
   perform 1 from public.o1ocards_listings

@@ -18,6 +18,7 @@ export default function CardModal({ sel, rarity, onClose, onChanged, onRefresh, 
   const [offerSent, setOfferSent] = useState(false)
 
   const type = catalog.typeMap[sel.typeId]
+  const secretType = !!type?.secret   // carte secrète : vendable même dans l'album (elle en sort quand elle est vendue à un autre joueur)
   const category = type ? catalog.categoryMap[type.category_id] : null
   const categoryClosed = !!category && (status?.closed_categories ?? []).includes(category.id)
 
@@ -92,7 +93,7 @@ export default function CardModal({ sel, rarity, onClose, onChanged, onRefresh, 
               aria-pressed={favorited} aria-label={favorited ? 'Retirer des favoris' : 'Ajouter aux favoris'}>
               <span aria-hidden="true">{favorited ? '♥' : '♡'}</span> {favorited ? 'Favorite' : 'Mettre en favori'}
             </button>
-            <p className="overlay-hint">{sel.friend ? `${sel.isDouble === false ? 'Une carte' : 'Un double'} de ${sel.ownerName}.${sel.iOwn === true ? ' Tu as déjà une carte de cet emplacement.' : sel.iOwn === false ? ' Cette carte te manque.' : ''} ${sel.isDouble === false && sel.inAlbum ? `Elle est dans son album : ${sel.ownerName} devra l’en retirer pour accepter. ` : ''}Propose-lui une offre : tes pièces ne sont débitées que si elle est acceptée.` : `${toneMsg[sel.state] ?? ''}${sel.state === 'taken' && sel.iOwn === true ? ' Tu as déjà une carte de cet emplacement dans ton album.' : sel.state === 'taken' && sel.iOwn === false ? ' Cette carte manque à ton album.' : ''}`}</p>
+            <p className="overlay-hint">{sel.friend ? `${sel.isDouble === false ? 'Une carte' : 'Un double'} de ${sel.ownerName}.${sel.iOwn === true ? ' Tu as déjà une carte de cet emplacement.' : sel.iOwn === false ? ' Cette carte te manque.' : ''} ${sel.isDouble === false && sel.inAlbum && !secretType ? `Elle est dans son album : ${sel.ownerName} devra l’en retirer pour accepter. ` : ''}Propose-lui une offre : tes pièces ne sont débitées que si elle est acceptée.` : `${toneMsg[sel.state] ?? ''}${sel.state === 'taken' && sel.iOwn === true ? ' Tu as déjà une carte de cet emplacement dans ton album.' : sel.state === 'taken' && sel.iOwn === false ? ' Cette carte manque à ton album.' : ''}`}</p>
             {sel.state === 'taken' && (
               <div className="sheet">
                 <section>
@@ -121,7 +122,7 @@ export default function CardModal({ sel, rarity, onClose, onChanged, onRefresh, 
             )}
             {sel.state === 'taken' && !sel.friend && <button className="btn ghost" onClick={() => goMarket('browse')}>Aller au marché</button>}
           </>
-        ) : sel.inAlbum ? (
+        ) : sel.inAlbum && !secretType ? (
           <>
             <p className="overlay-hint">Cette carte est dans ton album : elle ne peut pas être vendue. Retire-la de l’album pour la vendre.</p>
             <button className="btn ghost-light" disabled={busy} onClick={() => run(() => api.clearAlbumPick(sel.typeId, sel.rarityId))}>Retirer de l’album</button>
@@ -133,7 +134,12 @@ export default function CardModal({ sel, rarity, onClose, onChanged, onRefresh, 
           </>
         ) : (
           <div className="sheet">
-            <section>
+            {sel.inAlbum && (
+              <p className="overlay-hint" data-testid="secret-album-note">
+                Carte secrète : tu peux la vendre à un autre joueur (marché ou offre) même si elle est dans ton album. Si elle est vendue, elle quitte automatiquement ton album.
+              </p>
+            )}
+            {!sel.inAlbum && <section>
               <h3>Revendre à la banque</h3>
               {categoryClosed ? (
                 <p className="muted">
@@ -154,7 +160,7 @@ export default function CardModal({ sel, rarity, onClose, onChanged, onRefresh, 
                   )}
                 </>
               )}
-            </section>
+            </section>}
 
             <section>
               <h3>Mettre sur le marché</h3>
