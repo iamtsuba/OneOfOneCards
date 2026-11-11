@@ -120,7 +120,7 @@ export function FriendsView({ rows, results, query, notice, error, busy, invite,
   )
 }
 
-// Collection d'un ami : toutes ses cartes, ou seulement ses doubles (touche un double pour lui faire une offre)
+// Collection d'un ami : toutes ses cartes, ou seulement ses doubles. Toute carte peut recevoir une offre (double ou non) ; une carte placée dans son album ne se vend qu'une fois retirée de l'album.
 export function FriendCollectionView({ friend, cards, total, doublesTotal, doublesOnly, loading, error, rarityMap, onToggle, onPick, onMore, onBack }) {
   const shown = cards ?? []
   const more = shown.length < total
@@ -135,22 +135,23 @@ export function FriendCollectionView({ friend, cards, total, doublesTotal, doubl
       {error && <p className="msg error" role="alert">{error}</p>}
       {loading && shown.length === 0 && <p className="muted">Chargement…</p>}
       {!loading && shown.length === 0 && !error && <p className="muted">{doublesOnly ? `${friend.username} n’a aucun double pour le moment.` : `${friend.username} n’a aucune carte pour le moment.`}</p>}
-      {shown.length > 0 && <p className="fine">Touche un double pour proposer une offre à {friend.username}.</p>}
+      {shown.length > 0 && <p className="fine">Touche une carte pour proposer une offre à {friend.username}.</p>}
       <ul className="friend-cards">
         {shown.map((c) => {
           const rarity = rarityMap[c.rarity_id]
           const key = `${c.card_type}-${c.card_base}-${c.card_series}-${c.card_number}`
           return (
             <li key={key}>
-              <button type="button" className={`friend-card${c.is_double ? ' double' : ''}`} disabled={!c.is_double}
-                aria-label={`${rarity?.name ?? c.rarity_id}${c.is_double ? ', double' : c.in_album ? ', dans son album' : ''}${c.listing_id ? ', en vente' : ''}${c.is_double && c.i_own === true ? ', déjà possédé' : c.is_double && c.i_own === false ? ', il te manque' : ''}`}
+              <button type="button" className={`friend-card${c.is_double ? ' double' : ''}`}
+                aria-label={`${rarity?.name ?? c.rarity_id}${c.is_double ? ', double' : c.in_album ? ', dans son album' : ''}${c.listing_id ? ', en vente' : ''}${c.i_own === true ? ', déjà possédé' : c.i_own === false ? ', il te manque' : ''}`}
                 onClick={() => onPick(c)}>
                 <Card typeId={c.card_type} base={c.card_base} series={c.card_series} number={c.card_number} rarity={rarity} size="sm" />
                 {c.is_double && <small className="friend-tag">Double</small>}
-                {c.is_double && c.listing_id && <small className="friend-tag sale">En vente</small>}
+                {!c.is_double && c.in_album && <small className="friend-tag album">Dans son album</small>}
+                {c.listing_id && <small className="friend-tag sale">En vente</small>}
                 {/* « Déjà possédé » : tu as déjà une carte de cet emplacement. Simple information : l'offre reste possible. */}
-                {c.is_double && c.i_own === true && <small className="friend-tag owned">Déjà possédé</small>}
-                {c.is_double && c.i_own === false && <small className="friend-tag missing">Manquante</small>}
+                {c.i_own === true && <small className="friend-tag owned">Déjà possédé</small>}
+                {c.i_own === false && <small className="friend-tag missing">Manquante</small>}
               </button>
             </li>
           )
@@ -195,7 +196,7 @@ function FriendCollection({ friend, onBack }) {
     <>
       <FriendCollectionView friend={friend} cards={cards} total={total} doublesTotal={doublesTotal} doublesOnly={doublesOnly} loading={loading} error={error} rarityMap={rarityMap}
         onToggle={(d) => { setCards(null); setDoublesOnly(d) }}
-        onPick={(c) => setSel({ typeId: c.card_type, base: c.card_base, series: c.card_series, number: c.card_number, rarityId: c.rarity_id, state: 'taken', ownerName: friend.username, friend: true, iOwn: c.i_own })}
+        onPick={(c) => setSel({ typeId: c.card_type, base: c.card_base, series: c.card_series, number: c.card_number, rarityId: c.rarity_id, state: 'taken', ownerName: friend.username, friend: true, iOwn: c.i_own, isDouble: c.is_double, inAlbum: c.in_album })}
         onMore={() => load(doublesOnly, cards?.length ?? 0)} onBack={onBack} />
       {sel && catalog && <CardModal sel={sel} rarity={rarityMap[sel.rarityId]} onClose={() => setSel(null)} onChanged={() => setSel(null)} onRefresh={() => {}} goMarket={() => {}} />}
     </>
